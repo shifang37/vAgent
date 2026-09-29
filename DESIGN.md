@@ -1,9 +1,9 @@
 # 视频 LLM Agent（vagent）设计方案
 
-> 形态对齐 DeepSeek Harness：`npm` 安装 → 本地运行 → 填入自己的 API key → 打开本地 Web GUI 使用。
+> 形态对齐 DeepSeek Harness：Python 包安装 → 本地运行 → 填入自己的 API key → 打开本地 Web GUI 使用。
 > 定位：**专门适配视频生成 LLM 的 agent**，用户不写代码，用自然语言指挥 agent 完成脚本 → 分镜 → 生成 → 交付。
 
-> **实施补充（2026-09-29）**：先完成只依赖 DeepSeek API Key 的 Agent 基础，再用模拟视频任务验证扩展接口，最后接入真实视频模型。当前实施顺序、选型和验收以 [M1 实施计划](./M1_PLAN.md) 和 [Agent 选型与 Harness 设计](./AGENT_HARNESS_DESIGN.md) 为准；下文保留原始产品设计供参考。
+> **实施补充（2026-09-29）**：先完成只依赖 DeepSeek API Key 的 Agent 基础，再用模拟视频任务验证扩展接口，最后接入真实视频模型。当前实施顺序、选型和验收以 [M1 实施计划](./M1_PLAN.md) 和 [Agent 选型与 Harness 设计](./AGENT_HARNESS_DESIGN.md) 为准；实现语言已统一为 Python；下文保留产品远期目标供参考，未实现能力以 README 为准。
 
 ---
 
@@ -11,16 +11,16 @@
 
 | 环节 | 做法 |
 |---|---|
-| 安装 | `npm i -g vagent`（或 `npx vagent` 临时体验） |
+| 安装 | 从本地仓库执行 `python -m pip install .`（尚未发布 PyPI） |
 | 启动 | `vagent web` → 自动打开浏览器 `http://localhost:3210` |
 | 首次使用 | Web 向导引导填写各家视频 API key（可跳过，之后在设置里补） |
 | 使用 | 对话式：「生成一条 15 秒赛博朋克城市夜景宣传片」→ agent 自动写脚本、拆镜头、调视频 API、展示结果 |
 | 命令行 | `vagent headless "prompt"` 直接生成（脚本化/无头场景） |
-| 配置 | `~/.vagent/config.yml` + 环境变量，key 只存本地，不出机器 |
+| 配置 | `~/.vagent/config.yml` + 环境变量，key 保存在本机，仅用于对应供应商 HTTPS 认证 |
 | 扩展 | 插件目录 `~/.vagent/plugins`、skills 目录，高级用户可扩展（借鉴 DSH） |
 
 ### 与 DSH 的关系（关键决策）
-- **独立 npm 包分发**，不要求用户先装 DSH（开箱即用，`vagent` 一个命令搞定）。
+- **独立 Python 包分发**，不要求用户先装 DSH（开箱即用，`vagent` 一个命令搞定）。
 - **架构借鉴 DSH**：本地 CLI + 内置 Web GUI + 「默认配置 + 用户覆盖」的配置层 + 插件/skills 扩展点。
 - 未来可选：做成 DSH 兼容的 bundle，让已装 DSH 的用户通过 `dsh --profile video` 复用同一套能力（二期）。
 
@@ -36,12 +36,12 @@ vagent CLI (bin: vagent)
 └── plugins    管理插件（借鉴 dsh plugin）
 
 ┌────────────────────────────────────────────┐
-│ 本地 Web GUI（React + Vite，DSH web 同款形态）│
+│ 本地 Web GUI（后续 FastAPI + 页面模板）│
 │  首次向导 · 对话界面 · 任务进度 · 素材库 · 用量 │
 └───────────────┬────────────────────────────┘
                 │ HTTP / SSE（进度推送）
 ┌───────────────▼────────────────────────────┐
-│ 核心服务（Node/TS 本地进程）                  │
+│ 核心服务（Python 本地进程）                  │
 │  认证(本地单用户) · Key 管理 · 任务系统 · 资源 │
 └───────────────┬────────────────────────────┘
 ┌───────────────▼────────────────────────────┐
@@ -66,8 +66,8 @@ vagent CLI (bin: vagent)
 ## 3. 核心模块设计
 
 ### 3.1 CLI 与配置（对齐 DSH）
-- `package.json` 的 `bin` 字段注册 `vagent`。
-- 配置根：`~/.vagent/`（跨平台用 `os.homedir()`），含 `config.yml`、`state/`（任务与素材持久化）、`plugins/`、`skills/`。
+- `pyproject.toml` 的 `[project.scripts]` 注册 `vagent`。
+- 配置根：`~/.vagent/`（跨平台用 `pathlib.Path.home()`），含 `config.yml`、`state/`（任务与素材持久化）、`plugins/`、`skills/`。
 - 配置分层（借鉴 DSH 的 bundle + patch 思想）：
   1. 内置默认配置（能力差异表、默认参数、模型优先级）
   2. `~/.vagent/config.yml` 用户覆盖
@@ -75,7 +75,7 @@ vagent CLI (bin: vagent)
 - `vagent config` 子命令：查看生效配置、校验 key（试 ping 一次）、导出脱敏信息。
 
 ### 3.2 Key 管理与安全（本地单用户）
-- **key 只进本地后端进程，不出机器**：浏览器 UI → 本地 HTTP 服务 → 视频云 API，全程本机。
+- **Key 由本地后端持有**：浏览器与本地服务交互，由本地服务通过 HTTPS 向对应供应商认证；不将 Key 注入提示词或返回浏览器。
 - 写入 `config.yml`（建议 `chmod 600`），或环境变量注入。
 - 支持多供应商并行绑定：配了哪个 key，agent 就能用哪个模型；未配置的模型在对话中自动跳过并提示引导。
 - 用量统计：按官方单价估算每次调用费用，存本地 `state/usage.json`，GUI 用量面板展示。
@@ -83,15 +83,18 @@ vagent CLI (bin: vagent)
 ### 3.3 视频适配器层（统一接口）
 所有视频 API 都是异步长任务，抽象为统一接口：
 
-```ts
-interface VideoAdapter {
-  capabilities: Capabilities;          // 时长范围/分辨率/图生视频/首尾帧/音频/延长
-  generate(req: GenerateRequest): Promise<TaskHandle>;   // 提交
-  poll(taskId: string): Promise<TaskStatus>;             // 轮询
-  cancel(taskId: string): Promise<void>;                 // 取消
-}
-// GenerateRequest: { prompt, image?, firstFrame?, lastFrame?,
-//                    duration, aspectRatio, resolution, ... }
+```python
+from typing import Protocol
+
+# 后续视频模块协议草案，具体领域类型和适配器尚未实现。
+class VideoAdapter(Protocol):
+    capabilities: Capabilities  # 时长、分辨率、图生视频等能力
+
+    async def generate(self, req: GenerateRequest) -> TaskHandle: ...
+    async def poll(self, task_id: str) -> TaskStatus: ...
+
+# 取消是可选能力，不能假定每个供应商都支持。
+# GenerateRequest 包含 prompt、参考图、duration、aspect_ratio 等字段。
 ```
 
 - 每个供应商一个 adapter（Veo→Gemini API、Seedance→火山引擎、万相→DashScope、Sora→OpenAI、Kling→Kling API、fal/Replicate→聚合中转）。
@@ -110,7 +113,7 @@ interface VideoAdapter {
 ### 3.5 任务系统
 - 任务表（SQLite 或 JSON 文件持久化）：`task_id / project_id / provider / model / status / progress / cost / error / result_urls`。
 - 提交后本地进程轮询上游（无 webhook 的供应商）或收 webhook（支持的）。
-- SSE 向前端推进度；失败自动重试（指数退避），模型不可用时降级到备选模型并提示。
+- SSE 向前端推进度；查询失败可有界重试。付费提交结果不确定时先对账，不盲目重试或自动换供应商重复生成。
 - 结果文件：下载到 `~/.vagent/media/` 本地缓存，避免第三方 URL 过期。
 
 ### 3.6 本地 Web GUI（对齐 DSH web）
@@ -126,13 +129,13 @@ interface VideoAdapter {
 
 | 层 | 选型 | 理由 |
 |---|---|---|
-| 运行时 | Node.js + TypeScript | 与 DSH 一致，npm 分发天然契合 |
-| Web GUI | React + Vite（单页） | DSH web-app 同款形态，参考其实现 |
-| CLI | 手写 args 解析或 commander | 命令少，手写即可对齐 DSH 的 flag 风格 |
-| 配置 | YAML（js-yaml） | DSH/cordis 同风格 |
-| 状态存储 | SQLite（better-sqlite3）或 JSON | 单机单用户足够 |
-| 视频 API | 各家 REST 直连（fetch） | 不依赖各家 Node SDK，体积小；SDK 大多 Python 优先 |
-| 编排 | 直接调 LLM chat completions + function calling | 不引入重型框架；预留 MCP/插件扩展点 |
+| 运行时 | Python 3.11+ | Python Agent 生态与视频供应商 SDK 易于结合 |
+| Web GUI | FastAPI + 页面模板（后续） | 通过 HTTP/SSE 复用 Python Runner |
+| CLI | 标准库 argparse | 命令少，手写即可对齐 DSH 的 flag 风格 |
+| 配置 | 环境变量 + python-dotenv；技能元信息用 PyYAML | 配置与模型上下文分开管理 |
+| 状态存储 | JSON；后续可换 Python SQLite | 单机单用户足够 |
+| 视频 API | 各家 REST 直连（httpx） | 统一 Python 适配器封装请求与异步任务 |
+| 编排 | LangGraph Python + ChatDeepSeek + 自有 Harness | 复用图执行，自主实现上下文、工具策略与运行记录 |
 
 ---
 

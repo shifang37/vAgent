@@ -1,0 +1,45 @@
+[build-system]
+requires = ["hatchling>=1.27,<2"]
+build-backend = "hatchling.build"
+
+[project]
+name = "shifang37-vagent"
+version = "0.2.0"
+description = "DeepSeek video creation agent with a custom LangGraph harness"
+readme = "README.md"
+requires-python = ">=3.11"
+dependencies = [
+  "langgraph>=1.0,<2",
+  "langchain-deepseek>=1.0,<2",
+  "langchain-core>=1.4.7,<2",
+  "httpx>=0.28,<1",
+  "pydantic>=2.10,<3",
+  "python-dotenv>=1.0,<2",
+  "PyYAML>=6.0,<7",
+]
+
+[project.optional-dependencies]
+dev = ["pytest>=8,<10", "pytest-asyncio>=1,<2", "ruff>=0.12,<1", "build>=1.2,<2", "hatchling>=1.27,<2"]
+
+[project.scripts]
+vagent = "vagent.cli:main"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/vagent"]
+
+[tool.hatch.build.targets.wheel.force-include]
+"skills" = "vagent/builtin_skills"
+
+[tool.hatch.build.targets.sdist]
+include = ["/src/vagent", "/skills", "/tests/*.py", "/pyproject.toml", "/README.md", "/requirements-dev.lock"]
+
+[tool.pytest.ini_options]
+asyncio_mode = "auto"
+testpaths = ["tests"]
+
+[tool.ruff]
+target-version = "py311"
+line-length = 110
+
+[tool.ruff.lint]
+select = ["E4", "E7", "E9", "F", "I", "UP"]

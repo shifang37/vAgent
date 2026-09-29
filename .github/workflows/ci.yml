@@ -1,0 +1,40 @@
+name: Agent checks
+
+on:
+  push:
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  test:
+    strategy:
+      matrix:
+        os: [ubuntu-latest, windows-latest]
+        python-version: ["3.11", "3.12"]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python-version }}
+          cache: pip
+          cache-dependency-path: requirements-dev.lock
+      - run: python -m pip install -r requirements-dev.lock
+      - run: python -m pip install --no-deps -e .
+      - run: python -m ruff check src/vagent tests
+      - run: python -m ruff format --check src/vagent tests
+      - run: python -m pytest -q
+      - run: python -m build --no-isolation --outdir dist/python
+      - name: Verify installed wheel outside source tree
+        shell: python
+        run: |
+          import os, pathlib, subprocess, sys, tempfile
+          wheel = next(pathlib.Path("dist/python").resolve().glob("*.whl"))
+          subprocess.run([sys.executable, "-m", "pip", "uninstall", "-y", "shifang37-vagent"], check=True)
+          subprocess.run([sys.executable, "-m", "pip", "install", "--no-deps", str(wheel)], check=True)
+          with tempfile.TemporaryDirectory() as directory:
+              env = dict(os.environ, VAGENT_HOME=str(pathlib.Path(directory) / "state"), PYTHONIOENCODING="utf-8")
+              for args in (["skills", "list"], ["demo"], ["inspect", "--session", "demo"]):
+                  subprocess.run([sys.executable, "-m", "vagent", *args], cwd=directory, env=env, check=True)

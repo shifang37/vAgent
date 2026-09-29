@@ -4,6 +4,8 @@
 > 状态：已按求职项目目标选择 LangGraph 自主设计 Harness；第一部分实现与验证状态见 [README](./README.md)。本文其余能力为逐步实施的设计目标。  
 > 产品定位：以 DeepSeek 为决策模型的视频创作 Agent。先建立可独立运行的 Agent，再为它接入视频生成能力。
 
+当前原型已交付 Agent 循环、项目记忆、版本化产物、基础执行护栏、上下文裁剪和 Skills。上下文预算暂以 UTF-8 序列化字节数衡量；图级持久恢复、真实模型评测与视频 Job 仍属后续目标，不能把下文全部视为已实现。
+
 ## 1. 设计目标
 
 只配置 DeepSeek API Key，就能让 Agent 理解创作需求，读取项目状态，自主选择工具，保存创作方案，根据真实工具结果继续行动，并在用户反馈后修改已有产物。
@@ -29,25 +31,25 @@ Agent 不需要每次都调用工具；用户只问概念时可以直接回答�
 | 方案 | 适用点 | 对本项目的代价 | 决策 |
 |---|---|---|---|
 | 直接基于 DeepSeek REST 自建全部能力 | 协议控制最直接、依赖少 | 需自行维护流解析、消息序列化、工具调用增量与错误归一化 | 保留为 ModelAdapter 的替代实现 |
-| AI SDK + 自有轻量 Harness | 有 DeepSeek 适配、文本流和工具调用支持；适合 TS 项目 | 项目仍需负责持久化、执行记录、上下文和异步任务 | 备选，当前不引入第二套模型与循环抽象 |
-| LangGraph JS | 提供状态图、持久执行、流和中断等机制 | 自主定义状态、路由、工具策略和上下文，同时处理外部操作幂等 | **采用**：复用图执行底座，展示项目自身的 Harness 设计与评测 |
+| AI SDK + 自有轻量 Harness | 有 DeepSeek 适配、文本流和工具调用支持；适合 TS 项目 | 项目仍需负责持久化、执行记录、上下文和异步任务 | 历史备选，与当前 Python 路线不一致，不采用 |
+| LangGraph Python | 提供状态图、持久执行、流和中断等机制 | 自主定义状态、路由、工具策略和上下文，同时处理外部操作幂等 | **采用**：复用图执行底座，展示项目自身的 Harness 设计与评测 |
 | 基于 DeepSeek Harness 扩展 | 已有 Web、工具、会话、配置及插件结构；开源 MIT | 官方仍是 developer preview，明确可能出现兼容性破坏；需适应 Cordis 和已有工作区产品结构 | 参考架构，暂不作为独立 vagent 包的运行时依赖 |
 
-这是一项范围选择，而非框架性能排名。独立 npm 产品、DeepSeek 优先、视频专用工具和可控的初期复杂度，是本次选择的依据。
+这是一项范围选择，而非框架性能排名。独立 Python 产品、DeepSeek 优先、视频专用工具和可控的初期复杂度，是本次选择的依据。
 
 ### 2.2 采用的组合
 
 - **决策模型**：DeepSeek 官方 API，初始候选模型 ID 为 `deepseek-flash`；模型可配置，M1-A0 记录实际可用型号与行为。
-- **模型接入**：`@langchain/deepseek` 的 `ChatDeepSeek`，直连 DeepSeek；不依赖网关或第三个平台 Key。
-- **运行时**：Node.js 24 LTS + TypeScript。
+- **模型接入**：`langchain-deepseek` 的 `ChatDeepSeek`，直连 DeepSeek；不依赖网关或第三个平台 Key。
+- **运行时**：Python 3.11+（本地验证使用 Python 3.12）。
 - **Harness**：项目自有 `AgentRunner`，显式使用 LangGraph StateGraph 定义 model/tools 节点及路由；逐步补齐上下文、skills 和恢复。
-- **Schema**：Zod，生成提供给模型的 JSON Schema，同时做服务端输入和输出校验。
+- **Schema**：Pydantic，生成提供给模型的 JSON Schema，执行服务端参数校验；持久状态也通过模型校验。
 - **持久化**：版本化 JSON Store + 单进程串行写入；通过接口隔离，后续可以替换数据库。
-- **外壳**：CLI 先验收，React/Vite Web 随后接同一套 Runner 与事件。
+- **外壳**：CLI 先验收，FastAPI 本地 Web 随后接同一套 Runner 与事件。
 
 模型适配器只执行一个模型步，不自动执行工具。AgentRunner 的 LangGraph 图拥有唯一的循环与路由控制权，避免多个框架重复执行工具或独立重试。
 
-第一部分通过 ChatDeepSeek.bindTools().invoke() 完成单步请求，依赖由 package-lock.json 锁定。模型协议映射已用模拟 HTTP 验证，真实 Key 联调尚未完成；逐 Token 流和图级持久恢复继续分模块实施。
+第一部分通过 ChatDeepSeek.bind_tools(...).ainvoke(...) 完成单步请求，依赖由 requirements-dev.lock 锁定。模型协议映射已用模拟 HTTP 验证，真实 Key 联调尚未完成；逐 Token 流和图级持久恢复继续分模块实施。
 
 ### 2.3 已查明的 DeepSeek 协议约束
 
@@ -216,16 +218,21 @@ created → running → completed
 
 ### 8.1 先设计并模拟的接口
 
-```ts
-interface VideoProviderAdapter {
-  capabilities(): VideoCapabilities;
-  submit(req: VideoRequest, operationKey: string): Promise<ProviderTaskHandle>;
-  query(taskId: string): Promise<ProviderTaskSnapshot>;
-  cancel?(taskId: string): Promise<void>;
-}
+```python
+from typing import Protocol
+
+# 后续视频模块的协议草案；领域类型尚未实现。
+class VideoProviderAdapter(Protocol):
+    def capabilities(self) -> VideoCapabilities: ...
+    async def submit(self, req: VideoRequest, operation_key: str) -> ProviderTaskHandle: ...
+    async def query(self, task_id: str) -> ProviderTaskSnapshot: ...
+
+# 仅支持取消的供应商实现此能力。
+class CancellableProvider(Protocol):
+    async def cancel(self, task_id: str) -> None: ...
 ```
 
-`operationKey` 用于本地关联和供应商支持时的幂等键，不能假设所有 API 都提供幂等提交保证。
+`operation_key` 用于本地关联和供应商支持时的幂等键，不能假设所有 API 都提供幂等提交保证。
 
 `VideoRequest` 引用版本化脚本/镜头/素材 ID，包含提示词与输出规格；`VideoCapabilities` 按具体模型声明时长、画幅、参考图等能力，Agent 核心不硬编码万相的能力上限。
 
@@ -277,6 +284,6 @@ M1-A0 必须验证：DeepSeek Key 直连、文本流、工具参数增量组装�
 - [DeepSeek API 入门与当前模型](https://api-docs.deepseek.com/)
 - [AI SDK DeepSeek Provider](https://ai-sdk.dev/providers/ai-sdk-providers/deepseek)
 - [AI SDK Agent 概念与循环](https://ai-sdk.dev/docs/agents/overview)
-- [LangGraph JS 概览](https://docs.langchain.com/oss/javascript/langgraph/overview)
+- [LangGraph Python 概览](https://docs.langchain.com/oss/python/langgraph/overview)
 - [DeepSeek Harness 官方仓库](https://github.com/deepseek-ai/deepseek-harness)
 - [M1 实施计划](./M1_PLAN.md)

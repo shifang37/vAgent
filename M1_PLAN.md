@@ -33,14 +33,14 @@ M1-A 完成就有可使用的创作 Agent；整个 M1 的视频闭环在 M1-C �
 | 层 | 决策 |
 |---|---|
 | 决策模型 | DeepSeek 官方 API；初始候选 `deepseek-flash`，在 A0 确认可用模型 |
-| 模型接入 | `@langchain/deepseek`，直连 DeepSeek，不使用网关 |
+| 模型接入 | `langchain-deepseek`，直连 DeepSeek，不使用网关 |
 | Harness | 自主设计 LangGraph 状态图与 `AgentRunner`，负责路由、工具策略、上下文和预算，逐步接入持久检查点 |
 | Agent 组织 | 单 Agent；由模型决定使用哪些已注册工具，不写死创作步骤 |
-| 工具 Schema | Zod，模型声明与后端校验共享定义 |
-| 运行时 | Node.js 24 LTS + TypeScript |
-| 入口 | commander CLI、Fastify 本地服务、React + Vite Web |
+| 工具 Schema | Pydantic，模型声明与后端校验共享定义 |
+| 运行时 | Python 3.11+（本地验证使用 Python 3.12） |
+| 入口 | argparse CLI；后续 FastAPI 本地服务与最小 Web |
 | 状态 | 版本化 JSON Store，串行写入、原子替换、实例锁和可恢复快照 |
-| 测试 | Vitest 验证循环与工具边界；浏览器核心流程使用 Playwright |
+| 测试 | pytest + pytest-asyncio 验证循环与工具边界，Ruff 检查代码；后续补浏览器核心流程 |
 
 LangChain 模型适配器负责单步模型协议，LangGraph 提供图执行；项目自主设计 Harness 的状态、路由和工具执行策略。应用领域数据与框架消息通过存储边界隔离。
 
@@ -58,12 +58,13 @@ LangChain 模型适配器负责单步模型协议，LangGraph 提供图执行；
 | 工具注册 | 统一名称、说明、Schema、执行器、超时及副作用分类 |
 | 创作工具 | `project_read`、`project_update`、`plan_update`、`artifact_save`、`artifact_read` |
 | 项目记忆 | 结构化需求、受众、风格、约束；不只依赖聊天窗口中的历史文字 |
+| Skills | 自主实现元信息发现、按需读取正文与版本记录；先内置创作方案和镜头描述技能 |
 | 产物 | 保存创作方案/脚本/文本分镜，带稳定 ID 和版本；修改保留原版 |
 | 运行控制 | 步数与时间限制、用户停止、工具错误反馈、受控继续 |
 | 持久化 | 会话、Run、调用记录与产物；崩溃后不盲目重复写操作 |
 | 事件 | 文本流、工具开始/完成、产物变化、Run 状态，供 CLI/Web 共用 |
 | 最小 Web | 首次配置、会话、工具卡片、文本产物查看、停止/继续 |
-| npm 交付 | 打包后可运行，不依赖源码目录或开发服务器 |
+| Python 包交付 | 打包后可运行，不依赖源码目录或开发服务器 |
 
 M1-A 的 `artifact_save` 真正保存模型生成的内容，不在工具内部再次调用模型。Agent 必须观察工具返回的产物 ID 和版本后再报告完成。
 
@@ -90,27 +91,24 @@ M1-A 的 `artifact_save` 真正保存模型生成的内容，不在工具内部�
 
 ## 5. 工程结构与数据边界
 
+以下是后续模块拆分方向；当前已实现的 Python 文件布局见 README。
+
 ```text
-src/
-  cli/                   # chat/web/config 命令
-  app/                   # 会话、输入、停止、继续的统一服务
-  agent/
-    runner/              # 唯一的 Agent 循环
-    context/             # 上下文组装与预算
-    tools/               # 注册、校验、执行与执行记录
-    policy/              # 超时、步数、副作用与错误策略
-  models/                # ModelAdapter、DeepSeekModelAdapter
-  project/               # 结构化创作需求
-  artifacts/             # 版本化产物与读取边界
-  storage/               # JSON Store、检查点、实例锁
-  events/                # 统一事件模型
-  config/                # 配置与凭证
-  server/                # HTTP / SSE，复用 app/
-  video/                 # M1-B：JobService、能力表、适配器接口
-    providers/           # M1-B Mock，M1-C 首个真实适配器
-web/                     # 同一 Agent 的 Web 入口
-tests/                   # 模拟模型、工具、任务与浏览器用例
-docs/                    # 选型实验、接口和验收记录
+src/vagent/
+  cli.py                  # chat/run/config 命令
+  runner.py               # Agent 循环、路由、限额、事件
+  context.py              # 上下文组装与预算
+  tools.py                # 注册、校验、领域操作
+  models.py               # 模型协议与 DeepSeek 适配
+  storage.py              # JSON Store、运行快照、实例锁
+  skills.py               # 按需加载本地技能
+  config.py               # 配置与凭证
+  server/                 # 后续 HTTP / SSE，共用 Runner
+  video/                  # M1-B：JobService、能力表、适配器
+    providers/            # M1-B Mock，M1-C 首个真实适配器
+skills/                   # 内置技能，随 wheel 分发
+tests/                    # pytest 行为与协议测试
+docs/                     # 后续选型实验、接口和验收记录
 ```
 
 核心领域对象：Session、Run、ToolInvocation、Project、Artifact；M1-B 增加 Job。它们分别表示会话、单次执行、工具调用记录、创作需求、产物和耗时外部任务。
@@ -154,7 +152,7 @@ Key 在本地保存，只发送给相应 API 用于认证。浏览器不把 Key 
 - 首版工具串行执行；本地写操作和调用完成记录在同一 Store 更新中提交。
 - 模型请求重试和工具执行重试分别处理；工具成功后不会因为模型响应失败而重复保存。
 - 断电后未完成的 Run 标为 interrupted，依据检查点继续；流式草稿不被误当最终回复。
-- 用户停止通过 AbortSignal 中止模型请求并阻止新工具执行；停止不撤销已经完成的写操作。
+- 用户停止通过 asyncio 取消异步模型请求并阻止新工具执行；停止不撤销已经完成的写操作。
 - 上下文按完整调用/结果对裁剪，保留项目事实与按需读取产物的能力；首版无需向量数据库。
 
 Web 显示文本流、正在执行的工具、短任务清单和产物版本。面向用户的操作状态与模型协议元数据分离。
@@ -168,7 +166,7 @@ Web 显示文本流、正在执行的工具、短任务清单和产物版本。�
 | **A2 Agent 最小闭环** | DeepSeekModelAdapter、Runner、注册/执行、本地创作工具、`vagent chat` | 可运行的 CLI Agent | 用户可真实保存方案并让模型读取结果继续；并非只返回一次 JSON |
 | **A3 状态与上下文** | Session/Project/Artifact、产物版本、上下文预算、幂等与检查点 | 可恢复的创作会话 | 第二轮修改保持原版；重启不重复执行已完成工具 |
 | **A4 最小 Web** | 单 Key 向导、对话流、工具卡片、文本产物、停止/继续、SSE | `vagent web` | 只配置 DeepSeek 即可完成 A2/A3 用例，刷新后状态一致 |
-| **A5 Agent 验收** | npm 打包、使用文档、真实 Agent 用例和必要故障场景 | tarball、`docs/M1A_ACCEPTANCE.md` | M1-A 验收清单有证据；可独立使用，不要求视频能力 |
+| **A5 Agent 验收** | Python 包构建、使用文档、真实 Agent 用例和必要故障场景 | wheel/sdist、`docs/M1A_ACCEPTANCE.md` | M1-A 验收清单有证据；可独立使用，不要求视频能力 |
 
 顺序为 `A0 → A1 → A2 → A3 → A4 → A5`。没有 Key 时可以做 A1 和 Mock 验证，但 A0、A2/A5 的真实调用验收不得标记通过。
 
@@ -246,8 +244,8 @@ M1-B 增加 `GET /api/jobs/:id` 和 Job 事件；M1-C 增加媒体接口和下�
 - [ ] 步数、超时和停止有效；不因自动“继续”绕过限额。
 - [ ] clientRequestId 去重，工具已完成后的崩溃恢复不重复写入。
 - [ ] 上下文不拆散工具调用/结果对，长材料按需读取。
-- [ ] Key 不出现在配置读取响应、日志、提示词、事件和 npm 包中。
-- [ ] CLI 与 Web 使用同一 Runner；npm tarball 在干净目录安装后可启动。
+- [ ] Key 不出现在配置读取响应、日志、提示词、事件和 Python 安装包中。
+- [ ] CLI 与 Web 使用同一 Runner；Python wheel 在干净目录安装后可启动。
 - [ ] Windows 安装实测；至少一种 Unix 环境完成兼容验证，未测试平台如实记录。
 - [ ] `docs/M1A_ACCEPTANCE.md` 区分真实调用证据与 Mock 结果。
 
@@ -266,7 +264,7 @@ M1-B 增加 `GET /api/jobs/:id` 和 Job 事件；M1-C 增加媒体接口和下�
 - [ ] 提交结果不确定、限流、无权限、生成失败、下载失败均有可操作处理。
 - [ ] 实际模型、规格、耗时、估算费用及可取得的实际账单信息有记录。
 - [ ] 已缓存视频不受上游临时链接过期影响。
-- [ ] npm 安装包和 README 覆盖双 Key 视频模式，同时保留单 Key Agent 模式。
+- [ ] Python 安装包和 README 覆盖双 Key 视频模式，同时保留单 Key Agent 模式。
 
 自动化测试使用模拟模型、模拟供应商和临时目录；真实模型调用放在显式联调中，不让普通 CI 自动产生费用。修改文档本身不触发收费联调。
 
@@ -274,6 +272,6 @@ M1-B 增加 `GET /api/jobs/:id` 和 Job 事件；M1-C 增加媒体接口和下�
 
 当前首个交付目标为：Agent 技术基线、Harness 契约、DeepSeek 工具循环、最小 CLI/Web 和 M1-A 验收记录。M1-B、M1-C 作为后续实施阶段保留，不与 M1-A 混合推进为一个必须先取得视频 Key 的大任务。
 
-公共 npm 发布独立于本地 tarball 验收；发布前确认包名与发布权限。多镜头生成、拼接、素材库、更多供应商、插件和 skills 留到后续产品阶段。
+公共 PyPI 发布独立于本地 wheel 验收；发布前确认包名与发布权限。多镜头生成、拼接、素材库、更多供应商、插件和 skills 留到后续产品阶段。
 
 参考资料和框架对比见 [Agent 选型与 Harness 设计](./AGENT_HARNESS_DESIGN.md)。原始设计中与本计划不一致的 M1 顺序、首个视频候选和首次 Key 要求，以本计划的分阶段定义为准。
