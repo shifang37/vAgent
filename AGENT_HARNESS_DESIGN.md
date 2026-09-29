@@ -1,7 +1,7 @@
 # vagent Agent 选型与 Harness 设计
 
 > 日期：2026-09-29  
-> 状态：设计基线，尚未实现；SDK 兼容性在 M1-A0 验证。  
+> 状态：已按求职项目目标选择 LangGraph 自主设计 Harness；第一部分实现与验证状态见 [README](./README.md)。本文其余能力为逐步实施的设计目标。  
 > 产品定位：以 DeepSeek 为决策模型的视频创作 Agent。先建立可独立运行的 Agent，再为它接入视频生成能力。
 
 ## 1. 设计目标
@@ -29,8 +29,8 @@ Agent 不需要每次都调用工具；用户只问概念时可以直接回答�
 | 方案 | 适用点 | 对本项目的代价 | 决策 |
 |---|---|---|---|
 | 直接基于 DeepSeek REST 自建全部能力 | 协议控制最直接、依赖少 | 需自行维护流解析、消息序列化、工具调用增量与错误归一化 | 保留为 ModelAdapter 的替代实现 |
-| AI SDK + 自有轻量 Harness | 有 DeepSeek 适配、文本流和工具调用支持；适合 TS 项目 | 项目仍需负责持久化、执行记录、上下文和异步任务 | **首选** |
-| LangGraph JS | 提供状态图、持久执行、流和中断等机制 | 初期需要引入图与检查点模型，且仍需处理外部收费操作幂等 | 当长工作流、分支与恢复复杂度明显增长时再评估 |
+| AI SDK + 自有轻量 Harness | 有 DeepSeek 适配、文本流和工具调用支持；适合 TS 项目 | 项目仍需负责持久化、执行记录、上下文和异步任务 | 备选，当前不引入第二套模型与循环抽象 |
+| LangGraph JS | 提供状态图、持久执行、流和中断等机制 | 自主定义状态、路由、工具策略和上下文，同时处理外部操作幂等 | **采用**：复用图执行底座，展示项目自身的 Harness 设计与评测 |
 | 基于 DeepSeek Harness 扩展 | 已有 Web、工具、会话、配置及插件结构；开源 MIT | 官方仍是 developer preview，明确可能出现兼容性破坏；需适应 Cordis 和已有工作区产品结构 | 参考架构，暂不作为独立 vagent 包的运行时依赖 |
 
 这是一项范围选择，而非框架性能排名。独立 npm 产品、DeepSeek 优先、视频专用工具和可控的初期复杂度，是本次选择的依据。
@@ -38,16 +38,16 @@ Agent 不需要每次都调用工具；用户只问概念时可以直接回答�
 ### 2.2 采用的组合
 
 - **决策模型**：DeepSeek 官方 API，初始候选模型 ID 为 `deepseek-flash`；模型可配置，M1-A0 记录实际可用型号与行为。
-- **模型接入**：`ai` + `@ai-sdk/deepseek`，显式创建直连 DeepSeek 的 provider；不依赖 AI Gateway，也不要求第三个平台 Key。
+- **模型接入**：`@langchain/deepseek` 的 `ChatDeepSeek`，直连 DeepSeek；不依赖网关或第三个平台 Key。
 - **运行时**：Node.js 24 LTS + TypeScript。
-- **Harness**：项目自有 `AgentRunner`，仅实现当前必要的单 Agent 循环。
+- **Harness**：项目自有 `AgentRunner`，显式使用 LangGraph StateGraph 定义 model/tools 节点及路由；逐步补齐上下文、skills 和恢复。
 - **Schema**：Zod，生成提供给模型的 JSON Schema，同时做服务端输入和输出校验。
 - **持久化**：版本化 JSON Store + 单进程串行写入；通过接口隔离，后续可以替换数据库。
 - **外壳**：CLI 先验收，React/Vite Web 随后接同一套 Runner 与事件。
 
-AI SDK 只在 `DeepSeekModelAdapter` 内执行一个模型步，提供工具描述但不自动执行工具。项目不同时启用 SDK 自动 Agent 循环和自建循环，避免两套停止条件、重试和工具执行权相互冲突。
+模型适配器只执行一个模型步，不自动执行工具。AgentRunner 的 LangGraph 图拥有唯一的循环与路由控制权，避免多个框架重复执行工具或独立重试。
 
-使用 SDK Core 的 `streamText` 等能力完成单步调用；最终 API 写法与依赖版本以 M1-A0 的最小兼容实验为准，并写入锁文件。工具执行、持久化以及是否继续下一步始终由 Harness 控制。
+第一部分通过 ChatDeepSeek.bindTools().invoke() 完成单步请求，依赖由 package-lock.json 锁定。模型协议映射已用模拟 HTTP 验证，真实 Key 联调尚未完成；逐 Token 流和图级持久恢复继续分模块实施。
 
 ### 2.3 已查明的 DeepSeek 协议约束
 

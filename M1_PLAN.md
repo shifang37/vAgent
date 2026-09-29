@@ -1,7 +1,7 @@
 # vagent M1 实施计划：先实现 Agent，再接入视频生成
 
 > 更新日期：2026-09-29  
-> 状态：待实施；本文件描述计划，不代表已有功能。  
+> 状态：已开始实施；当前已完成内容、验证与限制以 [README](./README.md) 为准，本文仍保留阶段验收目标。  
 > 设计依据：[产品设计](./DESIGN.md)、[Agent 选型与 Harness 设计](./AGENT_HARNESS_DESIGN.md)。  
 > 当前优先级：完成 M1-A，使用一个 DeepSeek API Key 验收独立 Agent。
 
@@ -33,8 +33,8 @@ M1-A 完成就有可使用的创作 Agent；整个 M1 的视频闭环在 M1-C �
 | 层 | 决策 |
 |---|---|
 | 决策模型 | DeepSeek 官方 API；初始候选 `deepseek-flash`，在 A0 确认可用模型 |
-| 模型接入 | AI SDK Core + `@ai-sdk/deepseek`，直连 DeepSeek，不使用网关 |
-| Harness | 自有轻量 `AgentRunner`，负责循环、工具执行、上下文、检查点和预算 |
+| 模型接入 | `@langchain/deepseek`，直连 DeepSeek，不使用网关 |
+| Harness | 自主设计 LangGraph 状态图与 `AgentRunner`，负责路由、工具策略、上下文和预算，逐步接入持久检查点 |
 | Agent 组织 | 单 Agent；由模型决定使用哪些已注册工具，不写死创作步骤 |
 | 工具 Schema | Zod，模型声明与后端校验共享定义 |
 | 运行时 | Node.js 24 LTS + TypeScript |
@@ -42,7 +42,7 @@ M1-A 完成就有可使用的创作 Agent；整个 M1 的视频闭环在 M1-C �
 | 状态 | 版本化 JSON Store，串行写入、原子替换、实例锁和可恢复快照 |
 | 测试 | Vitest 验证循环与工具边界；浏览器核心流程使用 Playwright |
 
-AI SDK 负责单步模型协议和流；Harness 负责完整 Agent 行为。首版不同时启用 SDK 自动工具执行和自有工具执行，也不将 SDK 的模型对象直接作为应用数据模型。
+LangChain 模型适配器负责单步模型协议，LangGraph 提供图执行；项目自主设计 Harness 的状态、路由和工具执行策略。应用领域数据与框架消息通过存储边界隔离。
 
 初始工具闭环显式关闭 thinking。启用 thinking 时，必须验证 DeepSeek 要求的协议字段完整往返和持久化恢复；详细取舍见 Harness 设计第 2 节。
 
@@ -163,7 +163,7 @@ Web 显示文本流、正在执行的工具、短任务清单和产物版本。�
 
 | 工作包 | 内容 | 产物 | 完成门槛 |
 |---|---|---|---|
-| **A0 选型实验** | 验证 AI SDK DeepSeek 直连、文本流、工具调用及结果回传；确认模型 ID | `docs/AGENT_SPIKE.md`、最小实验与锁定依赖 | 真实 DeepSeek 能观察工具结果后再次决策；无视频 Key 依赖 |
+| **A0 选型实验** | 验证 LangGraph + ChatDeepSeek 的直连、工具调用及结果回传；确认模型 ID | 最小实验、协议测试与锁定依赖 | 真实 DeepSeek 能观察工具结果后再次决策；无视频 Key 依赖 |
 | **A1 Harness 契约** | 明确 Run、消息、事件、工具、检查点与领域存储接口；建立工程 | 基础类型、MockModelAdapter、工具测试夹具 | 可用确定性模型测试循环、终止、工具错误和执行次数 |
 | **A2 Agent 最小闭环** | DeepSeekModelAdapter、Runner、注册/执行、本地创作工具、`vagent chat` | 可运行的 CLI Agent | 用户可真实保存方案并让模型读取结果继续；并非只返回一次 JSON |
 | **A3 状态与上下文** | Session/Project/Artifact、产物版本、上下文预算、幂等与检查点 | 可恢复的创作会话 | 第二轮修改保持原版；重启不重复执行已完成工具 |
