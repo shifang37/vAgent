@@ -1,0 +1,47 @@
+# Dependencies and package-manager caches
+node_modules/
+.npm/
+.pnpm-store/
+
+# Build output and caches
+dist/
+build/
+.vite/
+.cache/
+*.tsbuildinfo
+*.tgz
+
+# Test output
+coverage/
+playwright-report/
+test-results/
+
+# Local credentials and configuration (keep sanitized examples trackable)
+.env
+.env.*
+!.env.example
+!.env.sample
+*.local.yml
+*.local.yaml
+*.local.json
+
+# Local agent state, generated media, and temporary files
+.vagent/
+/media/
+/output/
+/tmp/
+/temp/
+logs/
+*.log
+*.part
+
+# Temporary directory created by Windows tooling
+/%SystemDrive%/
+
+# OS and editor temporary files
+.DS_Store
+Thumbs.db
+Desktop.ini
+*.swp
+*.swo
+*~
