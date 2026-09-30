@@ -2,11 +2,13 @@ import argparse
 import asyncio
 import json
 import sys
+from contextlib import AsyncExitStack
 from dataclasses import asdict
 
 from dotenv import load_dotenv
 
 from vagent import __version__
+from vagent.cache import AnswerCache
 from vagent.config import load_config
 from vagent.context import ContextBuilder
 from vagent.errors import AppError, public_error
@@ -32,6 +34,8 @@ def show_event(event: dict) -> None:
         )
     elif event["type"] == "model.started":
         print(f"[模型步骤 {event['step']}]", flush=True)
+    elif event["type"] == "answer_cache":
+        print(f"[Redis 回答缓存] {event['status']}", flush=True)
     elif event["type"] == "tool.started":
         print(f"[工具] {event['name']}", flush=True)
     elif event["type"] == "tool.completed":
@@ -41,7 +45,8 @@ def show_event(event: dict) -> None:
 async def run_agent(args: argparse.Namespace) -> int:
     config = load_config()
     catalog = SkillCatalog.discover(config.skills_root)
-    with FileStore.open(config.home) as store:
+    async with AsyncExitStack() as stack:
+        store = stack.enter_context(FileStore.open(config.home))
         saved = None
         if args.command == "resume":
             saved = store.snapshot()["runs"].get(args.run_id)
@@ -49,6 +54,11 @@ async def run_agent(args: argparse.Namespace) -> int:
                 raise AppError("NOT_FOUND", "没有这个 Run，请使用 inspect 查看运行 ID。")
         offline = args.command == "demo" or (saved and saved["model"] == DemoModel.name)
         model = DemoModel() if offline else DeepSeekModel(config.api_key, config.model)
+        read_only = saved.get("readOnly", False) if saved else getattr(args, "read_only", False)
+        cache = None
+        if config.redis_url and read_only and not offline:
+            cache = AnswerCache.connect(config.redis_url, ttl=config.cache_ttl)
+            stack.push_async_callback(cache.aclose)
         runner = AgentRunner(
             store=store,
             model=model,
@@ -56,6 +66,8 @@ async def run_agent(args: argparse.Namespace) -> int:
             context=ContextBuilder(config.context_bytes),
             skills=catalog.list(),
             on_event=show_event,
+            read_only=read_only,
+            answer_cache=cache,
         )
         session_id = saved["sessionId"] if saved else args.session
         print(f"模型：{model.name}\n会话：{session_id}\n数据：{config.home}")
@@ -113,6 +125,8 @@ def show_usage(result: dict) -> None:
         f"[用量] 已记录模型调用 {usage['recordedCallCount']} 次；"
         f"已知输入 {usage['observedInputTokens']}、输出 {usage['observedOutputTokens']} Token；{cache}{suffix}"
     )
+    if usage["answerCache"]:
+        print(f"[Redis 回答缓存] {json.dumps(usage['answerCache'], ensure_ascii=False)}")
 
 
 def parser() -> argparse.ArgumentParser:
@@ -125,6 +139,10 @@ def parser() -> argparse.ArgumentParser:
     resume = commands.add_parser("resume", help="从持久检查点继续原 Run，沿用剩余预算")
     resume.add_argument("run_id")
     chat = commands.add_parser("chat", help="持续对话；/exit 退出，Ctrl+C 停止")
+    for command in (run, chat):
+        command.add_argument(
+            "--read-only", action="store_true", help="仅提供读取工具；配置 Redis 后启用回答缓存"
+        )
     demo = commands.add_parser("demo", help="无需 Key 的离线模拟演示")
     inspect = commands.add_parser("inspect", help="查看本地项目、产物与运行记录")
     usage = commands.add_parser("usage", help="查看模型调用和缓存 Token 用量，不调用模型")
@@ -151,6 +169,7 @@ def main() -> None:
         if args.command == "config":
             safe = asdict(config)
             key = safe.pop("api_key")
+            safe["redis_configured"] = bool(safe.pop("redis_url"))
             print_json({**safe, "api_key_configured": bool(key and key.strip()), "thinking": "disabled"})
         elif args.command == "skills":
             print_json(SkillCatalog.discover(config.skills_root).list())
@@ -174,6 +193,7 @@ def main() -> None:
                                 "model": run["model"],
                                 "status": run["status"],
                                 "contextVersion": run.get("contextVersion", 1),
+                                "readOnly": run.get("readOnly", False),
                                 "usage": summarize_usage(run),
                                 "modelCalls": run.get("modelCalls", []),
                             }
@@ -211,6 +231,7 @@ def main() -> None:
                                 },
                                 "usage": summarize_usage(run),
                                 "contextVersion": run.get("contextVersion", 1),
+                                "readOnly": run.get("readOnly", False),
                             }
                             for run in state["runs"].values()
                             if run["sessionId"] == args.session

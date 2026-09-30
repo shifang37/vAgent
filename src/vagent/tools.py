@@ -97,6 +97,13 @@ class ToolRegistry:
             for definition in self._definitions.values()
         ]
 
+    def read_only(self) -> "ToolRegistry":
+        registry = ToolRegistry()
+        for definition in self._definitions.values():
+            if definition.effect == "read":
+                registry.register(definition)
+        return registry
+
     def execute(
         self, name: str, args: object, *, store: FileStore, project_id: str, operation_key: str
     ) -> dict:

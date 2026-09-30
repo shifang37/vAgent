@@ -71,4 +71,5 @@ def summarize_usage(run: dict) -> dict:
         "cacheHitRate": paired_hits / denominator if denominator else None,
         "tokenUsageComplete": untracked == 0 and len(token_calls) == len(calls),
         "cacheUsageComplete": untracked == 0 and len(cache_calls) == len(calls),
+        "answerCache": run.get("answerCache", {}),
     }

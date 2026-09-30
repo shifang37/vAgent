@@ -117,6 +117,8 @@ class RunRecord(Record):
     tool_call_keys: list[str] = Field(default_factory=list)
     usage_start_step: int | None = Field(default=None, ge=1)
     model_calls: list[ModelCall] = Field(default_factory=list)
+    read_only: bool = False
+    answer_cache: dict[str, int] = Field(default_factory=dict)
 
 
 class Success(Record):

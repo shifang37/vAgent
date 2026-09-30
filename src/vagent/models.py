@@ -23,6 +23,13 @@ class DeepSeekModel:
         http_client: httpx.AsyncClient | None = None,
     ):
         self.name = model
+        self.cache_config = {
+            "adapter": "deepseek-v1",
+            "endpoint": "https://api.deepseek.com",
+            "model": model,
+            "max_tokens": 4096,
+            "thinking": "disabled",
+        }
         self._client = ChatDeepSeek(
             api_key=require_key(api_key),
             model=model,

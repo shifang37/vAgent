@@ -20,6 +20,7 @@ from langchain_core.messages import (
 )
 from langgraph.graph import END, START, StateGraph
 
+from vagent.cache import AnswerCache
 from vagent.checkpoints import CHECKPOINT_VERSION, open_checkpointer
 from vagent.config import assert_id
 from vagent.context import ContextBuilder
@@ -118,12 +119,24 @@ class AgentRunner:
         context: ContextBuilder | None = None,
         skills: list[dict] | None = None,
         on_event: Callable[[dict], None] | None = None,
+        read_only: bool = False,
+        answer_cache: AnswerCache | None = None,
     ):
         self.store, self.model, self.tools = store, model, tools
+        self.read_only = read_only
+        self.answer_cache = answer_cache
+        if read_only:
+            self.tools = tools.read_only()
         self.policy = policy or RunPolicy()
         self.context = context or ContextBuilder()
         self.skills = skills or []
         self.on_event = on_event
+
+    @property
+    def system_prompt(self):
+        return SYSTEM_PROMPT + (
+            "\n本次为只读任务，不能修改项目、计划或保存产物；需要写入时说明此限制。" if self.read_only else ""
+        )
 
     def emit(self, event: dict) -> None:
         if self.on_event:
@@ -136,13 +149,15 @@ class AgentRunner:
         payload = {
             "version": CHECKPOINT_VERSION,
             "model": self.model.name,
-            "system": SYSTEM_PROMPT,
+            "system": self.system_prompt,
             "tools": context.prepare_tools(self.tools.specs()),
             "skills": context.prepare_skills(self.skills),
             "contextBytes": context.max_input_bytes,
         }
         if context.format_version != 1:
             payload["contextVersion"] = context.format_version
+        if self.read_only:
+            payload["readOnly"] = True
         return hashlib.sha256(json.dumps(payload, sort_keys=True, ensure_ascii=False).encode()).hexdigest()
 
     async def run(
@@ -166,6 +181,8 @@ class AgentRunner:
                 if previous["sessionId"] == session_id and previous["requestId"] == request_id:
                     if previous["prompt"] != prompt:
                         raise AppError("REQUEST_CONFLICT", "相同请求 ID 不能关联不同需求。")
+                    if previous.get("readOnly", False) != self.read_only:
+                        raise AppError("REQUEST_CONFLICT", "相同请求 ID 不能改变只读模式。")
                     return previous, False
             if any(run["status"] == "running" for run in draft["runs"].values()):
                 raise AppError("RUN_BUSY", "已有任务正在运行，请等待完成或停止后重试。")
@@ -205,6 +222,8 @@ class AgentRunner:
                 "resumable": True,
                 "usageStartStep": 1,
                 "modelCalls": [],
+                "readOnly": self.read_only,
+                "answerCache": {},
             }
             draft["runs"][record["id"]] = record
             draft["sessions"][session_id]["latestRunId"] = record["id"]
@@ -304,6 +323,13 @@ class AgentRunner:
             next_state = journal.stats(state)
             attempt_step = None
             attempt_started = None
+            cache_key = None
+
+            def record_cache(status):
+                counters = journal.record.get("answerCache", {}).copy()
+                counters[status] = counters.get(status, 0) + 1
+                journal.update(answerCache=counters)
+                self.emit({"type": "answer_cache", "status": status})
 
             async def generate():
                 nonlocal attempt_started
@@ -334,13 +360,37 @@ class AgentRunner:
                     raise AppError("STEP_LIMIT", "已达到模型步数上限，保留已完成产物。")
                 specs = tools.specs()
                 report = context.build(
-                    system_prompt=SYSTEM_PROMPT,
+                    system_prompt=self.system_prompt,
                     history=state["messages"],
                     project=store.snapshot()["projects"][session_id],
                     tools=specs,
                     skills=self.skills,
                 )
                 specs = report.tools
+                if self.read_only and self.answer_cache and getattr(model, "cache_config", None):
+                    snapshot = store.snapshot()
+                    cache_key = self.answer_cache.key(
+                        scope=str(store.home),
+                        signature=self.context_signature(context.format_version),
+                        model_config=model.cache_config,
+                        messages=report.messages,
+                        tools=specs,
+                        project=snapshot["projects"][session_id],
+                        artifacts=[a for a in snapshot["artifacts"].values() if a["projectId"] == session_id],
+                    )
+                    cached, cache_status = await bounded_call(
+                        lambda: self.answer_cache.get(cache_key), cancelled, deadline
+                    )
+                    record_cache(cache_status)
+                    if cached is not None:
+                        journal.update(
+                            contextBytes=report.input_bytes,
+                            droppedMessages=max(next_state["dropped_messages"], report.dropped_messages),
+                        )
+                        next_state = journal.stats({**next_state, "messages": [*state["messages"], cached]})
+                        next_state.update(status="completed", answer=cached.content)
+                        publish_progress(next_state)
+                        return next_state
                 # Persist the attempt BEFORE calling the provider. Node replay must
                 # spend another attempt instead of resetting to older graph counters.
                 reservation = min(60.0, max(0, deadline - time.monotonic()))
@@ -388,6 +438,13 @@ class AgentRunner:
                     if not answer.strip():
                         raise AppError("EMPTY_RESPONSE", "模型返回空回复，本次任务未完成。")
                     next_state.update(status="completed", answer=answer)
+                    if cache_key:
+                        # Only successful final text is reusable; tool responses are never cached.
+                        record_cache(
+                            await bounded_call(
+                                lambda: self.answer_cache.put(cache_key, reply), cancelled, deadline
+                            )
+                        )
             except asyncio.CancelledError:
                 finish_attempt(AppError("CANCELLED", "执行已停止，保留已完成产物。"))
                 raise

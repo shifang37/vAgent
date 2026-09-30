@@ -9,7 +9,9 @@
 
 随后已加入单次模型调用与缓存 Token 用量观测，支持 `vagent usage` 查看已知用量和缺失项，记录见 [用量观测验收](./docs/USAGE_ACCEPTANCE.md)。这不代表真实 API 缓存命中率或费用已完成联调。
 
-任务三已实现上下文 v2：固定规则和 Skill 元信息置前，工具与 JSON 确定性排序，应用工具结果去除字符串外空白；保留完整轮次裁剪和产物分页读取，旧检查点按 v1 恢复。离线对比与兼容验证见 [上下文优化验收](./docs/CONTEXT_OPTIMIZATION_ACCEPTANCE.md)。Redis 回答缓存尚未实现。
+任务三已实现上下文 v2：固定规则和 Skill 元信息置前，工具与 JSON 确定性排序，应用工具结果去除字符串外空白；保留完整轮次裁剪和产物分页读取，旧检查点按 v1 恢复。离线对比与兼容验证见 [上下文优化验收](./docs/CONTEXT_OPTIMIZATION_ACCEPTANCE.md)。
+
+任务四已加入可选 Redis 回答缓存：只读工具隔离、完整上下文与状态精确匹配、TTL 和故障回退、独立缓存统计。本地真实 Redis 验收见 [Redis 缓存验收](./docs/REDIS_CACHE_ACCEPTANCE.md)，真实业务命中率与费用收益仍待测量。
 
 ## 1. 实施原则与阶段目标
 

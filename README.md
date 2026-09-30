@@ -13,6 +13,7 @@
 | Python 迁移 | 已实现并通过本地验证 | Python 源码与 pytest 测试、pip 安装、wheel 打包、Python CI；替换原 TS/Node 工程 |
 | 03 持久图恢复 | 已实现 | SQLite LangGraph 检查点、显式 resume、累计预算与工具重放保护 |
 | 03 用量观测 | 已实现 | 单次模型调用记录、缓存命中/未命中 Token、加权命中率、未知用量标记 |
+| 03 Redis 回答缓存 | 已实现 | 显式只读模式、最终文本精确匹配、TTL、故障回退、独立命中统计 |
 | 03 任务评测 | 待实现 | 真实模型固定任务集与策略对比 |
 | 04 Web 与视频工具 | 待实现 | 最小本地 Web、模拟视频 Job、真实供应商接入 |
 
@@ -113,6 +114,37 @@ DeepSeek 原始 `prompt_cache_hit_tokens`、`prompt_cache_miss_tokens` 优先使
 
 这里统计的是服务商报告的上下文缓存用量，不是本地 Redis 命中数，也不代表减少了上下文窗口占用。当前未加入价格表或人民币费用估算。验证范围见 [用量观测验收](./docs/USAGE_ACCEPTANCE.md)。
 
+## Redis 回答缓存（任务四）
+
+默认关闭。需要 Redis 服务，并在 `.env` 中设置连接地址；连接凭据不会显示在 `config show` 或保存到 Run。使用前先更新依赖：
+
+```powershell
+.\.venv\Scripts\python.exe -m pip install -r requirements-dev.lock
+```
+
+```dotenv
+VAGENT_REDIS_URL=redis://localhost:6379/0
+VAGENT_CACHE_TTL=3600
+```
+
+```powershell
+.\.venv\Scripts\python.exe -m vagent run '阅读现有方案，解释镜头节奏。' --session coffee --read-only
+.\.venv\Scripts\python.exe -m vagent chat --session coffee --read-only
+.\.venv\Scripts\python.exe -m vagent usage --session coffee
+```
+
+`--read-only` 仅提供 `project_read`、`artifact_read`、`skill_read`；后端同样拒绝写工具，即使模型尝试调用也不能修改项目、计划或产物。会话与执行记录仍正常持久化。`resume` 自动沿用原 Run 的模式。没有 Redis 配置时只读模式也能使用；普通写作 Run 和离线 demo 不使用回答缓存。
+
+缓存以**单个模型步的最终纯文本响应**为单位；工具调用响应、空回复、非法协议及明确截断的响应不缓存。命中跳过该步模型请求，仍正常完成图检查点与会话提交，不复用旧 Token usage。之前已经发生的模型调用与读取工具仍保留。缓存不是整个 Agent 工作流或工具操作的重放机制。
+
+键以 SHA-256 摘要覆盖数据目录、项目身份及完整事实、全部项目产物版本与内容、实际发送的消息及工具定义、系统与 Skill 版本、上下文格式和模型配置。不同数据目录或项目隔离；任一依赖变化都会生成不同键。Redis 仅保存版本号和回答文本，默认 1 小时过期，TTL 可设为 1～604800 秒；单条回答限制 256 KiB。
+
+这是严格精确匹配，没有语义相似度匹配。**重复输入同一句话不保证命中**：正常连续对话会增加历史，工具调用 ID 和消息元数据变化也会影响键。实际收益需要真实重复请求数据验证；未声称已测得生产 Token 节省。
+
+每次 Redis 读写最多等待 0.5 秒；连接失败、超时或损坏条目会回退到模型请求，写缓存失败不丢弃已经取得的回答。原 Run 的取消与总时间预算继续生效。Redis 是可丢弃缓存，不替代 SQLite 检查点和 JSON 项目记忆，也不提供并发请求合并。
+
+`usage.answerCache` 单独累计 `hit`、`miss`、`invalid`、`error`、`stored`、`skipped`，未发生的项省略；`error` 包含读失败和写失败，并非模型失败数。命中不会新增 `modelCalls`、`modelSteps` 或输入/输出 Token，不能将旧响应 Token 当作本次服务商缓存用量。执行时也显示 Redis 事件。验收证据见 [Redis 缓存验收](./docs/REDIS_CACHE_ACCEPTANCE.md)。
+
 ## 实现与代码入口
 
 ```text
@@ -124,6 +156,7 @@ src/vagent/
   checkpoints.py SQLite 异步检查点与连接生命周期
   journal.py   跨恢复保留的执行预算、使用量与会话提交
   usage.py     Token 与缓存用量归一化、覆盖率与 Run 汇总
+  cache.py     Redis 精确回答缓存、TTL、超时与故障回退
   context.py   上下文组装与完整轮次裁剪
   tools.py     工具注册、Pydantic 校验、项目与产物操作
   storage.py   单写锁、事务、原子替换、操作日志
@@ -191,6 +224,8 @@ Python 版保留 schema v1 的领域数据结构和工具 JSON 字段（如 `art
 
 ## 验证与打包
 
+任务四新增验证：真实 Redis 重连命中、TTL 失效与服务中断回退；独立 wheel 环境中的仓库外 CLI 与依赖检查通过。详见 [Redis 缓存验收](./docs/REDIS_CACHE_ACCEPTANCE.md)。
+
 ```powershell
 .\.venv\Scripts\python.exe -m ruff check src/vagent tests
 .\.venv\Scripts\python.exe -m ruff format --check src/vagent tests
@@ -198,7 +233,7 @@ Python 版保留 schema v1 的领域数据结构和工具 JSON 字段（如 `art
 .\.venv\Scripts\python.exe -m build --no-isolation --outdir dist/python
 ```
 
-本地 Python 3.12 测试结果：**88 passed，1 skipped**。跳过的是当前 Windows 账户无符号链接创建权限的测试。测试覆盖工具闭环、请求去重、错误与超时、取消、并发拒绝、版本/项目隔离、写入回滚、旧状态读取、上下文预算、Skills、DeepSeek HTTP 协议，以及真实子进程强退后的恢复、部分工具提交、累计预算、终态补交、缓存 Token 字段、缺失用量与加权命中率。上下文 v2 另验证了稳定前缀、确定性排序、无损 JSON 空白压缩、完整协议配对、分页读取及旧版上下文恢复兼容。
+本地 Python 3.12 测试结果：**109 passed，1 skipped**。跳过的是当前 Windows 账户无符号链接创建权限的测试。测试覆盖工具闭环、请求去重、错误与超时、取消、并发拒绝、版本/项目隔离、写入回滚、旧状态读取、上下文预算、Skills、DeepSeek HTTP 协议，以及真实子进程强退后的恢复、部分工具提交、累计预算、终态补交、缓存 Token 字段、缺失用量与加权命中率。上下文 v2 另验证了稳定前缀、确定性排序、无损 JSON 空白压缩、完整协议配对、分页读取及旧版上下文恢复兼容。
 
 已验证离线 CLI，以及 wheel 安装到独立虚拟环境后在仓库目录之外运行 `skills list`、`demo`、`inspect`。本次新增验证：新建独立虚拟环境安装 wheel，保存产物后取消，再从仓库外通过 CLI `resume` 完成原 Run，仍仅有一个产物；`pip check` 通过。源码包与 wheel 仅本地构建，未发布 PyPI。GitHub Actions 配置 Ubuntu/Windows、Python 3.11/3.12 检查，远端结果见 [Actions](https://github.com/shifang37/vAgent/actions)。
 
