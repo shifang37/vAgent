@@ -10,6 +10,7 @@ readme = "README.md"
 requires-python = ">=3.11"
 dependencies = [
   "langgraph>=1.0,<2",
+  "langgraph-checkpoint-sqlite>=3.1,<4",
   "langchain-deepseek>=1.0,<2",
   "langchain-core>=1.4.7,<2",
   "httpx>=0.28,<1",
@@ -31,7 +32,7 @@ packages = ["src/vagent"]
 "skills" = "vagent/builtin_skills"
 
 [tool.hatch.build.targets.sdist]
-include = ["/src/vagent", "/skills", "/tests/*.py", "/pyproject.toml", "/README.md", "/requirements-dev.lock"]
+include = ["/src/vagent", "/skills", "/tests/*.py", "/docs/*.md", "/pyproject.toml", "/README.md", "/requirements-dev.lock"]
 
 [tool.pytest.ini_options]
 asyncio_mode = "auto"

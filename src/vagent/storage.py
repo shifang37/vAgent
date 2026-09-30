@@ -52,6 +52,7 @@ class StoredMessage(Record):
 class Session(Record):
     id: str
     messages: list[StoredMessage]
+    latest_run_id: str | None = None
 
 
 class ArtifactVersion(Record):
@@ -66,6 +67,26 @@ class Artifact(Record):
     project_id: str
     kind: Literal["brief", "script", "storyboard"]
     versions: list[ArtifactVersion] = Field(min_length=1)
+
+
+class SavedPolicy(Record):
+    max_steps: int = Field(gt=0)
+    max_tool_calls: int = Field(gt=0)
+    timeout_seconds: float = Field(gt=0, allow_inf_nan=False)
+
+
+class ModelCall(Record):
+    step: int = Field(ge=1)
+    status: Literal["started", "responded", "failed", "cancelled", "interrupted"]
+    started_at: str
+    finished_at: str | None = None
+    duration_seconds: float | None = Field(default=None, ge=0, allow_inf_nan=False)
+    input_tokens: int | None = Field(default=None, ge=0)
+    output_tokens: int | None = Field(default=None, ge=0)
+    cache_hit_tokens: int | None = Field(default=None, ge=0)
+    cache_miss_tokens: int | None = Field(default=None, ge=0)
+    cache_usage_source: Literal["reported", "derived", "missing", "invalid"] = "missing"
+    error_code: str | None = None
 
 
 class RunRecord(Record):
@@ -86,6 +107,16 @@ class RunRecord(Record):
     error_code: str | None = None
     created_at: str
     updated_at: str
+    execution_version: int | None = None
+    context_signature: str | None = None
+    context_version: int = Field(default=1, ge=1)
+    policy: SavedPolicy | None = None
+    resumable: bool = False
+    active_seconds: float = Field(default=0, ge=0, allow_inf_nan=False)
+    in_flight_seconds: float = Field(default=0, ge=0, allow_inf_nan=False)
+    tool_call_keys: list[str] = Field(default_factory=list)
+    usage_start_step: int | None = Field(default=None, ge=1)
+    model_calls: list[ModelCall] = Field(default_factory=list)
 
 
 class Success(Record):
@@ -170,6 +201,13 @@ class FileStore:
                 for run in draft["runs"].values():
                     if run["status"] == "running":
                         run.update(status="interrupted", updatedAt=now())
+                        # An abruptly lost model request has unknown elapsed time. Charge
+                        # its reserved timeout once, never the time spent offline.
+                        run["activeSeconds"] = run.get("activeSeconds", 0) + run.get("inFlightSeconds", 0)
+                        run["inFlightSeconds"] = 0
+                        for call in run.get("modelCalls", []):
+                            if call["status"] == "started":
+                                call.update(status="interrupted", errorCode="INTERRUPTED")
 
             store.transaction(recover)
             return store
