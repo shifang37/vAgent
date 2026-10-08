@@ -54,6 +54,17 @@ const statusNames = {
   failed: "执行失败",
   interrupted: "已中断",
 };
+const artifactNames = { all: "全部产物", brief: "方案", script: "脚本", storyboard: "分镜" };
+function contentLimitsText(project) {
+  return Object.entries(project?.contentLimits || {})
+    .map(([kind, maximum]) => `${artifactNames[kind] || kind}：${maximum} 个非空白字符`)
+    .join("；") || "未设置";
+}
+function contentCheckText(version) {
+  const checked = version.contentCheck;
+  if (!checked) return "此历史版本未记录字数校验。";
+  return `正文 ${checked.characters} 个非空白字符${checked.maxCharacters == null ? "，未设置上限" : ` / 上限 ${checked.maxCharacters}，保存前已校验`}。含标点、英文、数字和 Markdown 标记，空白不计。`;
+}
 let health = null,
   csrf = null,
   sessions = [],
@@ -262,7 +273,7 @@ function renderObserve() {
     <h3>上下文管理</h3><div class="metrics">${metric("输入字节", value(run?.contextBytes))}${metric("预算字节", value(health?.contextBudgetBytes))}${metric("裁剪历史消息", value(run?.droppedMessages))}${metric("当前输入消息", value(context?.messageCount))}</div>
     <p class="meta">按完整轮次裁剪；持久记忆保留，原始历史不删除。</p>
     <h3>项目记忆 <small>revision ${project?.revision ?? "—"}</small></h3>
-    <dl class="memory">${["goal", "audience", "style", "constraints"].map((key, i) => `<dt>${["目标", "受众", "风格", "约束"][i]}</dt><dd>${escapeHTML(Array.isArray(project?.[key]) ? project[key].join("；") || "暂无" : project?.[key] || "暂无")}</dd>`).join("")}</dl>
+    <dl class="memory">${["goal", "audience", "style", "constraints"].map((key, i) => `<dt>${["目标", "受众", "风格", "约束"][i]}</dt><dd>${escapeHTML(Array.isArray(project?.[key]) ? project[key].join("；") || "暂无" : project?.[key] || "暂无")}</dd>`).join("")}<dt>正文上限</dt><dd>${escapeHTML(contentLimitsText(project))}</dd></dl>
     <h3>执行计划</h3><ol class="plan-list">${(project?.plan || []).map((p) => `<li>${escapeHTML(p.text)} <small>${escapeHTML(p.status)}</small></li>`).join("") || "<li>暂无计划</li>"}</ol>
     <h3>Skills · 按需读取</h3>${(health?.skills || []).map((s) => `<div class="capability"><strong>${escapeHTML(s.name)}</strong><small>${escapeHTML(s.description)}<br>版本 ${escapeHTML(s.version)}</small></div>`).join("")}
     <h3>MCP 服务</h3>${(health?.mcp || []).map((s) => `<div class="capability"><strong>${escapeHTML(s.name)} · 已连接</strong><small>${escapeHTML(s.transport)} / ${escapeHTML(s.protocolVersion)}<br>${s.tools.map(escapeHTML).join("<br>")}</small></div>`).join("") || '<p class="meta">未启用 MCP 服务</p>'}
@@ -288,7 +299,7 @@ async function showArtifact(id, version) {
   if (!selected) throw new Error("该产物版本不存在。");
   $("#observe-panel").hidden = true;
   $("#artifact-panel").innerHTML =
-    `<div class="panel-heading"><strong>创作产物</strong><button class="icon-button" data-action="close-artifact" aria-label="关闭产物预览" data-icon="close"></button></div><span class="meta">${escapeHTML(artifact.kind)} / 已持久保存</span><h2>${escapeHTML(selected.title)}</h2><label class="version-picker">历史版本 <select id="artifact-version" aria-label="产物版本">${artifact.versions.map((v) => `<option value="${v.version}" ${v.version === selected.version ? "selected" : ""}>v${v.version}</option>`).join("")}</select></label><pre>${escapeHTML(selected.content)}</pre><div class="artifact-actions"><button class="primary" data-action="export">导出 Markdown</button><button class="secondary" data-action="revise">继续修改</button></div>`;
+    `<div class="panel-heading"><strong>创作产物</strong><button class="icon-button" data-action="close-artifact" aria-label="关闭产物预览" data-icon="close"></button></div><span class="meta">${escapeHTML(artifact.kind)} / 已持久保存</span><h2>${escapeHTML(selected.title)}</h2><label class="version-picker">历史版本 <select id="artifact-version" aria-label="产物版本">${artifact.versions.map((v) => `<option value="${v.version}" ${v.version === selected.version ? "selected" : ""}>v${v.version}</option>`).join("")}</select></label><p class="meta">${escapeHTML(contentCheckText(selected))}</p><pre>${escapeHTML(selected.content)}</pre><div class="artifact-actions"><button class="primary" data-action="export">导出 Markdown</button><button class="secondary" data-action="revise">继续修改</button></div>`;
   $("#artifact-panel").hidden = false;
   icons($("#artifact-panel"));
 }

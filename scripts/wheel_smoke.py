@@ -40,10 +40,22 @@ async def main():
                     result = (await client.get("/api/sessions/wheel")).json()
                     assert result["run"]["status"] == "completed" and len(result["artifacts"]) == 1
                     assert len(result["run"]["toolTrace"]) == 3
+                    assert result["artifacts"][0]["versions"][0]["contentCheck"]["characters"] > 0
                     assert (await client.get("/.env")).status_code == 404
+                    bounded = await client.post(
+                        "/api/sessions/quality/messages",
+                        json={"prompt": "保存brief，正文不超过1字", "clientRequestId": "quality-wheel"},
+                    )
+                    assert bounded.status_code == 202
+                    await app.state.service.task
+                    rejected = (await client.get("/api/sessions/quality")).json()
+                    assert rejected["project"]["contentLimits"] == {"brief": 1}
+                    assert rejected["run"]["errorCode"] == "QUALITY_UNRESOLVED"
+                    assert not rejected["artifacts"]
+                    assert any(e.get("errorCode") == "CONTENT_LENGTH" for e in rejected["run"]["events"])
             assert not (Path(directory) / "state" / "instance.lock").exists()
     print(
-        "PASS: installed wheel, bundled Web assets, API, Runner, persisted artifact, real MCP discovery, cleanup."
+        "PASS: installed wheel, Web assets, API, Runner, artifacts, quality rejection, real MCP discovery, cleanup."
     )
 
 

@@ -7,6 +7,8 @@
 
 当前已补齐 SQLite 图检查点和 `vagent resume RUN_ID`，包含部分工具提交后的重放保护与累计预算验证，记录见 [持久恢复验收](./docs/RECOVERY_ACCEPTANCE.md)。2026-10-08 新增共享应用服务、本地 Web API/SSE 与只读 MCP；首组真实 DeepSeek 多轮编排已验证，发现记忆冗余与文本长度约束问题，详见 [编排验收](./docs/AGENT_ORCHESTRATION_ACCEPTANCE.md)。完整 A4 配置向导、逐 Token 流、大规模任务评测和视频阶段仍待完成。
 
+随后完成任务 1 的质量修复：后端检查记忆字段重复/旧事实残留，明确用户字数上限并持久保存，产物写入前执行实际计数，未纠正校验错误时不标记任务完成。151 项自动化测试通过、1 项跳过；本次没有重新发起付费模型验收，原样本保持不变。范围和后续验收方式见 [质量校验验收](./docs/QUALITY_ACCEPTANCE.md)。
+
 随后已加入单次模型调用与缓存 Token 用量观测，支持 `vagent usage` 查看已知用量和缺失项，记录见 [用量观测验收](./docs/USAGE_ACCEPTANCE.md)。本次真实编排已取得供应商 Token 与缓存命中数据，但不能外推生产命中率或节费收益。
 
 任务三已实现上下文 v2：固定规则和 Skill 元信息置前，工具与 JSON 确定性排序，应用工具结果去除字符串外空白；保留完整轮次裁剪和产物分页读取，旧检查点按 v1 恢复。离线对比与兼容验证见 [上下文优化验收](./docs/CONTEXT_OPTIMIZATION_ACCEPTANCE.md)。

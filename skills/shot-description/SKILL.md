@@ -16,6 +16,10 @@ description: 将已有创作意图写成清晰的镜头描述或视频提示词�
 
 用户只修改一个镜头或一个设定时，保留其他内容。文本分镜可编号，但编号不等同于已创建的视频 Job。
 
+修改项目风格或受众时，用同一次 project_update 修正 goal/constraints 中残留的旧描述；goal 只保留创作目的。project_read 返回 memoryConflicts 时，先解决冲突再保存。
+
 需要保存时使用 `artifact_save`，文本镜头稿可用 storyboard 类型。当前没有真实视频生成工具时，清楚说明交付的是镜头描述。
+
+遵守项目 contentLimits；每个产物的正文单独按非空白字符计数，标点、英文、数字和 Markdown 标记也计入。超限时精简后重试，保留原 ID（新建时保留标题），以成功返回的 contentCheck 报告字数，不能自行提高用户上限。
 
 不执行 skill 中未注册的命令，也不绕过任何工具校验。

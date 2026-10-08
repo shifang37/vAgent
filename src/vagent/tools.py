@@ -11,6 +11,7 @@ from pydantic import BaseModel, ConfigDict, Field, ValidationError, model_valida
 from pydantic.alias_generators import to_camel
 
 from vagent.errors import AppError, failure, public_error
+from vagent.quality import check_project_memory, content_check, project_memory_conflicts
 from vagent.storage import FileStore, now
 
 
@@ -20,9 +21,11 @@ class Arguments(BaseModel):
 
 class ProjectUpdate(Arguments):
     expected_revision: int = Field(ge=0)
-    goal: str | None = Field(default=None, max_length=2000)
-    audience: str | None = Field(default=None, max_length=500)
-    style: str | None = Field(default=None, max_length=500)
+    goal: str | None = Field(
+        default=None, max_length=2000, description="创作目的与核心信息，不重复受众或风格。"
+    )
+    audience: str | None = Field(default=None, max_length=500, description="受众的唯一事实来源。")
+    style: str | None = Field(default=None, max_length=500, description="风格的唯一事实来源。")
     constraints: list[Annotated[str, Field(max_length=500)]] | None = Field(default=None, max_length=20)
 
     @model_validator(mode="after")
@@ -180,6 +183,7 @@ def _project_read(args: dict, state: dict, project_id: str) -> dict:
     artifacts = [a for a in state["artifacts"].values() if a["projectId"] == project_id]
     return {
         **state["projects"][project_id],
+        "memoryConflicts": project_memory_conflicts(state, state["projects"][project_id]),
         "artifactCount": len(artifacts),
         "artifacts": [
             {
@@ -196,7 +200,9 @@ def _project_update(args: dict, state: dict, project_id: str) -> dict:
     project = state["projects"][project_id]
     if project["revision"] != args["expectedRevision"]:
         raise AppError("REVISION_CONFLICT", "项目版本已变化，请重新读取后再修改。")
-    project.update({k: v for k, v in args.items() if k != "expectedRevision"})
+    candidate = {**project, **{k: v for k, v in args.items() if k != "expectedRevision"}}
+    check_project_memory(state, candidate)
+    project.update(candidate)
     project["revision"] += 1
     return project
 
@@ -216,13 +222,29 @@ def _artifact_save(args: dict, state: dict, project_id: str) -> dict:
         existing["versions"][-1]["version"] != args.get("expectedVersion") or existing["kind"] != args["kind"]
     ):
         raise AppError("VERSION_CONFLICT", "产物版本或类型不匹配，请重新读取。")
+    project = state["projects"][project_id]
+    check_project_memory(state, project)
+    limits = project.get("contentLimits", {})
+    checked = content_check(args["content"], limits.get(args["kind"], limits.get("all")))
     artifact = existing or {"id": artifact_id, "projectId": project_id, "kind": args["kind"], "versions": []}
     version = len(artifact["versions"]) + 1
     artifact["versions"].append(
-        {"version": version, "title": args["title"], "content": args["content"], "createdAt": now()}
+        {
+            "version": version,
+            "title": args["title"],
+            "content": args["content"],
+            "createdAt": now(),
+            "contentCheck": checked,
+        }
     )
     state["artifacts"][artifact_id] = artifact
-    return {"artifactId": artifact_id, "version": version, "title": args["title"], "persisted": True}
+    return {
+        "artifactId": artifact_id,
+        "version": version,
+        "title": args["title"],
+        "persisted": True,
+        "contentCheck": checked,
+    }
 
 
 def _artifact_read(args: dict, state: dict, project_id: str) -> dict:
@@ -250,14 +272,17 @@ def create_project_tools() -> ToolRegistry:
     definitions = [
         ToolDefinition(
             "project_read",
-            "读取当前项目、revision 和最近 20 个产物的元信息；修改前先读取现有状态。",
+            "读取当前项目、revision、memoryConflicts 和最近 20 个产物的元信息；"
+            "写入前先读取并修复记忆冲突。contentLimits 是后端强制的正文上限。",
             Arguments,
             "read",
             _project_read,
         ),
         ToolDefinition(
             "project_update",
-            "更新明确的用户需求，使用当前 expectedRevision 防止覆盖；未传字段保持原值。",
+            "更新用户确认的事实，使用当前 expectedRevision；goal 只写目的，audience/style 分别保存受众/风格。"
+            "改变受众或风格时同步清理 goal/constraints 中的旧描述，冲突会整次拒绝；未传字段保持原值。"
+            "contentLimits 由用户的字数要求设置，工具不能修改。",
             ProjectUpdate,
             "write",
             _project_update,
@@ -267,7 +292,9 @@ def create_project_tools() -> ToolRegistry:
         ),
         ToolDefinition(
             "artifact_save",
-            "保存方案、脚本或文本分镜；修改时同时传 artifactId 和 expectedVersion，保留原版。",
+            "保存方案、脚本或文本分镜；修改时同时传 artifactId 和 expectedVersion，保留原版。"
+            "正文按非空白 Unicode 字符计数（含标点、英文、数字、Markdown 标记，不含 title），"
+            "遵守项目 contentLimits，超限返回 CONTENT_LENGTH 且不保存；成功返回实际 contentCheck。",
             ArtifactSave,
             "write",
             _artifact_save,

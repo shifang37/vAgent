@@ -6,7 +6,6 @@ Requires a running `vagent web --mcp-local`. Never loads or prints credentials.
 import argparse
 import asyncio
 import json
-import re
 import sys
 import time
 from datetime import UTC, datetime
@@ -14,6 +13,8 @@ from pathlib import Path
 from uuid import uuid4
 
 import httpx
+
+from vagent.quality import COUNT_METHOD, character_count, memory_conflicts
 
 TASKS = [
     (
@@ -49,26 +50,44 @@ def quality_findings(report):
         return []
     snapshot = report["runs"][-1]["snapshot"]
     findings = []
-    if "暖色" in snapshot["project"]["goal"] and "雨夜" in snapshot["project"]["style"]:
+    project = snapshot["project"]
+    conflicts = list(
+        dict.fromkeys(
+            issue
+            for item in report["runs"]
+            for issue in memory_conflicts(item["snapshot"]["project"], project)
+        )
+    )
+    if conflicts:
         findings.append(
             {
                 "code": "MEMORY_FIELD_CONTRADICTION",
-                "field": "project.goal",
-                "detail": "style 已更新为雨夜，但 goal 仍包含旧暖色描述；记忆字段存在语义冗余。",
+                "field": "project",
+                "detail": "；".join(conflicts),
             }
         )
     for artifact in snapshot["artifacts"]:
         for version in artifact["versions"]:
-            han_count = len(re.findall(r"[\u4e00-\u9fff]", version["content"]))
-            if han_count > 300:
+            count = character_count(version["content"])
+            checked = version.get("contentCheck")
+            if checked and (checked["characters"] != count or checked["method"] != COUNT_METHOD):
+                findings.append(
+                    {
+                        "code": "CONTENT_CHECK_MISMATCH",
+                        "artifactId": artifact["id"],
+                        "version": version["version"],
+                        "detail": "保存的统计与原文重新计数不一致。",
+                    }
+                )
+            if count > 300:
                 findings.append(
                     {
                         "code": "CONTENT_LENGTH",
                         "artifactId": artifact["id"],
                         "version": version["version"],
-                        "hanCharacters": han_count,
+                        "nonWhitespaceCharacters": count,
                         "allCharacters": len(version["content"]),
-                        "detail": "仅汉字数已超过测试提示词的300字要求；模型自述不作为验收依据。",
+                        "detail": "正文非空白字符超过本组任务的300字上限；含标点、英文、数字和 Markdown。",
                     }
                 )
     return findings
@@ -214,14 +233,14 @@ async def evaluate(args):
         report["status"] = "passed" if all(report["checks"].values()) else "assertion-failed"
         report["qualityFindings"] = quality_findings(report)
         if report["status"] == "passed" and report["qualityFindings"]:
-            report["status"] = "passed-with-quality-findings"
+            report["status"] = "quality-failed"
         report["finishedAt"] = datetime.now(UTC).isoformat()
         persist()
         print(
             json.dumps({"status": report["status"], "checks": report["checks"]}, ensure_ascii=False),
             flush=True,
         )
-        return 0 if report["status"].startswith("passed") else 1
+        return 0 if report["status"] == "passed" else 1
 
 
 if __name__ == "__main__":
@@ -242,10 +261,10 @@ if __name__ == "__main__":
             and all(report["checks"].values())
             and all(item["run"]["status"] == "completed" for item in report["runs"])
         ):
-            report["status"] = "passed-with-quality-findings" if report["qualityFindings"] else "passed"
+            report["status"] = "quality-failed" if report["qualityFindings"] else "passed"
         args.output.write_text(json.dumps(report, ensure_ascii=False, indent=2), encoding="utf-8")
         print(json.dumps(report["qualityFindings"], ensure_ascii=False))
-        raise SystemExit(0)
+        raise SystemExit(0 if report.get("status") == "passed" else 1)
     if not args.live:
         parser.error("实际模型验收必须显式传入 --live。")
     raise SystemExit(asyncio.run(evaluate(args)))

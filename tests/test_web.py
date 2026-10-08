@@ -185,3 +185,54 @@ async def test_mcp_startup_failure_does_not_leave_store_locked(tmp_path):
         async with ApplicationService.open(config):
             pass
     assert not (config.home / "instance.lock").exists()
+
+
+async def test_web_exposes_saved_length_check_and_rejects_oversize_revision(tmp_path):
+    artifact_id = None
+
+    def respond(messages, step):
+        nonlocal artifact_id
+        if step == 0:
+            return tool_call("artifact_save", {"kind": "brief", "title": "版本测试", "content": "雨夜咖啡"})
+        if step == 1:
+            artifact_id = json.loads(messages[-1].content)["data"]["artifactId"]
+            return AIMessage(content="已保存")
+        if step == 2:
+            return tool_call(
+                "artifact_save",
+                {
+                    "artifactId": artifact_id,
+                    "expectedVersion": 1,
+                    "kind": "brief",
+                    "title": "版本测试",
+                    "content": "雨夜咖啡馆",
+                },
+            )
+        return AIMessage(content="已修改完成")
+
+    async with client_for(tmp_path, ScriptedModel(respond)) as (client, service):
+        await client.post(
+            "/api/sessions/quality/messages",
+            json={
+                "prompt": "保存brief，正文不超过4字",
+                "clientRequestId": "quality-save",
+            },
+        )
+        await service.task
+        data = (await client.get("/api/sessions/quality")).json()
+        assert data["project"]["contentLimits"] == {"brief": 4}
+        assert data["artifacts"][0]["versions"][0]["contentCheck"]["characters"] == 4
+        response = await client.post(
+            "/api/sessions/quality/messages",
+            json={
+                "prompt": "继续修改方案",
+                "clientRequestId": "quality-revise",
+            },
+        )
+        await service.task
+        failed = (await client.get(f"/api/runs/{response.json()['id']}")).json()
+        assert failed["status"] == "failed" and failed["errorCode"] == "QUALITY_UNRESOLVED"
+        assert any(event.get("errorCode") == "CONTENT_LENGTH" for event in failed["events"])
+        artifact = (await client.get(f"/api/artifacts/{artifact_id}")).json()
+        assert len(artifact["versions"]) == 1
+        assert artifact["versions"][0]["content"] == "雨夜咖啡"

@@ -2,6 +2,8 @@
 
 验收日期：2026-10-08。结论：真实编排、工具闭环与持久化检查通过；同时发现两项内容质量问题，不能把 Run 的 completed 当成全部需求合格。
 
+后续更新：这两项问题已加入后端校验和离线回归，见 [质量校验验收](./QUALITY_ACCEPTANCE.md)。本文件保留首轮真实模型结果与原始问题，不将离线修复结果写成新的真实模型验收。
+
 ## 实际接入
 
 前端 → 同源 FastAPI / SSE → ApplicationService → 原有 LangGraph AgentRunner → DeepSeek / 内置工具 / MCP stdio。CLI 复用同一应用服务与工具配置。未接入视频生成供应商。

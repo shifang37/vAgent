@@ -2,7 +2,7 @@
 
 面向视频创作的 Agent 实习项目，使用 **Python + DeepSeek + LangGraph**，自主设计上下文、项目记忆、Skills、工具执行与护栏，再接入视频生成模型。
 
-当前已实现 **Python CLI + 本地 Web Agent**，前端通过同源 API/SSE 调用共享 LangGraph Runner。2026-10-08 完成真实 DeepSeek、持久记忆、Skills、8 种工具（含 2 个本地 MCP 工具）的编排验收。当前交付文本创作材料，尚未接入视频生成 API；发现的记忆一致性与字数约束问题见 [编排测试报告](./docs/AGENT_ORCHESTRATION_ACCEPTANCE.md)。
+当前已实现 **Python CLI + 本地 Web Agent**，前端通过同源 API/SSE 调用共享 LangGraph Runner。2026-10-08 完成真实 DeepSeek、持久记忆、Skills、8 种工具（含 2 个本地 MCP 工具）的编排验收，随后补齐记忆冲突与正文长度的后端校验。当前交付文本创作材料，尚未接入视频生成 API；首轮发现见 [编排测试报告](./docs/AGENT_ORCHESTRATION_ACCEPTANCE.md)，修复与验证范围见 [质量校验验收](./docs/QUALITY_ACCEPTANCE.md)。
 
 ## 当前进度
 
@@ -17,6 +17,7 @@
 | 03 任务评测 | 已完成首组真实编排验收 | 3 轮固定任务 + 1 次浏览器直发；大规模任务集与策略对比待实现 |
 | 04 本地 Web | 已接入真实 Agent | 同源 API/SSE、停止/恢复、产物版本、上下文/记忆/工具/用量观测 |
 | MCP | 已实现并验证 stdio | 显式只读白名单、工具发现、Schema 校验、取消/超时、结果大小限制 |
+| 内容质量校验 | 已实现并通过离线回归 | 记忆字段职责、旧事实残留检查、持久字数上限、保存前计数、未纠正错误禁止报告完成 |
 | 视频工具 | 待实现 | 模拟视频 Job、真实供应商接入 |
 
 每个独立完成的代码部分都同步更新本 README、提交并推送 GitHub。阶段目标见 [M1 计划](./M1_PLAN.md) 和 [Harness 设计](./AGENT_HARNESS_DESIGN.md)。
@@ -45,6 +46,25 @@ $env:VAGENT_HOME = Join-Path $PWD '.vagent/web'
 ```
 
 本次真实调用共 13 个模型步骤、17 次工具调用；输入 71,645、输出 3,498 Token。原始报告保存在被忽略的 `output/agent-live-acceptance.json`，可复现步骤和发现见 [验收记录](./docs/AGENT_ORCHESTRATION_ACCEPTANCE.md)。
+
+## 记忆一致性与字数上限
+
+`goal` 只保存创作目的和核心信息，`audience` / `style` 分别保存受众和风格。更新时检查目标中的字段重复，以及目标/约束中残留的旧受众、旧风格；操作日志中的历史项目快照也用于检查旧数据。发现冲突返回 `MEMORY_CONFLICT`，整次更新不落盘、revision 不变。模型需要在同一次更新中修正相关字段；历史产物正文不会自动改写。
+
+正文的“字数”统一采用**非空白 Unicode 字符数**：汉字、英文、数字、标点、Markdown 标记均计入，空格和换行不计，标题不计。支持明确的数字上限，例如：
+
+```text
+保存一份 brief，正文300字以内。
+方案不超过100字，分镜不超过300字。
+brief 改为500字以内。
+brief 取消字数限制。
+```
+
+后端在接收写作请求时，把上限写入项目 `contentLimits` 并更新 revision；同一请求 ID 不会重复修改，只读请求不修改它。上限跨轮次、跨重启保留，普通工具不能放宽或删除；未指定种类的正文上限是项目默认值。标题、纯回复要求、代码块、引用行和 Web 标记的附件参考材料不用于设置正文上限。
+
+`artifact_save` 在写入版本前计数。超限返回实际计数和 `CONTENT_LENGTH`，不创建产物或新版本；成功返回并保存 `contentCheck`。Web 展示上限、实际计数和保存时的校验记录。旧版本缺少记录时明确显示“未记录字数校验”，不会补造通过结果。
+
+校验错误需由模型在原执行预算内纠正；若没有纠正便直接结束，Run 返回 `QUALITY_UNRESOLVED`，不采用模型的成功声明。固定任务评测重新读取正文计数，有质量问题时返回失败退出码。当前检查针对明确数字上限和字段原值的文本重复/残留，不承诺任意自然语言约束或同义改写的完整语义判断。详见 [质量校验验收](./docs/QUALITY_ACCEPTANCE.md)。
 
 ## 快速开始（Windows PowerShell）
 
@@ -189,6 +209,7 @@ src/vagent/
   usage.py     Token 与缓存用量归一化、覆盖率与 Run 汇总
   cache.py     Redis 精确回答缓存、TTL、超时与故障回退
   context.py   上下文组装与完整轮次裁剪
+  quality.py   记忆冲突、用户字数要求与正文计数校验
   tools.py     工具注册、Pydantic 校验、项目与产物操作
   storage.py   单写锁、事务、原子替换、操作日志
   skills.py    技能发现、元信息与按需正文读取
@@ -264,7 +285,7 @@ Python 版保留 schema v1 的领域数据结构和工具 JSON 字段（如 `art
 .\.venv\Scripts\python.exe -m build --no-isolation --outdir dist/python
 ```
 
-本地 Python 3.12 测试结果：**120 passed，1 skipped**。跳过的是当前 Windows 账户无符号链接创建权限的测试。测试覆盖工具闭环、请求去重、错误与超时、取消、并发拒绝、版本/项目隔离、写入回滚、旧状态读取、上下文预算、Skills、DeepSeek HTTP 协议，以及真实子进程强退后的恢复、部分工具提交、累计预算、终态补交、缓存 Token 字段、缺失用量与加权命中率。上下文 v2 另验证了稳定前缀、确定性排序、无损 JSON 空白压缩、完整协议配对、分页读取及旧版上下文恢复兼容。
+本地 Python 3.12 测试结果：**151 passed，1 skipped**。跳过的是当前 Windows 账户无符号链接创建权限的测试。测试覆盖工具闭环、请求去重、错误与超时、取消、并发拒绝、版本/项目隔离、写入回滚、旧状态读取、上下文预算、Skills、DeepSeek HTTP 协议，以及真实子进程强退后的恢复、部分工具提交、累计预算、终态补交、缓存 Token 字段、缺失用量与加权命中率。上下文 v2 另验证了稳定前缀、确定性排序、无损 JSON 空白压缩、完整协议配对、分页读取及旧版上下文恢复兼容。质量修复新增 31 项用例，覆盖混合字符计数、旧事实冲突、上限持久化、模型纠错、失败完成保护及 Web 版本验证。
 
 已验证离线 CLI，以及 wheel 安装到独立虚拟环境后在仓库目录之外运行 `skills list`、`demo`、`inspect`。本次新增验证：新建独立虚拟环境安装 wheel，保存产物后取消，再从仓库外通过 CLI `resume` 完成原 Run，仍仅有一个产物；`pip check` 通过。源码包与 wheel 仅本地构建，未发布 PyPI。GitHub Actions 配置 Ubuntu/Windows、Python 3.11/3.12 检查，远端结果见 [Actions](https://github.com/shifang37/vAgent/actions)。
 
@@ -272,4 +293,4 @@ Python 版保留 schema v1 的领域数据结构和工具 JSON 字段（如 `art
 
 上下文 v2 的 wheel 已在同一独立环境重新安装验证：仓库外执行 `skills list`、取消后 `resume`、`inspect`、`usage --run` 均通过，格式版本保持 2、最终仍仅有一个产物，`pip check` 通过。v1 检查点兼容由自动化测试覆盖，详细记录见 [上下文优化验收](./docs/CONTEXT_OPTIMIZATION_ACCEPTANCE.md)。
 
-自动化测试验证工程行为。首组真实模型编排已完成，但少量固定任务不代表生产成功率；仍需改进记忆字段一致性与产物约束校验，再扩展真实任务评测、配置向导、模拟视频 Job 和真实视频模型接入。
+自动化测试验证工程行为。首组真实模型编排已完成，质量校验修复通过离线回归，尚未重新进行付费模型验收；少量固定任务不代表生产成功率。下一步扩展真实任务评测、配置向导，再推进模拟视频 Job 和真实视频模型接入。

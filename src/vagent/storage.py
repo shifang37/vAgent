@@ -8,7 +8,7 @@ import threading
 from collections.abc import Callable
 from datetime import UTC, datetime
 from pathlib import Path
-from typing import Any, Literal, TypeVar
+from typing import Annotated, Any, Literal, TypeVar
 from uuid import uuid4
 
 from langchain_core.messages import messages_from_dict
@@ -42,6 +42,9 @@ class Project(Record):
     style: str
     constraints: list[str]
     plan: list[PlanStep]
+    content_limits: dict[Literal["all", "brief", "script", "storyboard"], Annotated[int, Field(ge=1)]] = (
+        Field(default_factory=dict)
+    )
 
 
 class StoredMessage(Record):
@@ -55,11 +58,18 @@ class Session(Record):
     latest_run_id: str | None = None
 
 
+class ContentCheck(Record):
+    characters: int = Field(ge=1)
+    max_characters: int | None = Field(default=None, ge=1)
+    method: Literal["unicode_non_whitespace_v1"]
+
+
 class ArtifactVersion(Record):
     version: int = Field(ge=1)
     title: str
     content: str
     created_at: str
+    content_check: ContentCheck | None = None
 
 
 class Artifact(Record):
