@@ -8,9 +8,9 @@ from uuid import uuid4
 import httpx
 
 from vagent.cache import AnswerCache
-from vagent.config import Config, assert_id
+from vagent.config import Config, ConfigUpdate, assert_id, config_sources, require_key, update_local_settings
 from vagent.context import ContextBuilder
-from vagent.errors import AppError
+from vagent.errors import AppError, public_error
 from vagent.mcp_bridge import connect_mcp, server_configs
 from vagent.models import DeepSeekModel
 from vagent.runner import AgentRunner, RunPolicy
@@ -29,7 +29,10 @@ class ApplicationService:
         self.task = None
         self.cancelled = None
         self.active_run_id = None
-        self.subscribers: set[asyncio.Queue] = set()
+        self.subscribers: dict[asyncio.Queue, str] = {}
+        self.drafts: dict[str, dict] = {}
+        self.validation = {"status": "unverified"}
+        self.config_busy = False
 
     @classmethod
     @asynccontextmanager
@@ -89,7 +92,87 @@ class ApplicationService:
                 "seconds": self.policy.timeout_seconds,
             },
             "videoGeneration": False,
+            "configuration": self.configuration(),
         }
+
+    def configuration(self):
+        sources = config_sources(self.config)
+        return {
+            "model": self.config.model,
+            "apiKeyConfigured": bool(self.config.api_key and self.config.api_key.strip()),
+            "sources": sources,
+            "editable": {key: source not in {"environment", "provided"} for key, source in sources.items()},
+            "validation": copy.deepcopy(self.validation),
+            "busy": self.config_busy or bool(self.task and not self.task.done()),
+        }
+
+    def _check_config_idle(self):
+        if self.config_busy or (self.task and not self.task.done()):
+            raise AppError("CONFIG_BUSY", "请等待当前执行或配置验证结束后再修改配置。")
+
+    def save_configuration(self, update: ConfigUpdate):
+        self._check_config_idle()
+        previous = (self.config.api_key, self.config.model)
+        self.config = update_local_settings(self.config, update)
+        if previous != (self.config.api_key, self.config.model):
+            self.validation = {"status": "unverified"}
+        return self.configuration()
+
+    async def validate_configuration(self):
+        self._check_config_idle()
+        key = require_key(self.config.api_key)
+        self.config_busy = True
+        self.validation = {"status": "validating"}
+        try:
+            async with asyncio.timeout(15):
+                response = await self.http_client.post(
+                    "https://api.deepseek.com/chat/completions",
+                    headers={"Authorization": f"Bearer {key}"},
+                    json={
+                        "model": self.config.model,
+                        "messages": [{"role": "user", "content": "Reply OK."}],
+                        "max_tokens": 8,
+                        "thinking": {"type": "disabled"},
+                        "stream": False,
+                    },
+                    timeout=15,
+                )
+                if response.status_code in {401, 403}:
+                    raise AppError("AUTH_ERROR", "DeepSeek 凭证无效或没有模型权限。")
+                if response.status_code == 429:
+                    raise AppError("RATE_LIMIT", "DeepSeek 请求限流，请稍后重试。")
+                response.raise_for_status()
+                body = response.json()
+                choices = body.get("choices") if isinstance(body, dict) else None
+                first = choices[0] if isinstance(choices, list) and choices else None
+                message = first.get("message") if isinstance(first, dict) else None
+                content = message.get("content") if isinstance(message, dict) else None
+                if not isinstance(content, str) or not content.strip():
+                    raise AppError("INVALID_RESPONSE", "验证未取得有效模型回复。")
+                usage = body.get("usage") or {}
+                usage = usage if isinstance(usage, dict) else {}
+
+                def token_count(name):
+                    value = usage.get(name)
+                    return value if type(value) is int and value >= 0 else None
+
+                self.validation = {
+                    "status": "verified",
+                    "checkedAt": now(),
+                    "model": self.config.model,
+                    "inputTokens": token_count("prompt_tokens"),
+                    "outputTokens": token_count("completion_tokens"),
+                }
+        except asyncio.CancelledError:
+            self.validation = {"status": "unverified"}
+            raise
+        except Exception as error:
+            safe = public_error(error)
+            self.validation = {"status": "failed", "checkedAt": now(), "errorCode": safe.code}
+            raise safe from None
+        finally:
+            self.config_busy = False
+        return self.configuration()
 
     def sessions(self):
         state = self.store.snapshot()
@@ -134,6 +217,7 @@ class ApplicationService:
             "messages": visible,
             "run": self.run_view(run) if run else None,
             "artifacts": [a for a in state["artifacts"].values() if a["projectId"] == session_id],
+            "draft": copy.deepcopy(self.drafts.get(session_id)),
         }
 
     @staticmethod
@@ -190,11 +274,23 @@ class ApplicationService:
             raise AppError("NOT_FOUND", "没有这个 Run。")
         return record
 
-    def notify(self, session_id):
-        for queue in tuple(self.subscribers):
+    def subscribe(self, session_id):
+        queue = asyncio.Queue(maxsize=64)
+        self.subscribers[queue] = session_id
+        return queue
+
+    def notify(self, session_id, event=None):
+        for queue, subscribed_id in tuple(self.subscribers.items()):
+            if subscribed_id != session_id:
+                continue
             if queue.full():
-                queue.get_nowait()
-            queue.put_nowait(session_id)
+                while not queue.empty():
+                    queue.get_nowait()
+                # A slow reader gets current text and sequence in a snapshot,
+                # never an arbitrary hole in its token stream.
+                queue.put_nowait({"type": "snapshot"})
+            else:
+                queue.put_nowait(event or {"type": "snapshot"})
 
     async def start(self, session_id, prompt, request_id, *, read_only=False):
         assert_id(session_id)
@@ -206,6 +302,8 @@ class ApplicationService:
                 if record["prompt"] != prompt or record.get("readOnly", False) != read_only:
                     raise AppError("REQUEST_CONFLICT", "相同请求 ID 不能关联不同需求或模式。")
                 return self.run_view(record)
+        if self.config_busy:
+            raise AppError("CONFIG_BUSY", "配置验证正在进行，请稍后发送需求。")
         if self.task and not self.task.done():
             raise AppError("RUN_BUSY", "已有任务正在运行，请等待完成或停止后重试。")
         runner = self.runner(read_only=read_only)  # Missing keys fail before creating a run.
@@ -215,6 +313,8 @@ class ApplicationService:
         record = self.run_record(run_id)
         if record["status"] == "completed":
             return self.run_view(record)
+        if self.config_busy:
+            raise AppError("CONFIG_BUSY", "配置验证正在进行，请稍后继续任务。")
         if self.task and not self.task.done():
             raise AppError("RUN_BUSY", "已有任务正在运行，请等待完成或停止后重试。")
         runner = self.runner(read_only=record.get("readOnly", False))
@@ -229,6 +329,17 @@ class ApplicationService:
         def event_sink(event):
             if event.get("runId"):
                 self.active_run_id = event["runId"]
+            if event["type"] == "assistant.delta":
+                draft = self.drafts.get(session_id)
+                if draft is None or (draft["runId"], draft["step"]) != (event["runId"], event["step"]):
+                    draft = {"runId": event["runId"], "step": event["step"], "text": ""}
+                    self.drafts[session_id] = draft
+                draft["text"] += event["text"]
+                draft["sequence"] = event["sequence"]
+                self.notify(session_id, event)
+                return  # Drafts never enter state.json or the event journal.
+            if event["type"] in {"model.started", "model.completed", "assistant.discarded", "run.completed"}:
+                self.drafts.pop(session_id, None)
             if self.active_run_id:
 
                 def record_event(draft):
@@ -252,6 +363,7 @@ class ApplicationService:
             except Exception as error:
                 errors.append(error)
             finally:
+                self.drafts.pop(session_id, None)
                 ready.set()
                 self.notify(session_id)
 

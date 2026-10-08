@@ -4,7 +4,7 @@ DeepSeek Harness 风格的本地创作工作台，已连接真实 Agent。
 
 ## 启动
 
-在仓库根目录安装 `requirements-dev.lock`，在 `.env` 中配置 DeepSeek Key：
+在仓库根目录安装 `requirements-dev.lock`。启动后可在配置向导中填写 DeepSeek Key，也可使用 `.env`：
 
 ```powershell
 $env:VAGENT_HOME = Join-Path $PWD '.vagent/web'
@@ -16,6 +16,8 @@ $env:VAGENT_HOME = Join-Path $PWD '.vagent/web'
 ## 交互与数据
 
 - 创建、切换、搜索服务端会话；刷新恢复选中的会话。
+- 设置页保存本地 Key/模型，显示配置来源；独立的验证按钮只发起一次短模型请求，保存本身不产生模型费用。
+- 回复逐段显示为草稿；刷新或 SSE 重连补齐当前草稿，完成后显示正式回复，停止或失败清除草稿。
 - 真正的 DeepSeek model/tools 循环，Skills 按需读取；分镜模式将输出要求加入需求。
 - 只读模式在后端过滤写工具；模型不能通过改参数绕开。
 - 文字附件在发送时作为明确标记的参考材料加入需求，合计最多 20,000 字符。
@@ -29,18 +31,20 @@ $env:VAGENT_HOME = Join-Path $PWD '.vagent/web'
 
 ## API
 
-实现 `/api/health`、`/api/session-token`、会话列表/创建/快照、消息提交、Run 状态/停止/恢复、产物列表/历史版本，以及 `/api/events?sessionId=...`。
+实现 `/api/health`、`/api/session-token`、`GET/PATCH /api/config`、`POST /api/config/validate`、会话列表/创建/快照、消息提交、Run 状态/停止/恢复、产物列表/历史版本，以及 `/api/events?sessionId=...`。
 
 发送消息使用 `clientRequestId`。响应丢失时前端复用该 ID，后端返回原 Run，避免重复付费执行。同一 ID 对应不同需求或只读模式会冲突。
 
-SSE 首先发送快照；每次相关状态变化重新发送持久快照，15 秒心跳。断线重连恢复最新快照，不承诺永久事件流重放；事件编号保存在各 Run 内。当前模型回复仍整段返回，工具步骤和状态实时更新。
+SSE 首先发送 `snapshot`，包含持久状态和可选的内存 `draft`；正文通过 `assistant.delta` 推送，携带 Run ID、模型步、序号和文字。客户端拒绝旧步和重复序号，发现缺口时重新连接获取快照。每个订阅队列最多 64 项，慢客户端溢出时回退到当前快照；15 秒心跳，不承诺永久事件重放。
+
+Token 草稿不写入状态文件或事件日志。模型响应通过完成标记、完整 JSON 和质量检查后，`model.completed` 触发正式消息快照；中断、取消或截断丢弃草稿。工具参数只在整步响应完成后执行，不执行半截 JSON。流式 usage 和缓存字段按完整调用统计，不逐块累加累计值；缺失保持未知。
 
 ## 本地访问边界
 
 仅监听 127.0.0.1，Host 限定 localhost/127.0.0.1 与指定端口；Origin 必须精确同源，拒绝 cross-site/same-site Fetch Metadata。写请求需要 CSRF Token 和 JSON，请求体最多 128 KiB。静态文件只提供 4 个允许的资源，不提供 `.env` 或数据目录。
 
-API Key 仅来自服务端环境或本地 `.env`，不返回前端。受信任的本机进程仍可调用本地接口；本服务不是多用户鉴权系统，不支持局域网公开部署。CLI 与 Web 同一目录互斥，服务退出前等待当前 Run 取消完成。
+API Key 来自数据目录 `config.yml`、服务端环境或本地 `.env`，读取接口只返回是否已配置。密码框提交后清空，关闭设置时也清空，不写入 localStorage/sessionStorage。环境和启动配置优先且在页面锁定；本地保存立即对下一次运行生效。运行或验证期间拒绝配置修改，验证期间拒绝新执行。受信任的本机进程仍可调用接口；本服务不是多用户鉴权系统，不支持局域网公开部署。
 
-当前没有在线 Key 设置、模型切换、配置向导、逐 Token 流或视频生成。环境配置变化后重新启动服务。
+验证使用固定 DeepSeek 端点、最多 8 个输出 Token、15 秒超时、不重试；错误内容不回显供应商原文。验证状态在服务重启后重置，保存相同配置不清除已验证状态。环境配置变化后需重启服务。当前仍没有视频生成。
 
 质量规则见 [质量校验验收](../docs/QUALITY_ACCEPTANCE.md)。例如发送“brief 正文300字以内”会设置持久上限；只有用户明确修改/取消才能放宽。后端超限或记忆冲突会返回工具错误，模型未纠正就结束时 Run 失败。源码更新后需正常重启已有服务再刷新页面，以加载新的校验逻辑。

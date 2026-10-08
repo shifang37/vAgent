@@ -80,6 +80,7 @@ async def test_deepseek_cache_fields_persist_and_weighted_hit_rate_survives_reop
         result = await AgentRunner(
             store=store,
             model=DeepSeekModel("test-placeholder", http_client=client),
+            stream_output=False,
             tools=create_project_tools(),
             on_event=events.append,
         ).run("coffee", "test")
@@ -114,6 +115,7 @@ async def test_absent_http_usage_is_unknown_not_a_zero_cache_hit(store, usage, h
         result = await AgentRunner(
             store=store,
             model=DeepSeekModel("test-placeholder", http_client=client),
+            stream_output=False,
             tools=create_project_tools(),
         ).run("coffee", "test")
     call = result["modelCalls"][0]

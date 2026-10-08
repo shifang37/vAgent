@@ -781,6 +781,17 @@ dialog .actions {
   gap: 10px;
   margin-top: 22px;
 }
+dialog .config-actions {
+  flex-wrap: wrap;
+}
+.draft-text::after {
+  content: " ▍";
+  color: var(--blue);
+}
+dialog input:disabled {
+  color: #838c9b;
+  background: #f0f2f5;
+}
 .library-item {
   display: flex;
   flex-direction: column;

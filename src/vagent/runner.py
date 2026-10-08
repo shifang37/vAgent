@@ -26,7 +26,7 @@ from vagent.config import assert_id
 from vagent.context import ContextBuilder
 from vagent.errors import AppError, failure, public_error
 from vagent.journal import RunJournal
-from vagent.models import AgentModel
+from vagent.models import AgentModel, StreamResponseError
 from vagent.quality import requested_content_limits, updated_content_limits
 from vagent.storage import FileStore, now
 from vagent.tools import ToolRegistry
@@ -45,7 +45,14 @@ MEMORY_CONFLICT 或 CONTENT_LENGTH 必须纠正后再报告完成；仍受当前
 你没有 shell、任意文件访问、联网搜索或视频生成权限。当前只能准备文本创作材料。
 不索取、读取或展示 API Key。不要虚构已经生成视频。"""
 
-RECOVERABLE_ERRORS = {"CANCELLED", "AUTH_ERROR", "RATE_LIMIT", "EXECUTION_ERROR", "MODEL_TIMEOUT"}
+RECOVERABLE_ERRORS = {
+    "CANCELLED",
+    "AUTH_ERROR",
+    "RATE_LIMIT",
+    "EXECUTION_ERROR",
+    "MODEL_TIMEOUT",
+    "STREAM_INTERRUPTED",
+}
 
 
 @dataclass(frozen=True)
@@ -162,6 +169,7 @@ class AgentRunner:
         on_event: Callable[[dict], None] | None = None,
         read_only: bool = False,
         answer_cache: AnswerCache | None = None,
+        stream_output: bool = True,
     ):
         self.store, self.model, self.tools = store, model, tools
         self.read_only = read_only
@@ -172,6 +180,7 @@ class AgentRunner:
         self.context = context or ContextBuilder()
         self.skills = skills or []
         self.on_event = on_event
+        self.stream_output = stream_output
 
     @property
     def system_prompt(self):
@@ -386,7 +395,28 @@ class AgentRunner:
                 nonlocal attempt_started
                 attempt_started = time.monotonic()
                 journal.start_model_call(attempt_step)
-                reply = await model.generate(report.messages, specs)
+                sequence = 0
+
+                def delta(text):
+                    nonlocal sequence
+                    check_active(cancelled, deadline)
+                    sequence += 1
+                    self.emit(
+                        {
+                            "type": "assistant.delta",
+                            "runId": record["id"],
+                            "step": attempt_step,
+                            "sequence": sequence,
+                            "text": text,
+                        }
+                    )
+
+                streaming = getattr(model, "generate_stream", None) if self.stream_output else None
+                reply = (
+                    await streaming(report.messages, specs, delta)
+                    if callable(streaming)
+                    else await model.generate(report.messages, specs)
+                )
                 call = journal.finish_model_call(
                     attempt_step,
                     status="responded",
@@ -403,6 +433,7 @@ class AgentRunner:
                         status="cancelled" if error.code == "CANCELLED" else "failed",
                         duration=time.monotonic() - attempt_started,
                         error_code=error.code,
+                        usage=error.usage if isinstance(error, StreamResponseError) else None,
                     )
 
             try:
@@ -513,10 +544,31 @@ class AgentRunner:
                         )
             except asyncio.CancelledError:
                 finish_attempt(AppError("CANCELLED", "执行已停止，保留已完成产物。"))
+                self.emit({"type": "assistant.discarded", "runId": record["id"], "step": attempt_step})
                 raise
             except Exception as error:
                 safe = public_error(error)
                 finish_attempt(safe)
+                if attempt_started is not None:
+                    status = getattr(error, "status_code", None)
+                    cause, cause_types = error, []
+                    for _ in range(5):
+                        cause = cause.__cause__ or cause.__context__
+                        if cause is None:
+                            break
+                        cause_types.append(type(cause).__name__)
+                    self.emit(
+                        {
+                            "type": "model.failed",
+                            "runId": record["id"],
+                            "step": attempt_step,
+                            "errorCode": safe.code,
+                            "errorType": type(error).__name__,
+                            "causeTypes": cause_types,
+                            "httpStatus": status if type(status) is int and 100 <= status <= 599 else None,
+                        }
+                    )
+                self.emit({"type": "assistant.discarded", "runId": record["id"], "step": attempt_step})
                 if safe.code in RECOVERABLE_ERRORS:
                     # Leave this node pending in SQLite. Only the explicit resume
                     # command may run it again; raw provider errors never reach it.
@@ -524,6 +576,15 @@ class AgentRunner:
                     raise safe from None
                 next_state = finish_error(next_state, safe)
             publish_progress(next_state)
+            if next_state["status"] in {"running", "completed"}:
+                self.emit(
+                    {
+                        "type": "model.completed",
+                        "runId": record["id"],
+                        "step": attempt_step,
+                        "final": next_state["status"] == "completed",
+                    }
+                )
             return next_state
 
         async def tools_node(state: GraphState) -> GraphState:

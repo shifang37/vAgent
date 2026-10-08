@@ -39,6 +39,38 @@ def show_event(event: dict) -> None:
         print(f"[工具结果] {event['name']}: {'成功' if event['ok'] else '失败'}", flush=True)
 
 
+class EventDisplay:
+    def __init__(self):
+        self.text = ""
+        self.final_text = None
+
+    def __call__(self, event):
+        kind = event["type"]
+        if kind == "assistant.delta":
+            if not self.text:
+                print("\nAgent > ", end="", flush=True)
+            self.text += event["text"]
+            print(event["text"], end="", flush=True)
+            return
+        if kind in {"model.completed", "assistant.discarded", "run.completed"} and self.text:
+            print(flush=True)
+            if kind == "assistant.discarded":
+                print("[草稿未完成，已丢弃]", flush=True)
+            self.final_text = self.text if kind == "model.completed" and event.get("final") else None
+            self.text = ""
+        show_event(event)
+
+    def finish(self, result, *, chat=False):
+        if self.final_text != result["answer"]:
+            print(f"\n{'Agent > ' if chat else ''}{result['answer']}")
+        suffix = (
+            ""
+            if chat
+            else f" Run {result['id']}；模型 {result['modelSteps']} 步，工具 {result['toolCalls']} 次"
+        )
+        print(f"[{result['status']}]{suffix}")
+
+
 async def run_agent(args: argparse.Namespace) -> int:
     config = load_config()
     async with AsyncExitStack() as stack:
@@ -55,7 +87,8 @@ async def run_agent(args: argparse.Namespace) -> int:
         service = await stack.enter_async_context(
             ApplicationService.open(runtime_config, model=model, existing_store=store)
         )
-        runner = service.runner(read_only=read_only, on_event=show_event)
+        display = EventDisplay()
+        runner = service.runner(read_only=read_only, on_event=display)
         session_id = saved["sessionId"] if saved else args.session
         print(f"模型：{model.name}\n会话：{session_id}\n数据：{config.home}")
         if args.command == "chat":
@@ -71,8 +104,10 @@ async def run_agent(args: argparse.Namespace) -> int:
                     return 0
                 if not prompt.strip():
                     continue
+                display = EventDisplay()
+                runner.on_event = display
                 result = await runner.run(args.session, prompt)
-                print(f"\nAgent > {result['answer']}\n[{result['status']}]")
+                display.finish(result, chat=True)
                 show_usage(result)
                 show_resume_hint(result)
                 if result["status"] == "cancelled":
@@ -82,9 +117,7 @@ async def run_agent(args: argparse.Namespace) -> int:
         else:
             prompt = "演示读取项目和保存咖啡店方案。" if args.command == "demo" else args.prompt
             result = await runner.run(args.session, prompt, request_id=getattr(args, "request_id", None))
-        print(
-            f"\n{result['answer']}\n[{result['status']}] Run {result['id']}；模型 {result['modelSteps']} 步，工具 {result['toolCalls']} 次"
-        )
+        display.finish(result)
         show_usage(result)
         show_resume_hint(result)
         return 0 if result["status"] == "completed" else 130 if result["status"] == "cancelled" else 1

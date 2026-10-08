@@ -32,6 +32,7 @@ test-results/
 .env.*
 !.env.example
 !.env.sample
+/config.yml
 *.local.yml
 *.local.yaml
 *.local.json

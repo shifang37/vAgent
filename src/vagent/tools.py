@@ -288,7 +288,12 @@ def create_project_tools() -> ToolRegistry:
             _project_update,
         ),
         ToolDefinition(
-            "plan_update", "保存复杂任务的简短执行清单；简单问题无需调用。", PlanUpdate, "write", _plan_update
+            "plan_update",
+            "保存复杂任务的简短执行清单，会增加项目 revision；简单问题无需调用。"
+            "同一批需要更新事实和计划时先调用 project_update，再调用 plan_update；后续更新使用最新 revision。",
+            PlanUpdate,
+            "write",
+            _plan_update,
         ),
         ToolDefinition(
             "artifact_save",

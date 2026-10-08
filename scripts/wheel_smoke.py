@@ -9,9 +9,20 @@ from pathlib import Path
 import httpx
 
 import vagent
-from vagent.config import Config
+from vagent.config import load_config
 from vagent.models import DemoModel
 from vagent.web import create_app
+
+
+class StreamingDemo(DemoModel):
+    deltas = 0
+
+    async def generate_stream(self, messages, tools, on_delta):
+        reply = await self.generate(messages, tools)
+        for offset in range(0, len(reply.content), 8):
+            self.deltas += 1
+            on_delta(reply.content[offset : offset + 8])
+        return reply
 
 
 async def main():
@@ -19,9 +30,9 @@ async def main():
     with tempfile.TemporaryDirectory(prefix="vagent-wheel-web-") as directory:
         assert Path(directory).resolve().parent == Path(tempfile.gettempdir()).resolve()
         with chdir(directory):
-            app = create_app(
-                Config(home=Path(directory) / "state", api_key=None, mcp_local=True), model=DemoModel()
-            )
+            env = {"VAGENT_HOME": str(Path(directory) / "state"), "VAGENT_MCP_LOCAL": "1"}
+            model = StreamingDemo()
+            app = create_app(load_config(env), model=model)
             async with app.router.lifespan_context(app):
                 async with httpx.AsyncClient(
                     transport=httpx.ASGITransport(app=app), base_url="http://127.0.0.1:3210"
@@ -31,6 +42,10 @@ async def main():
                     health = (await client.get("/api/health")).json()
                     assert len(health["mcp"][0]["tools"]) == 2
                     client.headers["X-CSRF-Token"] = (await client.get("/api/session-token")).json()["token"]
+                    settings = await client.patch("/api/config", json={"apiKey": "wheel-test-placeholder"})
+                    assert settings.status_code == 200 and settings.json()["apiKeyConfigured"]
+                    assert "wheel-test-placeholder" not in (await client.get("/api/config")).text
+                    assert load_config(env).api_key == "wheel-test-placeholder"
                     response = await client.post(
                         "/api/sessions/wheel/messages",
                         json={"prompt": "offline check", "clientRequestId": "wheel"},
@@ -39,6 +54,8 @@ async def main():
                     await app.state.service.task
                     result = (await client.get("/api/sessions/wheel")).json()
                     assert result["run"]["status"] == "completed" and len(result["artifacts"]) == 1
+                    assert model.deltas > 0 and result["draft"] is None
+                    assert all(event["type"] != "assistant.delta" for event in result["run"]["events"])
                     assert len(result["run"]["toolTrace"]) == 3
                     assert result["artifacts"][0]["versions"][0]["contentCheck"]["characters"] > 0
                     assert (await client.get("/.env")).status_code == 404
@@ -55,7 +72,7 @@ async def main():
                     assert any(e.get("errorCode") == "CONTENT_LENGTH" for e in rejected["run"]["events"])
             assert not (Path(directory) / "state" / "instance.lock").exists()
     print(
-        "PASS: installed wheel, Web assets, API, Runner, artifacts, quality rejection, real MCP discovery, cleanup."
+        "PASS: installed wheel, Web assets, local config, streaming Runner, artifacts, quality rejection, real MCP discovery, cleanup."
     )
 
 

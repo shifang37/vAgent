@@ -5,9 +5,11 @@
 > 设计依据：[产品设计](./DESIGN.md)、[Agent 选型与 Harness 设计](./AGENT_HARNESS_DESIGN.md)。  
 > 当前优先级：完成 M1-A，使用一个 DeepSeek API Key 验收独立 Agent。
 
-当前已补齐 SQLite 图检查点和 `vagent resume RUN_ID`，包含部分工具提交后的重放保护与累计预算验证，记录见 [持久恢复验收](./docs/RECOVERY_ACCEPTANCE.md)。2026-10-08 新增共享应用服务、本地 Web API/SSE 与只读 MCP；首组真实 DeepSeek 多轮编排已验证，发现记忆冗余与文本长度约束问题，详见 [编排验收](./docs/AGENT_ORCHESTRATION_ACCEPTANCE.md)。完整 A4 配置向导、逐 Token 流、大规模任务评测和视频阶段仍待完成。
+当前已补齐 SQLite 图检查点和 `vagent resume RUN_ID`，包含部分工具提交后的重放保护与累计预算验证，记录见 [持久恢复验收](./docs/RECOVERY_ACCEPTANCE.md)。2026-10-08 新增共享应用服务、本地 Web API/SSE 与只读 MCP；首组真实 DeepSeek 多轮编排已验证，发现记忆冗余与文本长度约束问题，详见 [编排验收](./docs/AGENT_ORCHESTRATION_ACCEPTANCE.md)。
 
 随后完成任务 1 的质量修复：后端检查记忆字段重复/旧事实残留，明确用户字数上限并持久保存，产物写入前执行实际计数，未纠正校验错误时不标记任务完成。151 项自动化测试通过、1 项跳过；本次没有重新发起付费模型验收，原样本保持不变。范围和后续验收方式见 [质量校验验收](./docs/QUALITY_ACCEPTANCE.md)。
+
+任务 2 已实现 A4 配置向导、CLI/Web 流式回复，以及 A5 的 9 类固定评测、状态独立评分、用量覆盖率和显式续跑。工程回归通过，完整真实评测仍因连接中断和分镜纠错预算耗尽而未全部通过。下一项先完成 A5 真实验收，不提前开始 M1-B；证据、失败记录和复测边界见 [M1-A 验收记录](./docs/M1A_ACCEPTANCE.md)。
 
 随后已加入单次模型调用与缓存 Token 用量观测，支持 `vagent usage` 查看已知用量和缺失项，记录见 [用量观测验收](./docs/USAGE_ACCEPTANCE.md)。本次真实编排已取得供应商 Token 与缓存命中数据，但不能外推生产命中率或节费收益。
 
@@ -80,7 +82,7 @@ M1-A 的 `artifact_save` 真正保存模型生成的内容，不在工具内部�
 
 ### 3.2 当前不实现
 
-真实视频 API、视频计费、播放器、FFmpeg、图生视频、首尾帧、视频延长、自动拼接、完整素材库、Studio、插件市场、MCP、多 Agent、任意 shell、任意文件系统操作、远程访问与多用户。
+真实视频 API、视频计费、播放器、FFmpeg、图生视频、首尾帧、视频延长、自动拼接、完整素材库、Studio、插件市场、多 Agent、任意 shell、任意文件系统操作、远程访问与多用户。MCP 已限于显式允许的只读 stdio 工具，不包含开放插件市场或写入服务。
 
 脚本和文本分镜可以作为创作产物提前实现；多镜头视频生成与逐镜头重做仍属于后续工作。
 

@@ -76,6 +76,8 @@ let reference = null,
   selectedArtifact = null,
   pendingRequest = null;
 let viewGeneration = 0;
+let dialogGeneration = 0,
+  configSubmitting = false;
 const currentRun = () => snapshot?.run;
 const isRunning = () => currentRun()?.status === "running";
 function toast(message) {
@@ -167,24 +169,42 @@ function newChat() {
 }
 function connectEvents(id, generation) {
   stream?.close();
-  stream = new EventSource(`/api/events?sessionId=${encodeURIComponent(id)}`);
-  stream.addEventListener("snapshot", (event) => {
-    if (generation !== viewGeneration) return;
+  const source = new EventSource(`/api/events?sessionId=${encodeURIComponent(id)}`);
+  stream = source;
+  source.addEventListener("snapshot", (event) => {
+    if (generation !== viewGeneration || stream !== source) return;
     try {
       const next = JSON.parse(event.data);
       const runChanged = next.run?.status !== snapshot?.run?.status;
       snapshot = next;
-      $("#connection-label").textContent = health?.apiKeyConfigured
-        ? "Agent 已连接"
-        : "待配置 API Key";
+      renderConnection();
       render();
       if (runChanged) refreshSessions().catch((error) => toast(error.message));
     } catch {
       toast("执行状态读取失败，请刷新页面。");
     }
   });
-  stream.onerror = () => {
-    if (generation === viewGeneration)
+  source.addEventListener("assistant.delta", (event) => {
+    if (generation !== viewGeneration || stream !== source) return;
+    try {
+      const delta = JSON.parse(event.data);
+      const run = currentRun();
+      if (run?.status !== "running" || run.id !== delta.runId || delta.step < run.modelSteps) return;
+      const previous = snapshot.draft;
+      const sameStep = previous?.runId === delta.runId && previous.step === delta.step;
+      if (sameStep && delta.sequence <= previous.sequence) return;
+      if (delta.step !== run.modelSteps || delta.sequence !== (sameStep ? previous.sequence + 1 : 1)) {
+        connectEvents(id, generation); // Reconnect starts with a complete current snapshot.
+        return;
+      }
+      snapshot.draft = { ...delta, text: (sameStep ? previous.text : "") + delta.text };
+      renderDraft();
+    } catch {
+      connectEvents(id, generation);
+    }
+  });
+  source.onerror = () => {
+    if (generation === viewGeneration && stream === source)
       $("#connection-label").textContent = "连接中断 · 正在重连";
   };
 }
@@ -207,6 +227,23 @@ async function selectSession(id) {
 function artifactCard(artifact) {
   const last = artifact.versions.at(-1);
   return `<button class="artifact-card" data-artifact="${escapeHTML(artifact.id)}"><span data-icon="file"></span><span><strong>${escapeHTML(last.title)}</strong><small>${escapeHTML(artifact.kind)} · v${last.version} · 已保存</small></span><span>↗</span></button>`;
+}
+function draftHTML() {
+  return snapshot?.draft?.text
+    ? `<div id="assistant-draft" class="message draft" aria-busy="true"><div class="agent-name"><img src="./mark.svg" alt="" />vagent <span class="demo-label">正在回复 · 草稿</span></div><span class="draft-text">${escapeHTML(snapshot.draft.text)}</span></div>`
+    : "";
+}
+function renderDraft() {
+  const conversation = $("#conversation");
+  const followLatest = conversation.scrollHeight - conversation.scrollTop - conversation.clientHeight < 80;
+  const existing = $("#assistant-draft .draft-text");
+  if (existing) existing.textContent = snapshot.draft.text;
+  else {
+    const after = conversation.querySelector(".artifact-card, .run-details");
+    if (after) after.insertAdjacentHTML("beforebegin", draftHTML());
+    else conversation.insertAdjacentHTML("beforeend", draftHTML());
+  }
+  if (followLatest) conversation.scrollTop = conversation.scrollHeight;
 }
 function render() {
   const conversation = $("#conversation");
@@ -234,7 +271,7 @@ function render() {
         (m) =>
           `<div class="message ${m.role === "user" ? "user" : ""}">${m.role === "assistant" ? '<div class="agent-name"><img src="./mark.svg" alt="" />vagent <span class="demo-label">Agent 回复</span></div>' : ""}${escapeHTML(m.text)}</div>`,
       )
-      .join("") + (snapshot?.artifacts || []).map(artifactCard).join("");
+      .join("") + draftHTML() + (snapshot?.artifacts || []).map(artifactCard).join("");
   const run = currentRun();
   if (run) {
     const events = (run.events || []).filter(
@@ -285,10 +322,100 @@ function renderObserve() {
   icons($("#observe-panel"));
 }
 function openDialog(title, body) {
+  dialogGeneration++;
   $("#dialog-content").innerHTML =
     `<div class="dialog-header"><h2>${title}</h2><button class="icon-button" data-action="close-dialog" aria-label="关闭弹窗" data-icon="close"></button></div>${body}`;
   icons($("#dialog"));
   if (!$("#dialog").open) $("#dialog").showModal();
+  return dialogGeneration;
+}
+function renderConnection() {
+  $("#model").textContent = health?.model || "未连接";
+  $("#connection-label").textContent = health?.modelKind === "injected-test"
+    ? "测试模型已连接"
+    : !health?.apiKeyConfigured
+      ? "待配置 API Key"
+      : health.configuration?.validation.status === "verified"
+        ? "模型连接已验证"
+        : "API Key 已配置 · 待验证";
+}
+function applyConfiguration(config) {
+  if (!health) return;
+  health.configuration = config;
+  health.apiKeyConfigured = config.apiKeyConfigured;
+  if (health.modelKind === "deepseek") health.model = config.model;
+  renderConnection();
+}
+async function showSettings() {
+  if (configSubmitting) return toast("配置请求正在进行，请稍候。");
+  const generation = openDialog("Agent 连接与配置", "<p>正在读取配置…</p>");
+  const config = await api("/api/config");
+  applyConfiguration(config);
+  if ($("#dialog").open && generation === dialogGeneration) renderSettings(config);
+}
+function renderSettings(config, notice = "") {
+  const sources = { environment: "环境变量 / .env", provided: "启动配置", local: "本地配置", default: "默认值", unset: "未配置" };
+  const validation = config.validation;
+  const status = { unverified: "尚未验证", validating: "正在验证", verified: "连接已验证", failed: "验证失败" }[validation.status];
+  const generation = openDialog("Agent 连接与配置", `
+    <p>配置保存在本机，下次执行即可生效。环境变量和 .env 优先；由启动配置提供的字段需在原处修改。</p>
+    <form id="settings-form">
+      <label for="config-key">DeepSeek API Key · ${sources[config.sources.apiKey] || "启动配置"}
+        <input id="config-key" type="password" autocomplete="new-password" maxlength="512" spellcheck="false" autocapitalize="off" placeholder="${config.apiKeyConfigured ? "已配置，留空保持" : "输入 API Key"}" ${!config.editable.apiKey || config.busy ? "disabled" : ""}>
+      </label>
+      <label for="config-model">模型 · ${sources[config.sources.model] || "启动配置"}
+        <input id="config-model" value="${escapeHTML(config.model)}" maxlength="100" required spellcheck="false" ${!config.editable.model || config.busy ? "disabled" : ""}>
+      </label>
+      <p id="config-status" role="status">${escapeHTML(notice || (config.busy ? "请等待当前执行或验证结束。" : `${config.apiKeyConfigured ? "密钥已配置" : "密钥未配置"} · ${status}`))}${validation.checkedAt ? `<br>上次验证：${escapeHTML(new Date(validation.checkedAt).toLocaleString())}` : ""}</p>
+      <p>保存不调用模型。「保存并验证」会发起一次简短模型请求，可能产生少量费用。验证状态在服务重启后重置。</p>
+      <div class="actions config-actions">
+        ${config.editable.apiKey && config.apiKeyConfigured ? `<button type="button" class="secondary" data-config="clear" ${config.busy ? "disabled" : ""}>移除密钥</button>` : ""}
+        <button type="submit" class="secondary" ${config.busy ? "disabled" : ""}>保存</button>
+        <button type="button" class="primary" data-config="validate" ${config.busy ? "disabled" : ""}>保存并验证</button>
+      </div>
+    </form>`);
+  const form = $("#settings-form");
+  async function submitConfiguration(action) {
+    if (configSubmitting || config.busy) return;
+    if (action !== "clear" && !form.reportValidity()) return;
+    const update = {};
+    const input = $("#config-key");
+    const key = input.value.trim();
+    input.value = "";
+    if (action === "clear") update.clearApiKey = true;
+    else {
+      if (config.editable.apiKey && key) update.apiKey = key;
+      const model = $("#config-model").value.trim();
+      if (config.editable.model && model !== config.model) update.model = model;
+    }
+    configSubmitting = true;
+    form.querySelectorAll("input, button").forEach((el) => { el.disabled = true; });
+    $("#config-status").textContent = action === "validate" ? "正在保存并验证连接…" : "正在保存…";
+    let result = config;
+    let message;
+    try {
+      if (Object.keys(update).length)
+        result = await api("/api/config", { method: "PATCH", body: JSON.stringify(update) });
+      applyConfiguration(result);
+      if (action === "validate") result = await post("/api/config/validate");
+      message = action === "validate" ? "连接已验证，可以开始创作。" : action === "clear" ? "本地密钥已移除。" : "配置已保存，下次执行生效。";
+    } catch (error) {
+      message = error.message;
+      try { result = await api("/api/config"); } catch {}
+    } finally {
+      configSubmitting = false;
+    }
+    applyConfiguration(result);
+    if ($("#dialog").open && generation === dialogGeneration) renderSettings(result, message);
+    else toast(message);
+  }
+  form.addEventListener("submit", (event) => {
+    event.preventDefault();
+    submitConfiguration("save");
+  });
+  form.querySelectorAll("[data-config]").forEach((button) => {
+    button.addEventListener("click", () => submitConfiguration(button.dataset.config));
+  });
 }
 async function showArtifact(id, version) {
   selectedArtifact = await api(`/api/artifacts/${encodeURIComponent(id)}`);
@@ -387,6 +514,10 @@ $("#artifact-panel").addEventListener("change", (event) => {
       (error) => toast(error.message),
     );
 });
+$("#dialog").addEventListener("close", () => {
+  const key = $("#config-key");
+  if (key) key.value = "";
+});
 document.addEventListener("click", async (event) => {
   try {
     const template = event.target.closest("[data-template]");
@@ -439,13 +570,7 @@ document.addEventListener("click", async (event) => {
         "和 Agent 一起完成创作",
         '<p>描述需求后，Agent 会按需读取 Skills、管理项目记忆、调用工具并保存方案。侧栏「编排观测」显示每次执行的上下文、工具结果和模型用量。</p><p>会话与产物保存在本机。可以停止执行并从检查点继续；旧版产物可在预览中切换。只读分析模式禁止修改项目或保存产物。当前不提供视频生成。</p><div class="actions"><button class="primary" data-action="close-dialog">开始创作</button></div>',
       );
-    if (action === "settings") {
-      health = await api("/api/health");
-      openDialog(
-        "Agent 连接与配置",
-        `<p>模型：${escapeHTML(health.model)}<br>API Key：${health.apiKeyConfigured ? "已配置（凭证不返回前端）" : "未配置，请在项目 .env 中填写 DEEPSEEK_API_KEY 后重启 Web"}<br>运行类型：${health.modelKind === "deepseek" ? "真实 DeepSeek 适配器" : "测试模型注入"}<br>MCP：${health.mcp.length} 个服务已连接</p><p>执行预算：${health.limits.modelSteps} 个模型步 / ${health.limits.toolCalls} 次工具 / ${health.limits.seconds} 秒。发送需求将调用配置的模型。</p><div class="actions"><button class="primary" data-action="close-dialog">完成</button></div>`,
-      );
-    }
+    if (action === "settings") await showSettings();
     if (action === "library") {
       const all = (await api("/api/artifacts")).artifacts;
       openDialog(
@@ -489,12 +614,9 @@ async function initialize() {
       api("/api/health"),
       api("/api/session-token"),
     ]);
-    $("#model").textContent = health.model;
+    renderConnection();
     $("#skills-label").textContent =
       `${health.skills.length} Skills · ${health.mcp.length} MCP`;
-    $("#connection-label").textContent = health.apiKeyConfigured
-      ? "Agent 已连接"
-      : "待配置 API Key";
     $("#execution-label").textContent =
       health.modelKind === "deepseek"
         ? "真实 Agent · 按实际模型用量计费"
@@ -507,6 +629,7 @@ async function initialize() {
     if (saved && sessions.some((s) => s.id === saved))
       await selectSession(saved);
     else render();
+    if (!health.apiKeyConfigured && health.modelKind === "deepseek") await showSettings();
   } catch (error) {
     health = null;
     $("#connection-label").textContent = "Agent 服务未连接";

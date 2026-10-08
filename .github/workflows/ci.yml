@@ -23,8 +23,12 @@ jobs:
           cache-dependency-path: requirements-dev.lock
       - run: python -m pip install -r requirements-dev.lock
       - run: python -m pip install --no-deps -e .
-      - run: python -m ruff check src/vagent tests
-      - run: python -m ruff format --check src/vagent tests
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - run: python -m ruff check src/vagent tests scripts
+      - run: python -m ruff format --check src/vagent tests scripts
+      - run: node --check web/app.js
       - run: python -m pytest -q
       - run: python -m build --no-isolation --outdir dist/python
       - name: Verify installed wheel outside source tree
@@ -38,3 +42,4 @@ jobs:
               env = dict(os.environ, VAGENT_HOME=str(pathlib.Path(directory) / "state"), PYTHONIOENCODING="utf-8")
               for args in (["skills", "list"], ["demo"], ["inspect", "--session", "demo"]):
                   subprocess.run([sys.executable, "-m", "vagent", *args], cwd=directory, env=env, check=True)
+      - run: python scripts/wheel_smoke.py

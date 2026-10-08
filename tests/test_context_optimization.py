@@ -191,6 +191,7 @@ async def test_real_adapter_receives_stable_tools_and_prefix_across_project_upda
         result = await AgentRunner(
             store=store,
             model=DeepSeekModel("test-placeholder", http_client=client),
+            stream_output=False,
             tools=register_skill_tool(create_project_tools(), catalog),
             skills=catalog.list(),
         ).run("coffee", "更新受众")

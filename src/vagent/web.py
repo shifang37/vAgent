@@ -13,6 +13,7 @@ from pydantic import BaseModel, ConfigDict, Field
 
 from vagent import __version__
 from vagent.application import ApplicationService
+from vagent.config import ConfigUpdate
 from vagent.errors import AppError, public_error
 
 
@@ -78,7 +79,15 @@ def create_app(config, *, port=3210, model=None, policy=None):
             if error.code == "NOT_FOUND"
             else 409
             if error.code
-            in {"RUN_BUSY", "REQUEST_CONFLICT", "STALE_RUN", "NOT_RESUMABLE", "RESUME_CONFIG_CHANGED"}
+            in {
+                "RUN_BUSY",
+                "REQUEST_CONFLICT",
+                "STALE_RUN",
+                "NOT_RESUMABLE",
+                "RESUME_CONFIG_CHANGED",
+                "CONFIG_BUSY",
+                "CONFIG_OVERRIDE",
+            }
             else 400
         )
         return JSONResponse({"error": {"code": error.code, "message": str(error)}}, status)
@@ -99,6 +108,18 @@ def create_app(config, *, port=3210, model=None, policy=None):
     @app.get("/api/session-token")
     async def session_token():
         return {"token": token}
+
+    @app.get("/api/config")
+    async def configuration():
+        return app.state.service.configuration()
+
+    @app.patch("/api/config")
+    async def save_configuration(body: ConfigUpdate):
+        return app.state.service.save_configuration(body)
+
+    @app.post("/api/config/validate")
+    async def validate_configuration():
+        return await app.state.service.validate_configuration()
 
     @app.get("/api/sessions")
     async def sessions():
@@ -153,23 +174,27 @@ def create_app(config, *, port=3210, model=None, policy=None):
         service.session(sessionId)
 
         async def stream():
-            queue = asyncio.Queue(maxsize=16)
-            service.subscribers.add(queue)
+            queue = service.subscribe(sessionId)
+
+            def snapshot():
+                data = json.dumps(service.session(sessionId), ensure_ascii=False, separators=(",", ":"))
+                return f"event: snapshot\ndata: {data}\n\n"
+
             try:
+                yield snapshot()
                 while not await request.is_disconnected():
-                    data = json.dumps(service.session(sessionId), ensure_ascii=False, separators=(",", ":"))
-                    yield f"event: snapshot\ndata: {data}\n\n"
-                    while True:
-                        try:
-                            async with asyncio.timeout(15):
-                                changed = await queue.get()
-                            if changed == sessionId:
-                                break
-                        except TimeoutError:
-                            yield ": heartbeat\n\n"
-                            break
+                    try:
+                        async with asyncio.timeout(15):
+                            event = await queue.get()
+                        if event["type"] == "snapshot":
+                            yield snapshot()
+                        else:
+                            data = json.dumps(event, ensure_ascii=False, separators=(",", ":"))
+                            yield f"event: assistant.delta\ndata: {data}\n\n"
+                    except TimeoutError:
+                        yield ": heartbeat\n\n"
             finally:
-                service.subscribers.discard(queue)
+                service.subscribers.pop(queue, None)
 
         return StreamingResponse(
             stream(), media_type="text/event-stream", headers={"X-Accel-Buffering": "no"}

@@ -31,7 +31,8 @@ def content_check(content: str, maximum: int | None) -> dict:
         raise AppError(
             "CONTENT_LENGTH",
             f"正文为 {count} 个非空白字符，上限 {maximum}；标点、英文、数字和 Markdown 标记均计入。"
-            "请压缩正文后重新调用 artifact_save；未保存新版本。",
+            f"至少需删去 {count - maximum} 个字符，建议压缩至 {max(1, maximum * 4 // 5)} 字左右，预留计数余量。"
+            "合并重复说明、移除非必要小标题或表格分隔线，保留用户必需信息后重新调用 artifact_save；未保存新版本。",
         )
     return {"characters": count, "maxCharacters": maximum, "method": COUNT_METHOD}
 
