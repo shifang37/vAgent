@@ -2,7 +2,7 @@
 
 面向视频创作的 Agent 实习项目，使用 **Python + DeepSeek + LangGraph**，自主设计上下文、项目记忆、Skills、工具执行与护栏，再接入视频生成模型。
 
-当前已实现可运行的 **Python CLI Agent 原型**。DeepSeek 适配接口已完成，尚未配置真实 Key 联调；现有验证使用离线模拟模型和模拟 HTTP。当前交付文本创作材料，还未接入视频生成 API。
+当前已实现 **Python CLI + 本地 Web Agent**，前端通过同源 API/SSE 调用共享 LangGraph Runner。2026-10-08 完成真实 DeepSeek、持久记忆、Skills、8 种工具（含 2 个本地 MCP 工具）的编排验收。当前交付文本创作材料，尚未接入视频生成 API；发现的记忆一致性与字数约束问题见 [编排测试报告](./docs/AGENT_ORCHESTRATION_ACCEPTANCE.md)。
 
 ## 当前进度
 
@@ -14,10 +14,37 @@
 | 03 持久图恢复 | 已实现 | SQLite LangGraph 检查点、显式 resume、累计预算与工具重放保护 |
 | 03 用量观测 | 已实现 | 单次模型调用记录、缓存命中/未命中 Token、加权命中率、未知用量标记 |
 | 03 Redis 回答缓存 | 已实现 | 显式只读模式、最终文本精确匹配、TTL、故障回退、独立命中统计 |
-| 03 任务评测 | 待实现 | 真实模型固定任务集与策略对比 |
-| 04 Web 与视频工具 | 待实现 | 最小本地 Web、模拟视频 Job、真实供应商接入 |
+| 03 任务评测 | 已完成首组真实编排验收 | 3 轮固定任务 + 1 次浏览器直发；大规模任务集与策略对比待实现 |
+| 04 本地 Web | 已接入真实 Agent | 同源 API/SSE、停止/恢复、产物版本、上下文/记忆/工具/用量观测 |
+| MCP | 已实现并验证 stdio | 显式只读白名单、工具发现、Schema 校验、取消/超时、结果大小限制 |
+| 视频工具 | 待实现 | 模拟视频 Job、真实供应商接入 |
 
 每个独立完成的代码部分都同步更新本 README、提交并推送 GitHub。阶段目标见 [M1 计划](./M1_PLAN.md) 和 [Harness 设计](./AGENT_HARNESS_DESIGN.md)。
+
+## 本地 Web 与真实编排
+
+保留 DeepSeek Harness 风格，已移除浏览器中的模板回复。会话、项目记忆和产物由 Python 服务保存；侧栏「编排观测」查看上下文字节预算、裁剪数、记忆 revision、Skills、MCP 与实际调用用量。
+
+```powershell
+.\.venv\Scripts\python.exe -m pip install -r requirements-dev.lock
+# .env 中配置 DEEPSEEK_API_KEY 与 VAGENT_DEEPSEEK_MODEL，不要提交真实 Key。
+$env:VAGENT_HOME = Join-Path $PWD '.vagent/web'
+.\.venv\Scripts\python.exe -m vagent web --mcp-local --no-open
+```
+
+打开 [本地工作台](http://127.0.0.1:3210)。发送需求会调用真实 DeepSeek；缺少 Key 时明确报错。`--mcp-local` 启用镜头时长和帧数计算服务；外部 stdio 配置见 [MCP 说明](./docs/MCP.md)。运行期更改 `.env` 后需重启服务。
+
+服务只监听 `127.0.0.1`，校验 Host/Origin 和写请求 CSRF Token；静态资源使用白名单，API 不返回 Key。同一数据目录只允许一个 CLI/Web 写进程。API/SSE 提供持久快照和工具事件，当前仍整段返回模型文本。配置向导、逐 Token 流和视频 Job 尚未实现；完整边界见 [Web 说明](./web/README.md)。
+
+在工作台运行时，可显式执行固定任务验收（会产生模型费用）：
+
+```powershell
+.\.venv\Scripts\python.exe scripts/evaluate_agent.py --live
+# 仅重新检查已有产物，不调用模型：
+.\.venv\Scripts\python.exe scripts/evaluate_agent.py --review-existing
+```
+
+本次真实调用共 13 个模型步骤、17 次工具调用；输入 71,645、输出 3,498 Token。原始报告保存在被忽略的 `output/agent-live-acceptance.json`，可复现步骤和发现见 [验收记录](./docs/AGENT_ORCHESTRATION_ACCEPTANCE.md)。
 
 ## 快速开始（Windows PowerShell）
 
@@ -150,6 +177,10 @@ VAGENT_CACHE_TTL=3600
 ```text
 src/vagent/
   cli.py       argparse 命令行与配置展示
+  application.py CLI/Web 共用的生命周期与执行服务
+  web.py       回环 HTTP API、CSRF、SSE 与打包页面
+  mcp_bridge.py MCP stdio 发现、显式只读白名单与异步工具桥
+  mcp_server.py 内置镜头时长与帧数计算服务
   config.py    环境变量与 Key 校验
   models.py    DeepSeek 单步适配、离线模拟模型
   runner.py    自定义 LangGraph 图、预算、取消与事件
@@ -218,7 +249,7 @@ Python 版保留 schema v1 的领域数据结构和工具 JSON 字段（如 `art
 - 成功会话可跨重启继续；未完成 Run 重启后标记为 `interrupted`，已提交产物保留，不自动重放。
 - 应用快照和 SQLite 检查点分别提交，依靠同步图检查点、操作幂等和恢复时补交会话处理提交间隙；并非跨 JSON/SQLite 的单一数据库事务。
 - 异常断电可能留下 `instance.lock`；确认没有进程使用该数据目录后才手动移除，程序不会自动抢锁。
-- 回复整段显示，工具事件实时输出；逐 Token 流、自动摘要、跨项目偏好记忆、Web 和视频任务尚未实现。
+- 回复整段显示，工具事件实时输出；逐 Token 流、自动摘要、跨项目偏好记忆和视频任务尚未实现；Web 已接入共享 Runner。
 
 后续视频服务通过注册工具接入独立 Job 服务和供应商适配器。Agent Run 与视频 Job 分开记录；长任务状态、付费提交与恢复策略独立实现，结果不确定的付费提交不能盲目重试。当前只需要 DeepSeek Key，视频服务 Key 在真实视频阶段单独配置。
 
@@ -233,7 +264,7 @@ Python 版保留 schema v1 的领域数据结构和工具 JSON 字段（如 `art
 .\.venv\Scripts\python.exe -m build --no-isolation --outdir dist/python
 ```
 
-本地 Python 3.12 测试结果：**109 passed，1 skipped**。跳过的是当前 Windows 账户无符号链接创建权限的测试。测试覆盖工具闭环、请求去重、错误与超时、取消、并发拒绝、版本/项目隔离、写入回滚、旧状态读取、上下文预算、Skills、DeepSeek HTTP 协议，以及真实子进程强退后的恢复、部分工具提交、累计预算、终态补交、缓存 Token 字段、缺失用量与加权命中率。上下文 v2 另验证了稳定前缀、确定性排序、无损 JSON 空白压缩、完整协议配对、分页读取及旧版上下文恢复兼容。
+本地 Python 3.12 测试结果：**120 passed，1 skipped**。跳过的是当前 Windows 账户无符号链接创建权限的测试。测试覆盖工具闭环、请求去重、错误与超时、取消、并发拒绝、版本/项目隔离、写入回滚、旧状态读取、上下文预算、Skills、DeepSeek HTTP 协议，以及真实子进程强退后的恢复、部分工具提交、累计预算、终态补交、缓存 Token 字段、缺失用量与加权命中率。上下文 v2 另验证了稳定前缀、确定性排序、无损 JSON 空白压缩、完整协议配对、分页读取及旧版上下文恢复兼容。
 
 已验证离线 CLI，以及 wheel 安装到独立虚拟环境后在仓库目录之外运行 `skills list`、`demo`、`inspect`。本次新增验证：新建独立虚拟环境安装 wheel，保存产物后取消，再从仓库外通过 CLI `resume` 完成原 Run，仍仅有一个产物；`pip check` 通过。源码包与 wheel 仅本地构建，未发布 PyPI。GitHub Actions 配置 Ubuntu/Windows、Python 3.11/3.12 检查，远端结果见 [Actions](https://github.com/shifang37/vAgent/actions)。
 
@@ -241,4 +272,4 @@ Python 版保留 schema v1 的领域数据结构和工具 JSON 字段（如 `art
 
 上下文 v2 的 wheel 已在同一独立环境重新安装验证：仓库外执行 `skills list`、取消后 `resume`、`inspect`、`usage --run` 均通过，格式版本保持 2、最终仍仅有一个产物，`pip check` 通过。v1 检查点兼容由自动化测试覆盖，详细记录见 [上下文优化验收](./docs/CONTEXT_OPTIMIZATION_ACCEPTANCE.md)。
 
-这些测试验证工程行为，不代表真实模型任务成功率。后续按顺序完成真实 DeepSeek 联调与任务评测、最小 Web、模拟视频 Job、真实视频模型接入。
+自动化测试验证工程行为。首组真实模型编排已完成，但少量固定任务不代表生产成功率；仍需改进记忆字段一致性与产物约束校验，再扩展真实任务评测、配置向导、模拟视频 Job 和真实视频模型接入。

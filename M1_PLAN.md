@@ -1,13 +1,13 @@
 # vagent M1 实施计划：先实现 Agent，再接入视频生成
 
-> 更新日期：2026-09-30
+> 更新日期：2026-10-08
 > 状态：已开始实施；当前已完成内容、验证与限制以 [README](./README.md) 为准，本文仍保留阶段验收目标。  
 > 设计依据：[产品设计](./DESIGN.md)、[Agent 选型与 Harness 设计](./AGENT_HARNESS_DESIGN.md)。  
 > 当前优先级：完成 M1-A，使用一个 DeepSeek API Key 验收独立 Agent。
 
-当前已补齐 SQLite 图检查点和 `vagent resume RUN_ID`，包含部分工具提交后的重放保护与累计预算验证，记录见 [持久恢复验收](./docs/RECOVERY_ACCEPTANCE.md)。真实 DeepSeek 联调、任务评测、最小 Web 与后续视频阶段仍未验收。
+当前已补齐 SQLite 图检查点和 `vagent resume RUN_ID`，包含部分工具提交后的重放保护与累计预算验证，记录见 [持久恢复验收](./docs/RECOVERY_ACCEPTANCE.md)。2026-10-08 新增共享应用服务、本地 Web API/SSE 与只读 MCP；首组真实 DeepSeek 多轮编排已验证，发现记忆冗余与文本长度约束问题，详见 [编排验收](./docs/AGENT_ORCHESTRATION_ACCEPTANCE.md)。完整 A4 配置向导、逐 Token 流、大规模任务评测和视频阶段仍待完成。
 
-随后已加入单次模型调用与缓存 Token 用量观测，支持 `vagent usage` 查看已知用量和缺失项，记录见 [用量观测验收](./docs/USAGE_ACCEPTANCE.md)。这不代表真实 API 缓存命中率或费用已完成联调。
+随后已加入单次模型调用与缓存 Token 用量观测，支持 `vagent usage` 查看已知用量和缺失项，记录见 [用量观测验收](./docs/USAGE_ACCEPTANCE.md)。本次真实编排已取得供应商 Token 与缓存命中数据，但不能外推生产命中率或节费收益。
 
 任务三已实现上下文 v2：固定规则和 Skill 元信息置前，工具与 JSON 确定性排序，应用工具结果去除字符串外空白；保留完整轮次裁剪和产物分页读取，旧检查点按 v1 恢复。离线对比与兼容验证见 [上下文优化验收](./docs/CONTEXT_OPTIMIZATION_ACCEPTANCE.md)。
 

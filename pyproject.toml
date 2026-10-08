@@ -18,6 +18,10 @@ dependencies = [
   "python-dotenv>=1.0,<2",
   "PyYAML>=6.0,<7",
   "redis>=5,<6",
+  "fastapi>=0.115,<1",
+  "uvicorn>=0.34,<1",
+  "mcp>=1.12,<2",
+  "jsonschema>=4.23,<5",
 ]
 
 [project.optional-dependencies]
@@ -31,9 +35,10 @@ packages = ["src/vagent"]
 
 [tool.hatch.build.targets.wheel.force-include]
 "skills" = "vagent/builtin_skills"
+"web" = "vagent/web"
 
 [tool.hatch.build.targets.sdist]
-include = ["/src/vagent", "/skills", "/tests/*.py", "/docs/*.md", "/pyproject.toml", "/README.md", "/requirements-dev.lock"]
+include = ["/src/vagent", "/skills", "/web", "/tests", "/scripts", "/docs/*.md", "/pyproject.toml", "/README.md", "/requirements-dev.lock"]
 
 [tool.pytest.ini_options]
 asyncio_mode = "auto"

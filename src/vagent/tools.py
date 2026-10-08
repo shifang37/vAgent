@@ -1,10 +1,12 @@
 """Tool allowlist, shared JSON schemas, and project-scoped execution."""
 
-from collections.abc import Callable
+import copy
+from collections.abc import Awaitable, Callable
 from dataclasses import dataclass
 from typing import Annotated, Literal
 from uuid import uuid4
 
+from jsonschema import Draft202012Validator
 from pydantic import BaseModel, ConfigDict, Field, ValidationError, model_validator
 from pydantic.alias_generators import to_camel
 
@@ -69,9 +71,11 @@ class ArtifactRead(Arguments):
 class ToolDefinition:
     name: str
     description: str
-    schema: type[BaseModel]
+    schema: type[BaseModel] | dict
     effect: Literal["read", "write"]
-    execute: Callable[[dict, dict, str], object]
+    execute: Callable[[dict, dict, str], object] | None = None
+    async_execute: Callable[[dict], Awaitable[object]] | None = None
+    identity: str | None = None
 
 
 class ToolRegistry:
@@ -81,6 +85,8 @@ class ToolRegistry:
     def register(self, definition: ToolDefinition) -> "ToolRegistry":
         if definition.name in self._definitions:
             raise ValueError(f"Duplicate tool: {definition.name}")
+        if definition.async_execute and definition.effect != "read":
+            raise ValueError("External tools must be explicitly read-only")
         self._definitions[definition.name] = definition
         return self
 
@@ -91,7 +97,9 @@ class ToolRegistry:
                 "function": {
                     "name": definition.name,
                     "description": definition.description,
-                    "parameters": definition.schema.model_json_schema(by_alias=True),
+                    "parameters": copy.deepcopy(definition.schema)
+                    if isinstance(definition.schema, dict)
+                    else definition.schema.model_json_schema(by_alias=True),
                 },
             }
             for definition in self._definitions.values()
@@ -104,12 +112,54 @@ class ToolRegistry:
                 registry.register(definition)
         return registry
 
+    @property
+    def identities(self) -> dict[str, str]:
+        return {d.name: d.identity for d in self._definitions.values() if d.identity}
+
+    def inventory(self) -> list[dict]:
+        return [
+            {
+                "name": d.name,
+                "description": d.description,
+                "effect": d.effect,
+                "source": "mcp" if d.async_execute else "builtin",
+            }
+            for d in self._definitions.values()
+        ]
+
+    async def aexecute(
+        self, name: str, args: object, *, store: FileStore, project_id: str, operation_key: str
+    ) -> dict:
+        definition = self._definitions.get(name)
+        if definition is None or definition.async_execute is None:
+            return self.execute(name, args, store=store, project_id=project_id, operation_key=operation_key)
+        if not isinstance(args, dict) or not isinstance(definition.schema, dict):
+            return failure("INVALID_ARGUMENTS", "MCP 工具参数必须是 JSON 对象。")
+        if next(Draft202012Validator(definition.schema).iter_errors(args), None):
+            return failure("INVALID_ARGUMENTS", "MCP 工具参数不符合已发现的 Schema。")
+        payload = copy.deepcopy(args)
+        previous = store.operation_result(operation_key, name, payload)
+        if previous is not None:
+            return previous
+        try:
+            result = await definition.async_execute(payload)
+        except Exception as error:
+            safe = public_error(error)
+
+            def fail(_):
+                raise safe
+
+            return store.operation(operation_key, name, payload, fail)
+        return store.operation(operation_key, name, payload, lambda _: result)
+
     def execute(
         self, name: str, args: object, *, store: FileStore, project_id: str, operation_key: str
     ) -> dict:
         definition = self._definitions.get(name)
         if definition is None:
             return failure("UNKNOWN_TOOL", "该工具未注册。")
+        if definition.async_execute:
+            return failure("ASYNC_TOOL", "外部工具必须通过异步执行入口调用。")
         try:
             parsed = definition.schema.model_validate(args)
         except ValidationError as error:

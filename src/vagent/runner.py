@@ -158,6 +158,8 @@ class AgentRunner:
             payload["contextVersion"] = context.format_version
         if self.read_only:
             payload["readOnly"] = True
+        if self.tools.identities:
+            payload["externalTools"] = self.tools.identities
         return hashlib.sha256(json.dumps(payload, sort_keys=True, ensure_ascii=False).encode()).hexdigest()
 
     async def run(
@@ -367,7 +369,12 @@ class AgentRunner:
                     skills=self.skills,
                 )
                 specs = report.tools
-                if self.read_only and self.answer_cache and getattr(model, "cache_config", None):
+                if (
+                    self.read_only
+                    and self.answer_cache
+                    and not tools.identities
+                    and getattr(model, "cache_config", None)
+                ):
                     snapshot = store.snapshot()
                     cache_key = self.answer_cache.key(
                         scope=str(store.home),
@@ -407,6 +414,10 @@ class AgentRunner:
                         "type": "context.prepared",
                         "inputBytes": report.input_bytes,
                         "droppedMessages": report.dropped_messages,
+                        "budgetBytes": context.max_input_bytes,
+                        "messageCount": len(report.messages),
+                        "skillCount": len(self.skills),
+                        "projectRevision": store.snapshot()["projects"][session_id]["revision"],
                     }
                 )
                 self.emit({"type": "model.started", "step": next_state["model_steps"]})
@@ -468,21 +479,26 @@ class AgentRunner:
             admitted = journal.record["toolCallKeys"]
             over_budget = len(admitted) + sum(key not in admitted for key in keys) > policy.max_tool_calls
             for call, key in zip(calls, keys, strict=True):
+                started = time.monotonic()
                 try:
                     if over_budget:
                         raise AppError("TOOL_LIMIT", "已达到工具调用上限，本批工具未执行。")
                     check_active(cancelled, deadline)
-                    self.emit({"type": "tool.started", "name": call["name"]})
+                    self.emit({"type": "tool.started", "name": call["name"], "callId": call["id"]})
                     check_active(cancelled, deadline)
                     if key not in admitted:
                         admitted = [*admitted, key]
                         journal.update(toolCallKeys=admitted, toolCalls=len(admitted))
-                    result = tools.execute(
-                        call["name"],
-                        call["args"],
-                        store=store,
-                        project_id=session_id,
-                        operation_key=key,
+                    result = await bounded_call(
+                        lambda: tools.aexecute(
+                            call["name"],
+                            call["args"],
+                            store=store,
+                            project_id=session_id,
+                            operation_key=key,
+                        ),
+                        cancelled,
+                        deadline,
                     )
                     next_state = journal.stats(next_state)
                 except Exception as error:
@@ -496,7 +512,16 @@ class AgentRunner:
                         name=call["name"],
                     )
                 )
-                self.emit({"type": "tool.completed", "name": call["name"], "ok": result["ok"]})
+                self.emit(
+                    {
+                        "type": "tool.completed",
+                        "name": call["name"],
+                        "ok": result["ok"],
+                        "callId": call["id"],
+                        "durationSeconds": round(time.monotonic() - started, 3),
+                        "errorCode": result.get("error", {}).get("code"),
+                    }
+                )
             next_state["messages"] = [*state["messages"], *results]
             publish_progress(next_state)
             if next_state["error_code"] == "CANCELLED":

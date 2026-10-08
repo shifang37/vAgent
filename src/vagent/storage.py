@@ -119,6 +119,7 @@ class RunRecord(Record):
     model_calls: list[ModelCall] = Field(default_factory=list)
     read_only: bool = False
     answer_cache: dict[str, int] = Field(default_factory=dict)
+    events: list[dict[str, Any]] = Field(default_factory=list)
 
 
 class Success(Record):
@@ -260,10 +261,23 @@ class FileStore:
 
         self.transaction(create)
 
-    def operation(self, key: str, name: str, args: dict, mutate: Callable[[dict], Any]) -> dict:
+    @staticmethod
+    def operation_fingerprint(name: str, args: dict) -> str:
         # Match the original JSON encoding so existing journal entries remain usable.
         encoded = json.dumps({"name": name, "args": args}, ensure_ascii=False, separators=(",", ":"))
-        fingerprint = hashlib.sha256(encoded.encode("utf-8")).hexdigest()
+        return hashlib.sha256(encoded.encode("utf-8")).hexdigest()
+
+    def operation_result(self, key: str, name: str, args: dict) -> dict | None:
+        with self._mutex:
+            existing = self._state["operations"].get(key)
+            if existing is None:
+                return None
+            if existing["fingerprint"] != self.operation_fingerprint(name, args):
+                return failure("OPERATION_CONFLICT", "同一调用 ID 不能用于不同操作。")
+            return copy.deepcopy(existing["result"])
+
+    def operation(self, key: str, name: str, args: dict, mutate: Callable[[dict], Any]) -> dict:
+        fingerprint = self.operation_fingerprint(name, args)
 
         def execute(draft: dict) -> dict:
             existing = draft["operations"].get(key)

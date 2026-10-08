@@ -1,0 +1,250 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <meta name="color-scheme" content="light" />
+    <title>vagent · 视频创作工作台</title>
+    <link rel="icon" href="./mark.svg" type="image/svg+xml" />
+    <link rel="stylesheet" href="./styles.css" />
+    <script type="module" src="./app.js"></script>
+  </head>
+  <body>
+    <aside class="rail" aria-label="主导航">
+      <button class="brand" data-action="home" aria-label="vagent 首页">
+        <img src="./mark.svg" alt="" />
+      </button>
+      <div class="rail-main">
+        <button
+          class="icon-button active"
+          data-action="new"
+          aria-label="新建创作"
+          title="新建创作"
+          data-icon="plus-square"
+        ></button>
+        <button
+          class="icon-button"
+          data-action="projects"
+          aria-label="项目与会话"
+          title="项目与会话"
+          data-icon="folder"
+        ></button>
+        <button
+          class="icon-button"
+          data-action="library"
+          aria-label="创作产物"
+          title="创作产物"
+          data-icon="layers"
+        ></button>
+        <button
+          class="icon-button"
+          data-action="search"
+          aria-label="搜索会话"
+          title="搜索会话"
+          data-icon="search"
+        ></button>
+        <button
+          class="icon-button"
+          data-action="observe"
+          aria-label="编排观测"
+          title="上下文、记忆与工具"
+          data-icon="sliders"
+        ></button>
+      </div>
+      <div class="rail-bottom">
+        <button
+          class="icon-button"
+          data-action="help"
+          aria-label="使用指南"
+          title="使用指南"
+          data-icon="help"
+        ></button>
+        <button
+          class="icon-button"
+          data-action="settings"
+          aria-label="设置"
+          title="设置"
+          data-icon="settings"
+        ></button>
+        <span class="avatar" title="本地工作区">V</span>
+      </div>
+    </aside>
+    <aside id="sidebar" class="sidebar" hidden>
+      <div class="panel-heading">
+        <strong>项目与会话</strong
+        ><button
+          class="icon-button"
+          data-action="close-sidebar"
+          aria-label="关闭侧边栏"
+          data-icon="close"
+        ></button>
+      </div>
+      <button class="new-project" data-action="new">
+        <span data-icon="plus"></span> 新建创作
+      </button>
+      <label class="search-field"
+        ><span data-icon="search"></span
+        ><input
+          id="search"
+          placeholder="搜索创作会话…"
+          aria-label="搜索创作会话"
+      /></label>
+      <div class="sidebar-label">本地会话</div>
+      <div id="sessions"></div>
+      <div class="sidebar-note">
+        <span class="status-dot"></span>会话与记忆保存在本机
+      </div>
+    </aside>
+    <main>
+      <header class="topbar">
+        <div class="breadcrumb">
+          <span>工作台</span><span class="slash">/</span
+          ><span id="page-title">新建创作</span>
+        </div>
+        <button class="preview-badge" data-action="settings">
+          <span class="status-dot"></span
+          ><span id="connection-label">正在连接 Agent</span>
+        </button>
+      </header>
+      <div id="workspace" class="workspace">
+        <section id="welcome" class="welcome">
+          <div class="eyebrow">YOUR STORY, FRAME BY FRAME</div>
+          <h1>
+            <img src="./mark.svg" alt="" />让灵感，成为下一帧<span class="beta"
+              >Agent</span
+            >
+          </h1>
+          <p>从一个想法出发，和你的 AI 创作伙伴一起完成视频方案。</p>
+        </section>
+        <section
+          id="conversation"
+          class="conversation"
+          aria-live="polite"
+          aria-label="创作对话"
+          hidden
+        ></section>
+        <section class="compose-area" aria-label="创作输入">
+          <div class="context-row">
+            <button
+              id="project-picker"
+              class="context-button"
+              data-action="project-picker"
+            >
+              <span data-icon="folder"></span
+              ><span id="project-label">个人工作区</span
+              ><span data-icon="chevron"></span>
+            </button>
+            <span class="context-divider"></span>
+            <label class="context-button"
+              ><span data-icon="sliders"></span
+              ><select id="mode" aria-label="创作模式">
+                <option>创作模式</option>
+                <option>分镜模式</option>
+                <option>只读分析</option>
+              </select></label
+            >
+          </div>
+          <form id="composer" class="composer">
+            <label class="sr-only" for="prompt">描述视频创作需求</label>
+            <textarea
+              id="prompt"
+              rows="3"
+              maxlength="6000"
+              placeholder="描述你想创作的视频，让我们从灵感开始…"
+            ></textarea>
+            <div id="attachment" class="attachment" hidden></div>
+            <div class="composer-toolbar">
+              <div class="tools">
+                <button
+                  type="button"
+                  class="icon-button"
+                  data-action="attach"
+                  aria-label="添加文字参考"
+                  title="添加文字参考（TXT / Markdown）"
+                  data-icon="clip"
+                ></button
+                ><button
+                  type="button"
+                  class="skill-button"
+                  data-action="observe"
+                >
+                  <span data-icon="spark"></span
+                  ><span id="skills-label">Skills · MCP</span>
+                </button>
+              </div>
+              <div class="send-tools">
+                <span class="model-picker" id="model">连接中</span
+                ><button
+                  id="send"
+                  class="send-button"
+                  type="submit"
+                  aria-label="发送创作需求"
+                  disabled
+                  data-icon="arrow"
+                ></button>
+              </div>
+            </div>
+          </form>
+          <div class="composer-caption">
+            <span>Enter 发送 · Shift + Enter 换行</span
+            ><span id="execution-label">正在读取服务状态</span>
+          </div>
+          <div
+            id="run-status"
+            class="run-status"
+            aria-live="polite"
+            hidden
+          ></div>
+          <input
+            id="file-input"
+            type="file"
+            accept=".txt,.md,text/plain,text/markdown"
+            hidden
+          />
+        </section>
+        <section id="inspiration" class="inspiration">
+          <div class="section-heading">
+            <span>从这里开启创作</span><span>一点灵感，无限可能</span>
+          </div>
+          <div class="starter-grid">
+            <button class="starter" data-template="brand">
+              <span class="starter-icon sage" data-icon="film"></span
+              ><strong>品牌短片</strong><span>让品牌故事被看见</span
+              ><span class="starter-arrow">↗</span>
+            </button>
+            <button class="starter" data-template="life">
+              <span class="starter-icon sand" data-icon="sun"></span
+              ><strong>生活记录</strong><span>把日常拍成电影</span
+              ><span class="starter-arrow">↗</span>
+            </button>
+            <button class="starter" data-template="product">
+              <span class="starter-icon blue" data-icon="box"></span
+              ><strong>产品种草</strong><span>发现产品的心动瞬间</span
+              ><span class="starter-arrow">↗</span>
+            </button>
+            <button class="starter" data-template="story">
+              <span class="starter-icon lavender" data-icon="book"></span
+              ><strong>故事分镜</strong><span>让每一帧都有叙事</span
+              ><span class="starter-arrow">↗</span>
+            </button>
+          </div>
+          <div class="workflow">
+            <span>一个想法</span><i></i><span>创作方案</span><i></i
+            ><span>镜头脚本</span><i></i
+            ><span class="future">视频生成 <small>即将开放</small></span>
+          </div>
+        </section>
+      </div>
+      <footer>vagent <span>·</span> 为创作留出更多空间</footer>
+    </main>
+    <aside id="artifact-panel" class="artifact-panel" hidden></aside>
+    <aside
+      id="observe-panel"
+      class="artifact-panel observe-panel"
+      aria-label="编排观测"
+      hidden
+    ></aside>
+    <dialog id="dialog"><div id="dialog-content"></div></dialog>
+    <div id="toast" class="toast" role="status" hidden></div>
+  </body>
+</html>

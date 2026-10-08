@@ -3,20 +3,17 @@ import asyncio
 import json
 import sys
 from contextlib import AsyncExitStack
-from dataclasses import asdict
+from dataclasses import asdict, replace
 
 from dotenv import load_dotenv
 
 from vagent import __version__
-from vagent.cache import AnswerCache
+from vagent.application import ApplicationService
 from vagent.config import load_config
-from vagent.context import ContextBuilder
 from vagent.errors import AppError, public_error
 from vagent.models import DeepSeekModel, DemoModel
-from vagent.runner import AgentRunner
-from vagent.skills import SkillCatalog, register_skill_tool
+from vagent.skills import SkillCatalog
 from vagent.storage import FileStore
-from vagent.tools import create_project_tools
 from vagent.usage import summarize_usage
 
 
@@ -44,7 +41,6 @@ def show_event(event: dict) -> None:
 
 async def run_agent(args: argparse.Namespace) -> int:
     config = load_config()
-    catalog = SkillCatalog.discover(config.skills_root)
     async with AsyncExitStack() as stack:
         store = stack.enter_context(FileStore.open(config.home))
         saved = None
@@ -55,20 +51,11 @@ async def run_agent(args: argparse.Namespace) -> int:
         offline = args.command == "demo" or (saved and saved["model"] == DemoModel.name)
         model = DemoModel() if offline else DeepSeekModel(config.api_key, config.model)
         read_only = saved.get("readOnly", False) if saved else getattr(args, "read_only", False)
-        cache = None
-        if config.redis_url and read_only and not offline:
-            cache = AnswerCache.connect(config.redis_url, ttl=config.cache_ttl)
-            stack.push_async_callback(cache.aclose)
-        runner = AgentRunner(
-            store=store,
-            model=model,
-            tools=register_skill_tool(create_project_tools(), catalog),
-            context=ContextBuilder(config.context_bytes),
-            skills=catalog.list(),
-            on_event=show_event,
-            read_only=read_only,
-            answer_cache=cache,
+        runtime_config = replace(config, redis_url=None) if offline else config
+        service = await stack.enter_async_context(
+            ApplicationService.open(runtime_config, model=model, existing_store=store)
         )
+        runner = service.runner(read_only=read_only, on_event=show_event)
         session_id = saved["sessionId"] if saved else args.session
         print(f"模型：{model.name}\n会话：{session_id}\n数据：{config.home}")
         if args.command == "chat":
@@ -154,6 +141,10 @@ def parser() -> argparse.ArgumentParser:
     demo.add_argument("-s", "--session", default="demo")
     commands.add_parser("config").add_subparsers(dest="action", required=True).add_parser("show")
     commands.add_parser("skills").add_subparsers(dest="action", required=True).add_parser("list")
+    web = commands.add_parser("web", help="启动本地 Web 与真实 Agent 编排")
+    web.add_argument("--port", type=int, default=3210)
+    web.add_argument("--no-open", action="store_true")
+    web.add_argument("--mcp-local", action="store_true", help="启用内置只读视频规划 MCP 服务")
     return root
 
 
@@ -166,7 +157,28 @@ def main() -> None:
     args = parser().parse_args()
     try:
         config = load_config()
-        if args.command == "config":
+        if args.command == "web":
+            import webbrowser
+
+            import uvicorn
+
+            from vagent.web import create_app
+
+            if not 1 <= args.port <= 65535:
+                raise AppError("INVALID_PORT", "端口必须为 1～65535。")
+            config = replace(config, mcp_local=config.mcp_local or args.mcp_local)
+            address = f"http://127.0.0.1:{args.port}"
+            print(f"vagent Web: {address}", flush=True)
+            if not args.no_open:
+                webbrowser.open(address)
+            uvicorn.run(
+                create_app(config, port=args.port),
+                host="127.0.0.1",
+                port=args.port,
+                access_log=False,
+                log_level="warning",
+            )
+        elif args.command == "config":
             safe = asdict(config)
             key = safe.pop("api_key")
             safe["redis_configured"] = bool(safe.pop("redis_url"))

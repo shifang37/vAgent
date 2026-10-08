@@ -17,6 +17,8 @@ class Config:
     skills_root: Path | None = None
     redis_url: str | None = field(default=None, repr=False)
     cache_ttl: int = 3600
+    mcp_config: Path | None = None
+    mcp_local: bool = False
 
 
 def load_config(env: Mapping[str, str] | None = None) -> Config:
@@ -49,6 +51,8 @@ def load_config(env: Mapping[str, str] | None = None) -> Config:
         redis_url=redis_url,
         cache_ttl=ttl,
         skills_root=Path(env["VAGENT_SKILLS_DIR"]).absolute() if env.get("VAGENT_SKILLS_DIR") else None,
+        mcp_config=Path(env["VAGENT_MCP_CONFIG"]).resolve() if env.get("VAGENT_MCP_CONFIG") else None,
+        mcp_local=env.get("VAGENT_MCP_LOCAL", "0") == "1",
     )
 
 
