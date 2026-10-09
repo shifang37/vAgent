@@ -22,7 +22,10 @@ class Arguments(BaseModel):
 class ProjectUpdate(Arguments):
     expected_revision: int = Field(ge=0)
     goal: str | None = Field(
-        default=None, max_length=2000, description="创作目的与核心信息，不重复受众或风格。"
+        default=None,
+        max_length=2000,
+        description="仅写创作目的或核心信息，例如“提升品牌认知和到店意愿”。"
+        "不要包含 audience 或 style 的描述；“提升某人群的品牌认知”中的人群限定也必须移除。",
     )
     audience: str | None = Field(default=None, max_length=500, description="受众的唯一事实来源。")
     style: str | None = Field(default=None, max_length=500, description="风格的唯一事实来源。")
@@ -41,7 +44,10 @@ class Step(Arguments):
 
 
 class PlanUpdate(Arguments):
-    steps: list[Step] = Field(max_length=12)
+    steps: list[Step] = Field(
+        max_length=12,
+        description="简短的实际交付清单；不把读取 Skill、维护清单或最终回复列为子任务。",
+    )
 
 
 ArtifactId = Annotated[
@@ -54,7 +60,12 @@ class ArtifactSave(Arguments):
     expected_version: int | None = Field(default=None, ge=1)
     kind: Literal["brief", "script", "storyboard"]
     title: str = Field(min_length=1, max_length=120)
-    content: str = Field(min_length=1, max_length=20000)
+    content: str = Field(
+        min_length=1,
+        max_length=20000,
+        description="完整正文。遵守项目 contentLimits[kind]，非空白字符含标点、英文、数字和 Markdown。"
+        "只有上限、没有最低字数要求时，初稿按上限约七成组织并保留必需信息，以工具实际计数为准。",
+    )
 
     @model_validator(mode="after")
     def require_version(self):

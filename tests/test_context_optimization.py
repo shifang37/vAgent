@@ -8,7 +8,13 @@ import pytest
 from conftest import ScriptedModel, tool_call
 from langchain_core.messages import AIMessage, HumanMessage, ToolMessage, messages_to_dict
 
-from vagent.context import PROJECT_HEADER, SKILLS_HEADER, ContextBuilder, assert_complete_protocol
+from vagent.context import (
+    PROJECT_HEADER,
+    RUN_BUDGET_HEADER,
+    SKILLS_HEADER,
+    ContextBuilder,
+    assert_complete_protocol,
+)
 from vagent.errors import AppError
 from vagent.models import DeepSeekModel
 from vagent.runner import SYSTEM_PROMPT, AgentRunner
@@ -77,6 +83,28 @@ def test_json_mapping_order_does_not_change_prompt_or_tool_definitions():
     )
     assert messages_to_dict(first.messages) == messages_to_dict(second.messages)
     assert first.input_bytes == second.input_bytes
+
+
+def test_run_budget_is_measured_after_stable_context_without_mutating_history():
+    args = context_input()
+    original = deepcopy(args)
+    builder = ContextBuilder()
+    plain = builder.build(**args)
+    first = builder.build(**args, run_budget={"modelCallsRemaining": 8, "toolCallsRemaining": 12})
+    last = builder.build(**args, run_budget={"modelCallsRemaining": 1, "toolCallsRemaining": 4})
+    assert first.messages[0].content.split(RUN_BUDGET_HEADER)[0] == plain.messages[0].content
+    assert last.messages[0].content.split(RUN_BUDGET_HEADER)[0] == plain.messages[0].content
+    assert first.input_bytes > plain.input_bytes
+    assert first.messages[1:] == last.messages[1:] == plain.messages[1:]
+    assert first.tools == last.tools and args == original
+    with pytest.raises(AppError, match="当前任务"):
+        ContextBuilder(plain.input_bytes).build(
+            **args, run_budget={"modelCallsRemaining": 8, "toolCallsRemaining": 12}
+        )
+    legacy = ContextBuilder(format_version=1)
+    assert (
+        legacy.build(**args, run_budget={"modelCallsRemaining": 8}).messages == legacy.build(**args).messages
+    )
 
 
 def test_tool_compaction_preserves_strings_number_literals_and_protocol_metadata():

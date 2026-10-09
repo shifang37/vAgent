@@ -23,7 +23,7 @@ from langgraph.graph import END, START, StateGraph
 from vagent.cache import AnswerCache
 from vagent.checkpoints import CHECKPOINT_VERSION, open_checkpointer
 from vagent.config import assert_id
-from vagent.context import ContextBuilder
+from vagent.context import RUN_BUDGET_HEADER, ContextBuilder
 from vagent.errors import AppError, failure, public_error
 from vagent.journal import RunJournal
 from vagent.models import AgentModel, StreamResponseError
@@ -34,9 +34,12 @@ from vagent.usage import extract_usage
 
 SYSTEM_PROMPT = """你是 vagent 视频创作 Agent，使用中文协助用户规划和修改创作方案。
 根据需求自主选择工具，观察工具真实结果后再行动。普通交流无需工具。
+步数预算也包含最终回复。相互独立的读取或计算可在同一响应中提出；依赖工具返回值的操作必须等结果。
+计划只列实际交付工作，不把维护计划或回复用户列为子任务；交付经工具确认后及时给出最终回复。
+只剩一次模型调用时，根据已确认结果回复；未完成事项明确说明，不能把草稿说成已保存产物。
 操作前读取已有项目或产物，尊重版本号与用户明确约束；保存失败不能声称成功。
 修改产物应保留原版，最终回复引用工具返回的 artifactId 和版本。
-goal 只描述创作目的；受众和风格分别保存在 audience/style，不在 goal 重复。
+goal 只描述创作目的，例如“提升品牌认知和到店意愿”；受众和风格分别保存在 audience/style，不在 goal 重复。
 修改受众或风格时检查 goal/constraints，使用同一次 project_update 清理旧描述，保留其他有效要求。
 用户明确的正文上限由系统保存在项目 contentLimits；正文按非空白字符计数，含标点、英文、数字和 Markdown。
 字数以 artifact_save 返回的 contentCheck 为准，不自报合格；超限应压缩后重试，不能擅自放宽用户上限。
@@ -206,6 +209,7 @@ class AgentRunner:
         }
         if context.format_version != 1:
             payload["contextVersion"] = context.format_version
+            payload["runBudgetGuidance"] = RUN_BUDGET_HEADER
         if self.read_only:
             payload["readOnly"] = True
         if self.tools.identities:
@@ -447,6 +451,10 @@ class AgentRunner:
                     project=store.snapshot()["projects"][session_id],
                     tools=specs,
                     skills=self.skills,
+                    run_budget={
+                        "modelCallsRemaining": policy.max_steps - next_state["model_steps"],
+                        "toolCallsRemaining": policy.max_tool_calls - next_state["tool_calls"],
+                    },
                 )
                 specs = report.tools
                 if (

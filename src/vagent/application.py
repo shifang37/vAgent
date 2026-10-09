@@ -5,12 +5,11 @@ import copy
 from contextlib import AsyncExitStack, asynccontextmanager
 from uuid import uuid4
 
-import httpx
-
 from vagent.cache import AnswerCache
 from vagent.config import Config, ConfigUpdate, assert_id, config_sources, require_key, update_local_settings
 from vagent.context import ContextBuilder
 from vagent.errors import AppError, public_error
+from vagent.http import ModelHttpClient
 from vagent.mcp_bridge import connect_mcp, server_configs
 from vagent.models import DeepSeekModel
 from vagent.runner import AgentRunner, RunPolicy
@@ -39,7 +38,7 @@ class ApplicationService:
     async def open(cls, config: Config, *, model=None, policy=None, existing_store=None):
         async with AsyncExitStack() as stack:
             store = existing_store or stack.enter_context(FileStore.open(config.home))
-            client = await stack.enter_async_context(httpx.AsyncClient(timeout=60))
+            client = await stack.enter_async_context(ModelHttpClient(timeout=60))
             catalog = SkillCatalog.discover(config.skills_root)
             tools = register_skill_tool(create_project_tools(), catalog)
             mcp_status = await stack.enter_async_context(
@@ -136,6 +135,7 @@ class ApplicationService:
                         "stream": False,
                     },
                     timeout=15,
+                    extensions={"vagent_connect_retries": False},
                 )
                 if response.status_code in {401, 403}:
                     raise AppError("AUTH_ERROR", "DeepSeek 凭证无效或没有模型权限。")

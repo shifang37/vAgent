@@ -5,7 +5,7 @@ import pytest
 from conftest import ScriptedModel, tool_call
 from langchain_core.messages import AIMessage, HumanMessage, messages_from_dict
 
-from vagent.context import ContextBuilder, assert_complete_protocol
+from vagent.context import RUN_BUDGET_HEADER, ContextBuilder, assert_complete_protocol
 from vagent.errors import AppError
 from vagent.models import DemoModel
 from vagent.runner import AgentRunner, RunPolicy
@@ -97,6 +97,49 @@ async def test_step_limit_prevents_unbounded_loop(store):
     assert result["errorCode"] == "STEP_LIMIT"
     assert model.calls == 2
     assert_complete_protocol(messages_from_dict(result["messages"]))
+
+
+async def test_model_sees_original_remaining_budget_after_failure_and_restart(store):
+    observed = []
+
+    def respond(messages, step):
+        observed.append(json.loads(messages[0].content.split(RUN_BUDGET_HEADER)[1]))
+        if step == 0:
+            return tool_call("artifact_save", {"kind": "brief", "title": "saved", "content": "content"})
+        raise RuntimeError("connection interrupted")
+
+    runner = AgentRunner(
+        store=store,
+        model=ScriptedModel(respond),
+        tools=create_project_tools(),
+        policy=RunPolicy(max_steps=3, max_tool_calls=2),
+    )
+    first = await runner.run("coffee", "保存方案")
+    assert first["resumable"] and first["modelSteps"] == 2
+    home = store.home
+    store.close()
+    with FileStore.open(home) as reopened:
+
+        def finish(messages, _):
+            observed.append(json.loads(messages[0].content.split(RUN_BUDGET_HEADER)[1]))
+            return AIMessage(content="已保存")
+
+        final = await AgentRunner(
+            store=reopened,
+            model=ScriptedModel(finish),
+            tools=create_project_tools(),
+            policy=RunPolicy(max_steps=20, max_tool_calls=20),
+        ).resume(first["id"])
+        assert final["status"] == "completed" and final["modelSteps"] == 3
+        assert final["toolCalls"] == 1 and len(reopened.snapshot()["artifacts"]) == 1
+        assert all(
+            RUN_BUDGET_HEADER not in message.content for message in messages_from_dict(final["messages"])
+        )
+    assert observed == [
+        {"modelCallsRemaining": 3, "toolCallsRemaining": 2},
+        {"modelCallsRemaining": 2, "toolCallsRemaining": 1},
+        {"modelCallsRemaining": 1, "toolCallsRemaining": 1},
+    ]
 
 
 async def test_tool_limit_blocks_entire_batch_and_pairs_all_results(store):

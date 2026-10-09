@@ -178,4 +178,8 @@ def project_memory_conflicts(state: dict, candidate: dict) -> list[str]:
 def check_project_memory(state: dict, candidate: dict) -> None:
     conflicts = project_memory_conflicts(state, candidate)
     if conflicts:
-        raise AppError("MEMORY_CONFLICT", "；".join(conflicts) + "。本次项目修改未保存，revision 不变。")
+        raise AppError(
+            "MEMORY_CONFLICT",
+            "；".join(conflicts) + "。请一次检查全部字段：goal 仅保留创作目的，同时移除其中的受众和风格描述；"
+            "修正 constraints 中的旧事实。本次项目修改未保存，revision 不变。",
+        )

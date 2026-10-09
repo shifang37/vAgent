@@ -1,8 +1,9 @@
 """Fixed M1-A suite. Defaults to an offline fixture; --live explicitly spends model tokens.
 
 New suites use a fresh data directory; --continue-from explicitly resumes a failed
-suite. No automatic retries/resume, Redis, or user-configured external MCP servers.
-Reports keep failures and missing usage.
+suite. Failed runs require explicit resume; sent model requests are never retried
+automatically. Connection retries, failures and missing usage are reported separately.
+No Redis or user-configured external MCP servers are used.
 """
 
 import argparse
@@ -353,6 +354,7 @@ def totals(report):
         "completedCases": len(runs),
         "plannedCases": len(CASES),
         "modelCalls": len(calls),
+        "connectionRetries": sum(run.get("connectionRetries", 0) for run in runs),
         "toolCalls": sum(run["toolCalls"] for run in runs),
         "elapsedSeconds": round(sum(item["elapsedSeconds"] for item in report["cases"]), 3),
         "observedInputTokens": sum(run["usage"]["observedInputTokens"] for run in runs),
@@ -554,6 +556,7 @@ async def run_suite(args):
                 elapsed_before = prior["elapsedSeconds"] if prior else 0
                 first_text = prior["firstTextSeconds"] if prior else None
                 started = time.monotonic()
+                connections_before = service.http_client.connection_retries
 
                 def event_sink(event):
                     nonlocal first_text
@@ -576,6 +579,11 @@ async def run_suite(args):
                     record = await runner.run(case.session, case.prompt, request_id=case.name)
                 run = service.run_view({**record, "events": events})
                 run["modelCalls"] = record["modelCalls"]
+                run["connectionRetries"] = (
+                    (prior["run"].get("connectionRetries", 0) if prior else 0)
+                    + service.http_client.connection_retries
+                    - connections_before
+                )
                 after = domain(service.session(case.session))
                 checks = grade(case, before, after, run)
                 checks["within_context_budget"] = run["contextBytes"] <= args.context_bytes

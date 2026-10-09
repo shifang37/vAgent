@@ -11,7 +11,7 @@ from vagent import __version__
 from vagent.application import ApplicationService
 from vagent.config import load_config
 from vagent.errors import AppError, public_error
-from vagent.models import DeepSeekModel, DemoModel
+from vagent.models import DemoModel
 from vagent.skills import SkillCatalog
 from vagent.storage import FileStore
 from vagent.usage import summarize_usage
@@ -81,7 +81,7 @@ async def run_agent(args: argparse.Namespace) -> int:
             if saved is None:
                 raise AppError("NOT_FOUND", "没有这个 Run，请使用 inspect 查看运行 ID。")
         offline = args.command == "demo" or (saved and saved["model"] == DemoModel.name)
-        model = DemoModel() if offline else DeepSeekModel(config.api_key, config.model)
+        model = DemoModel() if offline else None
         read_only = saved.get("readOnly", False) if saved else getattr(args, "read_only", False)
         runtime_config = replace(config, redis_url=None) if offline else config
         service = await stack.enter_async_context(
@@ -90,7 +90,7 @@ async def run_agent(args: argparse.Namespace) -> int:
         display = EventDisplay()
         runner = service.runner(read_only=read_only, on_event=display)
         session_id = saved["sessionId"] if saved else args.session
-        print(f"模型：{model.name}\n会话：{session_id}\n数据：{config.home}")
+        print(f"模型：{runner.model.name}\n会话：{session_id}\n数据：{config.home}")
         if args.command == "chat":
             if not sys.stdin.isatty():
                 raise AppError("TTY_REQUIRED", "交互模式需要终端；自动化调用请使用 run。")
