@@ -6,6 +6,7 @@ import json
 import os
 import threading
 from collections.abc import Callable
+from contextlib import contextmanager
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import Annotated, Any, Literal, TypeVar
@@ -17,12 +18,31 @@ from pydantic.alias_generators import to_camel
 
 from vagent.config import assert_id
 from vagent.errors import AppError, failure
+from vagent.video.contracts import Job
+from vagent.waiting import WaitBinding
 
 T = TypeVar("T")
 
 
 def now() -> str:
     return datetime.now(UTC).isoformat()
+
+
+def atomic_write_bytes(path: Path, content: bytes) -> None:
+    """Replace one local file only after its complete contents have been flushed."""
+    temporary = path.with_name(f"{path.stem}-{uuid4()}.tmp")
+    try:
+        with temporary.open("xb") as handle:
+            handle.write(content)
+            handle.flush()
+            os.fsync(handle.fileno())
+        os.replace(temporary, path)
+    finally:
+        temporary.unlink(missing_ok=True)
+
+
+def atomic_write_json(path: Path, value: dict) -> None:
+    atomic_write_bytes(path, json.dumps(value, ensure_ascii=False, indent=2, allow_nan=False).encode("utf-8"))
 
 
 class Record(BaseModel):
@@ -99,7 +119,7 @@ class ModelCall(Record):
     error_code: str | None = None
 
 
-class RunRecord(Record):
+class RunRecordV1(Record):
     id: str
     session_id: str
     request_id: str
@@ -132,6 +152,13 @@ class RunRecord(Record):
     events: list[dict[str, Any]] = Field(default_factory=list)
 
 
+class RunRecord(RunRecordV1):
+    status: Literal["running", "waiting_external", "completed", "failed", "cancelled", "interrupted"]
+    video_mode: Literal["off", "mock"] = "off"
+    active_wait_id: str | None = None
+    external_wait_seconds: float = Field(default=0, ge=0, allow_inf_nan=False)
+
+
 class Success(Record):
     ok: Literal[True]
     data: Any
@@ -152,13 +179,20 @@ class Operation(Record):
     result: Success | Failure = Field(discriminator="ok")
 
 
-class Database(Record):
+class DatabaseV1(Record):
     schema_version: Literal[1]
     projects: dict[str, Project]
     sessions: dict[str, Session]
     artifacts: dict[str, Artifact]
-    runs: dict[str, RunRecord]
+    runs: dict[str, RunRecordV1]
     operations: dict[str, Operation]
+
+
+class Database(DatabaseV1):
+    schema_version: Literal[2]
+    runs: dict[str, RunRecord]
+    jobs: dict[str, Job]
+    waits: dict[str, WaitBinding]
 
 
 class FileStore:
@@ -183,35 +217,46 @@ class FileStore:
             with handle:
                 json.dump({"pid": os.getpid(), "createdAt": now()}, handle)
             try:
-                raw = (home / "state.json").read_text(encoding="utf-8")
+                raw = (home / "state.json").read_bytes()
             except FileNotFoundError:
                 state = {
-                    "schemaVersion": 1,
+                    "schemaVersion": 2,
                     "projects": {},
                     "sessions": {},
                     "artifacts": {},
                     "runs": {},
                     "operations": {},
+                    "jobs": {},
+                    "waits": {},
                 }
             else:
                 try:
                     state = json.loads(raw)
-                    Database.model_validate(state)
+                    version = state["schemaVersion"]
+                    if type(version) is not int or version not in {1, 2}:
+                        raise ValueError("Unsupported schema version")
+                    (DatabaseV1 if version == 1 else Database).model_validate(state)
                     for collection in (state["sessions"], state["runs"]):
                         for item in collection.values():
                             messages_from_dict(item["messages"])
-                    # Preserve schema v1 domain data and operation fingerprints from the TS prototype.
-                    for run in state["runs"].values():
-                        run.setdefault("contextBytes", 0)
-                        run.setdefault("droppedMessages", 0)
                 except (ValueError, TypeError, KeyError):
                     raise AppError(
                         "INVALID_STORE", "本地状态损坏或版本不支持，已保留原文件，未重置数据。"
                     ) from None
+                if version == 1:
+                    # Keep the exact pre-migration bytes, including legacy message encoding.
+                    # The final transaction below is the only replacement of state.json.
+                    atomic_write_bytes(home / f"state-v1-{uuid4()}.json", raw)
+                    state = {**copy.deepcopy(state), "schemaVersion": 2, "jobs": {}, "waits": {}}
+                    Database.model_validate(state)
             store = cls(home, state)
 
             def recover(draft: dict) -> None:
+                from vagent.video.jobs import recover_interrupted_jobs
+
                 for run in draft["runs"].values():
+                    run.setdefault("contextBytes", 0)
+                    run.setdefault("droppedMessages", 0)
                     if run["status"] == "running":
                         run.update(status="interrupted", updatedAt=now())
                         # An abruptly lost model request has unknown elapsed time. Charge
@@ -221,6 +266,7 @@ class FileStore:
                         for call in run.get("modelCalls", []):
                             if call["status"] == "started":
                                 call.update(status="interrupted", errorCode="INTERRUPTED")
+                recover_interrupted_jobs(draft, now())
 
             store.transaction(recover)
             return store
@@ -232,22 +278,23 @@ class FileStore:
         with self._mutex:
             return copy.deepcopy(self._state)
 
-    def transaction(self, mutate: Callable[[dict], T]) -> T:
+    @contextmanager
+    def locked(self):
+        """Keep auxiliary local files under this live instance's single-writer lock."""
         with self._mutex:
             if self._closed:
                 raise AppError("STORE_CLOSED", "状态存储已关闭。")
+            yield
+
+    def transaction(self, mutate: Callable[[dict], T]) -> T:
+        from vagent.video.jobs import validate_job_changes
+
+        with self.locked():
             draft = copy.deepcopy(self._state)
             value = mutate(draft)
             Database.model_validate(draft)
-            temporary = self.home / f"state-{uuid4()}.tmp"
-            try:
-                with temporary.open("x", encoding="utf-8", newline="\n") as handle:
-                    json.dump(draft, handle, ensure_ascii=False, indent=2)
-                    handle.flush()
-                    os.fsync(handle.fileno())
-                os.replace(temporary, self.home / "state.json")
-            finally:
-                temporary.unlink(missing_ok=True)
+            validate_job_changes(self._state["jobs"], draft)
+            atomic_write_json(self.home / "state.json", draft)
             self._state = draft
             return copy.deepcopy(value)
 

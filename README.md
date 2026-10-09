@@ -4,7 +4,7 @@
 
 当前已实现 **Python CLI + 本地 Web Agent**，前端通过同源 API/SSE 调用共享 LangGraph Runner。2026-10-08 完成真实 DeepSeek、持久记忆、Skills、8 种工具（含 2 个本地 MCP 工具）的编排验收，随后补齐记忆冲突与正文长度的后端校验。当前交付文本创作材料，尚未接入视频生成 API；首轮发现见 [编排测试报告](./docs/AGENT_ORCHESTRATION_ACCEPTANCE.md)，修复与验证范围见 [质量校验验收](./docs/QUALITY_ACCEPTANCE.md)。
 
-任务 2 已补齐本地配置向导、CLI/Web 流式回复和 9 类固定评测。**2026-10-09 完成 A5：完整真实套件 9/9 通过，M1-A 已验收。** 最终套件包含 3 次显式恢复，累计 27 次模型调用、25 次工具调用；此前失败记录完整保留，详见 [M1-A 验收记录](./docs/M1A_ACCEPTANCE.md)。同日完成 M1-B 的 **B0 契约与持久等待验证**，新增严格视频/Job/等待类型、离线中断实验和旧检查点兼容回归；应用仍未启用视频任务。详见 [B0 验收记录](./docs/M1B_B0_ACCEPTANCE.md)，下一步按 [M1-B 任务规划](./docs/M1B_PLAN.md) 实施 B1。
+任务 2 已补齐本地配置向导、CLI/Web 流式回复和 9 类固定评测。**2026-10-09 完成 A5：完整真实套件 9/9 通过，M1-A 已验收。** 最终套件包含 3 次显式恢复，累计 27 次模型调用、25 次工具调用；此前失败记录完整保留，详见 [M1-A 验收记录](./docs/M1A_ACCEPTANCE.md)。同日完成 M1-B 的 **B0 契约与持久等待验证、B1 持久 Job 与 Mock Worker**：新增 schema v2 迁移、两层去重、独立 Mock 账本、查询重试和七处 Job 强退恢复验证。应用仍未注册视频工具，CLI/Web 继续交付文本；详见 [B0 验收](./docs/M1B_B0_ACCEPTANCE.md) 与 [B1 验收](./docs/M1B_B1_ACCEPTANCE.md)，下一步按 [M1-B 任务规划](./docs/M1B_PLAN.md) 实施 B2。
 
 ## 当前进度
 
@@ -20,7 +20,7 @@
 | 04 本地 Web | 已接入真实 Agent | 单 Key 配置向导、模型切换与验证、逐段文本流、断线补齐、停止/恢复、产物与编排观测 |
 | MCP | 已实现并验证 stdio | 显式只读白名单、工具发现、Schema 校验、取消/超时、结果大小限制 |
 | 内容质量校验 | 已通过回归与真实纠错验收 | 记忆字段职责、旧事实残留检查、持久字数上限、保存前计数、未纠正错误禁止报告完成 |
-| M1-B 模拟视频 | B0 已完成，B1–B5 待实施 | 视频/Job/等待契约、同批中断与五处强退实验、旧检查点兼容；尚无应用 JobService/Worker，详见 [任务规划](./docs/M1B_PLAN.md) |
+| M1-B 模拟视频 | B0、B1 已完成，B2–B5 待实施 | schema v2、持久 JobService/Mock Worker、两层去重、查询重试及强退验证；四工具和应用生命周期尚待接入，详见 [B1 验收](./docs/M1B_B1_ACCEPTANCE.md) |
 | M1-C 真实视频 | 待实施 | 真实供应商接入、媒体下载/播放与真实视频验收 |
 
 每个独立完成的代码部分都同步更新本 README、提交并推送 GitHub。阶段目标见 [M1 计划](./M1_PLAN.md) 和 [Harness 设计](./AGENT_HARNESS_DESIGN.md)。
@@ -236,11 +236,14 @@ src/vagent/
   context.py   上下文组装与完整轮次裁剪
   quality.py   记忆冲突、用户字数要求与正文计数校验
   tools.py     工具注册、Pydantic 校验、项目与产物操作
-  storage.py   单写锁、事务、原子替换、操作日志
+  storage.py   单写锁、事务、原子替换、操作日志、schema v1→v2 迁移
   skills.py    技能发现、元信息与按需正文读取
   contracts.py B0：不依赖 Store/SDK 的严格 JSON 类型
   waiting.py   B0：通用等待与恢复指针契约，尚未接入生产 Runner
   video/contracts.py B0：视频能力、请求、Job、供应商协议与状态约束
+  video/jobs.py B1：原子登记、请求冻结、去重、版本检查和启动恢复
+  video/worker.py B1：串行提交/查询、超时、持久重试和停止
+  video/providers/mock.py B1：独立持久上游账本与服务端模拟轨迹
 skills/        内置 SKILL.md，随 wheel 分发
 tests/         pytest 行为与协议测试
 scripts/probe_m1b_wait.py B0：独立临时目录中的持久等待实验
@@ -256,7 +259,7 @@ LangGraph 提供图执行底座，项目自己定义状态、路由、上下文�
 - **预算提示**：上下文 v2 在稳定前缀和项目事实之后提供实际剩余模型/工具次数，模型剩余次数包含本次调用；重启后继续扣除已用额度，提示不写入对话历史。v1 布局保持原状。
 - **日志边界**：不直接输出供应商异常或参数校验中的原始输入值。配置展示只返回 Key 是否存在。
 
-去重仅针对同一请求/操作 ID，不承诺不同 ID 之间的语义去重。JSON 存储面向单用户小规模使用，同步本地文件写入不是可抢占的异步任务。
+文本工具去重针对同一请求/操作 ID。B1 JobService 另限制每个 Run 最多一个视频 Job：不同调用 ID 的同一规范化视频请求返回原 jobId，不同请求返回冲突；这不是语义去重。JSON 存储面向单用户小规模使用，同步本地文件写入不是可抢占的异步任务。
 
 ## 上下文与 Skills
 
@@ -293,16 +296,17 @@ description: 说明哪些任务需要这个技能。
 
 ## 数据兼容与限制
 
-默认数据目录为 `~/.vagent/`，可用 `VAGENT_HOME` 覆盖。`state.json` 保存成功会话、项目、产物、Run 与操作结果；`checkpoints.sqlite` 保存图执行位置和消息。两者共同用于恢复，应在程序退出后一起备份和迁移。配置 Key 不写入状态。`inspect` 会显示创作正文。
+默认数据目录为 `~/.vagent/`，可用 `VAGENT_HOME` 覆盖。`state.json` 保存会话、项目、产物、Run、操作结果以及 B1 的 jobs/waits；`checkpoints.sqlite` 保存图执行位置和消息。B1 的 `mock-video.json` 独立保存模拟上游受理记录、请求、轨迹和调用计数。应在程序退出后备份完整数据目录。配置 Key 不写入状态。`inspect` 会显示创作正文。
 
-Python 版保留 schema v1 的领域数据结构和工具 JSON 字段（如 `artifactId`、`expectedVersion`），并验证了读取原 TS 消息格式的兼容行为。已有项目可以继续使用原数据目录；无效或不支持的状态文件会报错并保留原文件。
+当前存储为 schema v2。打开 v1 数据时，在实例锁下验证旧状态与消息，先将原始字节保存为同目录的 `state-v1-<UUID>.json`，再原子迁移，保留原项目、产物版本、Operation 指纹、用量和检查点。缺少视频字段的旧 Run 按 off 解释，execution v1 与上下文 v1/v2 继续按原配置恢复。迁移写入失败、损坏数据和未知版本均保留原状态文件；单独的 v1 快照不能代替完整目录备份。
 
-- 成功会话可跨重启继续；未完成 Run 重启后标记为 `interrupted`，已提交产物保留，不自动重放。
+- 成功会话可跨重启继续；执行中的普通 Run 重启后标记为 `interrupted`，已提交产物保留，不自动重放。预留的 `waiting_external` 记录原样保留，生产等待协调由 B3 接入。
+- B1 已登记但尚未提交的 Job 可由 Worker 继续推进；丢失提交结果的任务进入 `unknown`，不自动重提。已确认上游 ID 只用于继续查询，失败窗口和累计次数跨重启保留。
 - 应用快照和 SQLite 检查点分别提交，依靠同步图检查点、操作幂等和恢复时补交会话处理提交间隙；并非跨 JSON/SQLite 的单一数据库事务。
 - 异常断电可能留下 `instance.lock`；确认没有进程使用该数据目录后才手动移除，程序不会自动抢锁。
-- CLI/Web 已支持流式草稿，完成后以持久回复替换；草稿不写入检查点，中断后不作为下一次模型输入。自动摘要、跨项目偏好记忆和视频任务尚未实现。
+- CLI/Web 已支持流式草稿，完成后以持久回复替换；草稿不写入检查点，中断后不作为下一次模型输入。自动摘要、跨项目偏好记忆和视频工具/页面接入尚未实现。
 
-后续视频服务通过注册工具接入独立 Job 服务和供应商适配器。Agent Run 与视频 Job 分开记录；长任务状态、付费提交与恢复策略独立实现，结果不确定的付费提交不能盲目重试。当前只需要 DeepSeek Key，视频服务 Key 在真实视频阶段单独配置。
+B1 的 JobService、MockVideoAdapter 和 JobWorker 已可通过 Python API 独立使用和测试，不需要模型或 Key。Worker 支持单步推进及 start/stop，尚未由 CLI/Web 应用自动启动。B2 接入视频工具和模式，B3 接入生产等待，B4 交付 Job 命令与页面。Mock 只保存带 `simulated: true`、`mediaAvailable: false` 的描述，不生成媒体文件。当前文本 Agent 只需要 DeepSeek Key，视频服务 Key 在真实视频阶段单独配置。
 
 ## 验证与打包
 
@@ -316,7 +320,7 @@ node --check web/app.js
 .\.venv\Scripts\python.exe -m build --no-isolation --outdir dist/python
 ```
 
-本地 Python 3.12 测试结果：**254 passed，1 skipped**。跳过的是当前 Windows 账户无符号链接创建权限的测试。B0 在 A5 的 210 项基础上新增 44 项：严格视频契约、请求冻结/来源、Job 状态、等待恢复指针、同批多个中断、五处真实子进程强退及两种旧上下文指纹兼容。原工具闭环、预算、质量校验、只读缓存、MCP、配置/流式协议、CLI 和评测继续通过。Node 仅用于开发时检查前端语法，运行 Agent 无需安装。
+本地 Python 3.12 测试结果：**315 passed，1 skipped**。跳过的是当前 Windows 账户无符号链接创建权限的测试。B0 在 A5 的 210 项基础上新增 44 项；B1 再新增 61 项，覆盖迁移、两层去重、来源冻结、Mock 轨迹、查询重试、关闭/落盘失败与七处 Job 子进程强退。两个固定的旧上下文指纹还通过了实际 schema v1→v2 迁移后的恢复验证。原工具闭环、预算、质量校验、只读缓存、MCP、配置/流式协议、CLI 和评测继续通过。Node 仅用于开发时检查前端语法，运行 Agent 无需安装。
 
 已验证离线 CLI，以及 wheel 安装到独立虚拟环境后在仓库目录之外运行 `skills list`、`demo`、`inspect`。本次新增验证：新建独立虚拟环境安装 wheel，保存产物后取消，再从仓库外通过 CLI `resume` 完成原 Run，仍仅有一个产物；`pip check` 通过。源码包与 wheel 仅本地构建，未发布 PyPI。GitHub Actions 配置 Ubuntu/Windows、Python 3.11/3.12 检查，远端结果见 [Actions](https://github.com/shifang37/vAgent/actions)。
 
@@ -324,4 +328,4 @@ node --check web/app.js
 
 上下文 v2 的 wheel 已在同一独立环境重新安装验证：仓库外执行 `skills list`、取消后 `resume`、`inspect`、`usage --run` 均通过，格式版本保持 2、最终仍仅有一个产物，`pip check` 通过。v1 检查点兼容由自动化测试覆盖，详细记录见 [上下文优化验收](./docs/CONTEXT_OPTIMIZATION_ACCEPTANCE.md)。
 
-自动化测试验证工程行为。2026-10-09 的完整真实套件 9/9 通过，保留了此前连接故障、步数耗尽和超长拒绝的全部证据；单套通过不代表生产成功率或创作质量保证。M1-A 验收完成，M1-B 已完成 B0 契约与等待实验，下一步是 B1 的持久 Job、Mock Worker 和存储迁移。B0 没有新增真实模型调用；两阶段证据分别见 [M1-A 验收记录](./docs/M1A_ACCEPTANCE.md) 与 [B0 验收记录](./docs/M1B_B0_ACCEPTANCE.md)。
+自动化测试验证工程行为。2026-10-09 的完整真实套件 9/9 通过，保留了此前连接故障、步数耗尽和超长拒绝的全部证据；单套通过不代表生产成功率或创作质量保证。M1-A 已验收，M1-B 已完成 B0 契约/等待实验和 B1 持久 Job/Mock Worker，下一步为 B2。B0/B1 没有新增真实模型或视频 API 调用；证据见 [M1-A 验收](./docs/M1A_ACCEPTANCE.md)、[B0 验收](./docs/M1B_B0_ACCEPTANCE.md) 与 [B1 验收](./docs/M1B_B1_ACCEPTANCE.md)。

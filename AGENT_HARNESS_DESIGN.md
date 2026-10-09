@@ -222,14 +222,14 @@ created → running → completed
 
 ## 8. 与视频生成结合
 
-2026-10-09 已完成 M1-B 的 B0 契约与持久等待实验，见 [契约协议](./docs/M1B_CONTRACTS.md) 和 [B0 验收记录](./docs/M1B_B0_ACCEPTANCE.md)。[M1-B 任务规划](./docs/M1B_PLAN.md) 中的 B1–B5 继续实现存储迁移、Job/Worker、生产 Run 等待与 CLI/Web 交付；当前实现状态仍以 README 为准。
+2026-10-09 已完成 M1-B 的 B0 契约/持久等待实验与 B1 存储迁移/持久 Job/Mock Worker，见 [契约协议](./docs/M1B_CONTRACTS.md)、[B0 验收](./docs/M1B_B0_ACCEPTANCE.md) 和 [B1 验收](./docs/M1B_B1_ACCEPTANCE.md)。[M1-B 任务规划](./docs/M1B_PLAN.md) 中的 B2–B5 继续接入视频工具、生产 Run 等待与 CLI/Web；当前实现状态仍以 README 为准。
 
 ### 8.1 先设计并模拟的接口
 
 ```python
 from typing import Protocol
 
-# B0 已在 video/contracts.py 定义领域类型与协议；应用接入由 B1–B3 实施。
+# B0 定义领域协议，B1 已实现 JobService/Mock/Worker；应用接入由 B2–B4 实施。
 class VideoProviderAdapter(Protocol):
     def capabilities(self) -> VideoCapabilities: ...
     async def submit(self, req: VideoRequest, operation_key: str) -> ProviderTaskHandle: ...

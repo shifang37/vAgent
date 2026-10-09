@@ -1,3 +1,5 @@
+import json
+
 import pytest
 from langchain_core.messages import AIMessage
 
@@ -54,11 +56,19 @@ async def test_b0_preserves_v1_execution_with_both_context_layouts(store, versio
     before = await runner.run("legacy", "Save an artifact", request_id="original-request")
     assert before["resumable"] and before["executionVersion"] == 1
     original = store.snapshot()
-    assert original["schemaVersion"] == 1
+    assert original["schemaVersion"] == 2
     assert before["modelSteps"] == 2 and before["toolCalls"] == 1
     home = store.home
     store.close()
+    # Recreate the v1 domain envelope around the unchanged execution-v1 checkpoint.
+    # This now covers migration as well as both original configuration signatures.
+    legacy = {key: value for key, value in original.items() if key not in {"jobs", "waits"}}
+    legacy["schemaVersion"] = 1
+    legacy_bytes = json.dumps(legacy, ensure_ascii=False).encode("utf-8")
+    (home / "state.json").write_bytes(legacy_bytes)
     with FileStore.open(home) as reopened:
+        assert reopened.snapshot()["schemaVersion"] == 2
+        assert next(home.glob("state-v1-*.json")).read_bytes() == legacy_bytes
         model = LegacyModel(finish=True)
         resumed = AgentRunner(store=reopened, model=model, tools=create_project_tools())
         final = await resumed.resume(before["id"])

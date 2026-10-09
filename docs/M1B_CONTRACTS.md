@@ -1,8 +1,8 @@
 # M1-B 契约与恢复协议
 
-日期：2026-10-09。B0 已实现本文的数据契约和离线等待实验；JobService、Worker、schema v2 迁移与生产 Run 挂起仍由 B1–B3 接入。当前应用继续使用 schema v1、execution v1，视频能力尚未启用。
+日期：2026-10-09。B0 已实现数据契约和离线等待实验；B1 已实现 JobService、Mock Worker 和 schema v2 迁移。当前应用使用 schema v2、execution v1，尚未注册视频工具；生产 Run 挂起与自动恢复由 B3 接入。
 
-范围依据：[M1-B 任务规划](./M1B_PLAN.md)。验证证据见 [B0 验收记录](./M1B_B0_ACCEPTANCE.md)。
+范围依据：[M1-B 任务规划](./M1B_PLAN.md)。验证证据见 [B0 验收](./M1B_B0_ACCEPTANCE.md) 与 [B1 验收](./M1B_B1_ACCEPTANCE.md)。
 
 ## 1. 模块与版本
 
@@ -11,12 +11,13 @@
 | `src/vagent/contracts.py` | 不依赖 Store 或模型 SDK 的严格 JSON 类型、UTC 时间、标识符、不可变数组 |
 | `src/vagent/video/contracts.py` | VideoCapabilities、VideoRequest、产物引用、供应商协议/错误、Job/JobResult、查询策略与合法状态迁移关系 |
 | `src/vagent/waiting.py` | 通用 ToolExecutionContext、延迟结果、WaitBinding、ResumeToken、成功/失败工具结果；不导入视频模块 |
+| `src/vagent/video/jobs.py`、`worker.py`、`providers/mock.py` | B1：原子 Job 登记、两层去重、来源冻结、独立上游账本、串行 Worker、查询恢复 |
 | `scripts/probe_m1b_wait.py` | 使用真实 FileStore、项目工具和 SQLite 的离线图实验；不向应用注册工具或启动后台服务 |
 
 | 版本维度 | 当前值 | 后续规则 |
 |---|---|---|
 | 视频对象 `contractVersion` | 1 | B0 Job 的字段契约；与存储/执行版本分开 |
-| JSON `schemaVersion` | 1 | B1 迁移至 2，加入 jobs/waits；本次不迁移用户数据 |
+| JSON `schemaVersion` | 2 | B1 在实例锁下自动迁移 v1，先保存原始快照，再增加 jobs/waits |
 | Run `executionVersion` | 1 | 保留旧图；`WAIT_EXECUTION_VERSION=2` 只是为 B3 新图保留的版本 |
 | Run `contextVersion` | 1 或 2 | 与 executionVersion 独立；两种旧布局都需要继续支持 |
 
@@ -47,11 +48,13 @@
 - VideoRequest 的提示词有界且非空，只清理首尾空白；sourceRefs 可为空，提供时必须包含确切版本，不接受重复引用。
 - `validate_video_request` 检查服务端选定的能力、所属项目和真实产物版本。跨项目来源与不存在来源均返回 `SOURCE_NOT_FOUND`；版本不存在返回 `SOURCE_VERSION_NOT_FOUND`。
 - 模型不能通过参数传入 projectId、runId、operationKey、mode、API Key 或 baseUrl。provider/model 名称仍须匹配服务端注册表，不构成任意供应商调用权限。
-- B1 必须在创建 Job 的同一 Store 事务中复核来源，避免校验与登记之间的竞态。旧版文本产物保持不变，因此来源 ID/版本能稳定定位原内容。
+- B1 在创建 Job 的同一 Store 事务中复核来源，避免校验与登记之间的竞态。旧版文本产物历史保持不变，因此来源 ID/版本能稳定定位原内容。
 
 请求指纹是确定性 JSON 的 SHA-256：包括 provider、model、能力版本、清理首尾空白后的提示词、规格和有序来源；按对象键排序，拒绝 NaN/Infinity。来源顺序和提示词内部空白保留，不宣称语义等价去重。
 
 请求指纹用于同 Run 的单次生成槽位。既有 `FileStore.operation_fingerprint` 仍负责原工具调用的参数冲突检测，其编码算法不变；两种指纹不能互相替代。
+
+B1 的 `JobService.generate(request, context=...)` 接受请求和服务端上下文，返回原 `ok/data` 或 `ok/error` 格式。原调用重放复用已登记的 Operation 结果；不同调用 ID 的同一规范化请求复用原 Job，不同请求返回 `JOB_ALREADY_EXISTS`，错误消息携带已有 jobId。登记结果是该调用当时的状态，实时状态应通过 `get` 读取；生成工具注册属于 B2。
 
 ## 3. 供应商提交、查询和结果
 
@@ -64,7 +67,7 @@ class VideoProviderAdapter(Protocol):
 
 `ProviderTaskHandle` 必须有上游 ID，可附初始快照；附带快照必须属于同一个 ID，因此可表达立即完成的提交。`ProviderTaskSnapshot` 只表示已确认的 queued/running/succeeded/failed，生成失败必须携带 `stage=generate` 的错误。取消是独立的 `CancellableProvider` 协议；能力标记不能替代实际实现。
 
-| 供应商调用结果 | 统一表达 | Worker 应采用的动作（B1） |
+| 供应商调用结果 | 统一表达 | Worker 动作（B1 已实现） |
 |---|---|---|
 | 提交已确认受理 | ProviderTaskHandle | 保存原上游 ID，后续只 query |
 | 明确未受理 | ProviderCallError，stage=submit，submission_outcome=not_accepted | Job failed，保留提交错误，不创建替代任务 |
@@ -89,12 +92,13 @@ pending_submit → submitting → queued → running → succeeded / failed
 
 - pending_submit 的 submitAttempts 为 0；进入 submitting 之前持久记录第一次尝试，之后最多为 1。submitting/unknown 尚无已确认的上游 ID；queued/running/succeeded 必须有原 ID。
 - 成功必须同时有匹配的 JobResult；失败必须有正确阶段的错误。unknown 表示提交不确定，不能写成 generation failure。
-- `job_transition_allowed` 拒绝 running 回退到 queued/submitting，以及 unknown/终态自动重提；允许同状态更新查询元信息。B1 还须在事务中比较旧状态、revision 和不可变字段，不能只验证新对象的结构。
+- `job_transition_allowed` 拒绝 running 回退到 queued/submitting，以及 unknown/终态自动重提；允许同状态更新查询元信息。B1 在 Store 事务中比较旧状态、revision、累计次数和不可变字段，并检查每个 Run 只有一个 Job、原登记 Operation 同时存在。供应商查询偶尔回报 queued 时，不回退本地已经确认的 running。
 - 正常每 2 秒查询。提交/单次查询超时初始均为 15 秒；查询错误后的重试间隔为 1/2/4 秒，三次重试仍失败则暂停。参数通过已保存的 PollingPolicy 决定，不在 Worker 中重新生成预算。
 - queryAttempts 累计，consecutiveQueryErrors 表示当前失败窗口；retrying 的计数处于窗口内，paused 表示初次查询及重试均已失败。恢复查询由用户发起，清零失败窗口并继续累计总查询数，不改变提交次数或上游 ID。
 - queryState=retrying/paused 时，Job 仍为最近一次确认的 queued/running。只有 polling/retrying 有 nextPollAt，暂停与终态不自动安排下一次查询。
+- B1 增加可缺省的 `queryStartedAt`。发起 query 前先累计 queryAttempts、保存开始时间，并将 nextPollAt 设为本次超时截止。进程在查询中退出后，这次已记账的查询消费一个失败窗口；重试时间锚定原截止，不因再次重启而重置。正常响应、异常和 Worker 停止都会清除此字段。
 
-这些类型约束已经实现；真正的队列、查询调用、原子去重与 Worker 生命周期属于 B1。
+这些类型约束、持久队列、查询调用、原子去重及 Worker start/stop 已由 B1 实现；应用生命周期和 Agent 等待协调仍待接入。Mock 的 `mock-video.json` 与 `state.json` 分别原子提交；Worker 只使用 capabilities/submit/query，不能读取私有账本来消除 unknown。
 
 ## 5. 通用等待与恢复指针
 
@@ -134,6 +138,7 @@ ToolExecutionContext 由执行端构造，包含 projectId/sessionId/runId/model
 | 登记生成 | Job + video_generate 的成功 Operation 同一 JSON 事务 | 重放返回原 jobId，不重新登记 |
 | 提交意图 | submitting + submitAttempts=1；随后在事务外 submit | 无已确认 ID 归 unknown，不能猜测未发送 |
 | 上游受理/完成 | 原 ID、标准化状态；成功时同时保存结果描述 | 继续 query 原 ID，或直接提供已保存结果 |
+| 查询意图 | queryAttempts 累计、queryStartedAt、当前请求的超时截止 | 保留原 ID；中断查询占用原失败窗口，再按保存的策略重试或暂停 |
 | 准备等待 | WaitBinding preparing、原调用/批次位置及 Run 等待意图；结算活动时间 | 图仍在原 tools 节点时可重放到中断，复用此前已完成操作，不先调用模型 |
 | 等待就绪 | SQLite 同步中断后再把绑定设为 armed | 若中断存在但 JSON 未更新，核对原调用后补 arm；再检查已经完成的 Job |
 | 结果就绪 | armed → ready，保存真实最终工具结果 | 不依赖内存事件；扫描即可发现可交付结果 |
@@ -145,9 +150,9 @@ ToolExecutionContext 由执行端构造，包含 projectId/sessionId/runId/model
 
 ## 8. schema v1 → v2 迁移协议（B1）
 
-目标根结构为原 projects/sessions/artifacts/runs/operations，加 `jobs: {}` 和 `waits: {}`，schemaVersion 改为 2。v2 Run 增加 waiting_external、videoMode、activeWaitId、externalWaitSeconds 等可缺省字段；缺失视频字段的旧 Run 按 off 解释。
+B1 已实现的根结构为原 projects/sessions/artifacts/runs/operations，加 `jobs: {}` 和 `waits: {}`，schemaVersion 为 2。v2 Run 增加 waiting_external、videoMode、activeWaitId、externalWaitSeconds 等可缺省字段；缺失视频字段的旧 Run 按 off 解释。
 
-实施顺序：取得原实例锁 → 依据 v1 模型及原消息解析器验证 → 同目录原子保存迁移前快照 → 深拷贝并只增加 v2 根字段 → 校验 v2 → 原子替换 state.json。迁移失败、损坏数据或未知版本保留原文件并报告错误，不自动重建空库。
+实施顺序：取得原实例锁 → 依据 v1 模型及原消息解析器验证 → 同目录原子保存 `state-v1-<UUID>.json` 原始字节快照 → 深拷贝并只增加 v2 根字段 → 校验 v2 → 沿用启动恢复并原子替换 state.json。迁移失败、损坏数据或未知版本保留原文件并报告错误，不自动重建空库。已经是 v2 的目录不再生成迁移快照。
 
 迁移不重新计算 Operation 指纹，不重排其原参数含义，不重写原 contextSignature、执行版本、产物历史或用量。默认字段可以在读取时解释；避免为迁移而把整份旧数据重新转成另一种消息/SDK 序列化格式。
 
@@ -164,4 +169,4 @@ SQLite 检查点保持在原文件中，不做盲目版本升级。备份或回�
 | 1 | 1 | `ca3d165c443da216c26394eb3d95d5400fc9633636e05ef90fd008388d41d3c7` |
 | 2 | 1 | `349273b9b922fca6637f83651e760dad4303343352ade27da2b30ca74ddcc7ae` |
 
-测试固定历史指纹，不从当前提示词重新推导期望值；后续接入必须继续保留这些恢复结果、原产物和累计预算。
+测试固定历史指纹，不从当前提示词重新推导期望值。B1 将同一旧执行检查点与 v1 JSON 状态一起重新打开，实际经过 schema v2 迁移后继续完成原 Run，保留原产物、Operation 和累计预算；后续接入仍需满足此门槛。

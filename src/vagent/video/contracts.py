@@ -204,6 +204,7 @@ class Job(Contract):
     query_attempts: int = Field(default=0, ge=0)
     consecutive_query_errors: int = Field(default=0, ge=0)
     query_state: Literal["idle", "polling", "retrying", "paused"] = "idle"
+    query_started_at: UtcTimestamp | None = None
     policy: PollingPolicy = Field(default_factory=PollingPolicy)
     next_poll_at: UtcTimestamp | None = None
     created_at: UtcTimestamp
@@ -257,6 +258,12 @@ class Job(Contract):
             raise ValueError("Only active accepted jobs have a query lifecycle")
         if (self.query_state in {"polling", "retrying"}) != (self.next_poll_at is not None):
             raise ValueError("Only scheduled queries have a next poll time")
+        if self.query_started_at is not None and (
+            self.query_state not in {"polling", "retrying"}
+            or not self.query_attempts
+            or datetime.fromisoformat(self.query_started_at) > datetime.fromisoformat(self.updated_at)
+        ):
+            raise ValueError("An in-flight query requires a recorded attempt and an active query lifecycle")
         if self.query_state in {"retrying", "paused"} and self.error is None:
             raise ValueError("Retrying or paused queries need a query error")
         if self.consecutive_query_errors > self.query_attempts:
