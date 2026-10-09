@@ -1,3 +1,5 @@
+import { mergeJobs, upsertJob } from "./job-state.js";
+
 const $ = (selector) => document.querySelector(selector);
 const paths = {
   "plus-square":
@@ -49,12 +51,18 @@ const templates = {
 };
 const statusNames = {
   running: "正在执行",
+  waiting_external: "等待外部结果",
   completed: "已完成",
   cancelled: "已停止",
   failed: "执行失败",
   interrupted: "已中断",
 };
 const artifactNames = { all: "全部产物", brief: "方案", script: "脚本", storyboard: "分镜" };
+const jobStatusNames = {
+  pending_submit: "已登记", submitting: "正在提交", queued: "排队中",
+  running: "模拟生成中", succeeded: "模拟完成", failed: "任务失败", unknown: "提交待核实",
+};
+const retryingJobs = new Set();
 function contentLimitsText(project) {
   return Object.entries(project?.contentLimits || {})
     .map(([kind, maximum]) => `${artifactNames[kind] || kind}：${maximum} 个非空白字符`)
@@ -79,7 +87,7 @@ let viewGeneration = 0;
 let dialogGeneration = 0,
   configSubmitting = false;
 const currentRun = () => snapshot?.run;
-const isRunning = () => currentRun()?.status === "running";
+const isRunning = () => ["running", "waiting_external"].includes(currentRun()?.status);
 function toast(message) {
   $("#toast").textContent = message;
   $("#toast").hidden = false;
@@ -176,7 +184,7 @@ function connectEvents(id, generation) {
     try {
       const next = JSON.parse(event.data);
       const runChanged = next.run?.status !== snapshot?.run?.status;
-      snapshot = next;
+      applySnapshot(next);
       renderConnection();
       render();
       if (runChanged) refreshSessions().catch((error) => toast(error.message));
@@ -184,6 +192,34 @@ function connectEvents(id, generation) {
       toast("执行状态读取失败，请刷新页面。");
     }
   });
+  source.addEventListener("job.updated", (event) => {
+    if (generation !== viewGeneration || stream !== source) return;
+    try {
+      const update = JSON.parse(event.data);
+      if (update.sessionId !== id || snapshot?.id !== id) return;
+      const jobs = upsertJob(snapshot.jobs || [], update.job, id);
+      if (jobs === snapshot.jobs) return;
+      snapshot.jobs = jobs;
+      renderJobs();
+    } catch {
+      connectEvents(id, generation);
+    }
+  });
+  for (const kind of ["run.waiting", "run.resumed", "run.resume_blocked", "run.completed"]) {
+    source.addEventListener(kind, (event) => {
+      if (generation !== viewGeneration || stream !== source) return;
+      try {
+        const update = JSON.parse(event.data);
+        if (update.sessionId !== id || update.snapshot?.id !== id) return;
+        applySnapshot(update.snapshot);
+        renderConnection();
+        render();
+        if (kind === "run.completed") refreshSessions().catch((error) => toast(error.message));
+      } catch {
+        connectEvents(id, generation);
+      }
+    });
+  }
   source.addEventListener("assistant.delta", (event) => {
     if (generation !== viewGeneration || stream !== source) return;
     try {
@@ -208,13 +244,17 @@ function connectEvents(id, generation) {
       $("#connection-label").textContent = "连接中断 · 正在重连";
   };
 }
+function applySnapshot(next) {
+  next.jobs = mergeJobs(snapshot?.id === next.id ? snapshot.jobs || [] : [], next.jobs || [], next.id);
+  snapshot = next;
+}
 async function selectSession(id) {
   const generation = ++viewGeneration;
   stream?.close();
   const next = await api(`/api/sessions/${encodeURIComponent(id)}`);
   if (generation !== viewGeneration) return;
   activeId = id;
-  snapshot = next;
+  applySnapshot(next);
   pendingRequest = null;
   reference = null;
   $("#attachment").hidden = true;
@@ -228,6 +268,45 @@ function artifactCard(artifact) {
   const last = artifact.versions.at(-1);
   return `<button class="artifact-card" data-artifact="${escapeHTML(artifact.id)}"><span data-icon="file"></span><span><strong>${escapeHTML(last.title)}</strong><small>${escapeHTML(artifact.kind)} · v${last.version} · 已保存</small></span><span>↗</span></button>`;
 }
+function jobCard(job, expanded) {
+  const request = job.request, spec = request.spec;
+  const paused = job.queryState === "paused", retrying = job.queryState === "retrying";
+  const state = paused ? "查询已暂停" : retrying ? "查询重试中" : jobStatusNames[job.status] || job.status;
+  const tone = paused || retrying || job.status === "unknown" ? "attention" : job.status;
+  const sources = (request.sourceRefs || []).map((ref) => {
+    const artifact = snapshot?.artifacts.find((item) => item.id === ref.artifactId);
+    const title = artifact?.versions.find((item) => item.version === ref.version)?.title || ref.artifactId;
+    return `<button data-artifact="${escapeHTML(ref.artifactId)}" data-version="${ref.version}">${escapeHTML(title)} · v${ref.version}</button>`;
+  }).join("、") || "直接使用提示词";
+  const notice = paused || retrying
+    ? `最近确认状态：${jobStatusNames[job.status] || job.status}。${paused ? "恢复查询后可继续获取结果。" : "正在重试状态查询。"}`
+    : job.status === "unknown" ? "提交结果尚未确认，需要核实。任务不会自动重新提交。"
+    : job.status === "succeeded" ? "模拟流程已完成，仅提供结果描述，无可播放或下载的视频。"
+    : ["pending_submit", "submitting", "queued", "running"].includes(job.status) ? "服务运行期间持续推进，关闭页面不影响任务。" : "";
+  return `<article class="job-card" data-job-id="${escapeHTML(job.jobId)}">
+    <div class="job-heading"><strong><span data-icon="film"></span>模拟视频任务</strong><span class="job-state ${escapeHTML(tone)}">${escapeHTML(state)}</span></div>
+    <p class="job-id">Job <code>${escapeHTML(job.jobId)}</code></p>
+    <div class="job-spec"><span class="simulation-label">模拟 · 无真实媒体</span><span>${escapeHTML(request.model)} · ${spec.durationSeconds} 秒 · ${escapeHTML(spec.resolution)} · ${escapeHTML(spec.aspectRatio)}</span></div>
+    <p class="job-sources">来源：${sources}</p>
+    <details class="job-request" ${expanded ? "open" : ""}><summary>生成提示词</summary><p>${escapeHTML(request.prompt)}</p></details>
+    ${job.result ? `<p class="job-result">${escapeHTML(job.result.summary)}</p>` : ""}
+    ${notice ? `<p class="job-notice">${escapeHTML(notice)}</p>` : ""}
+    ${job.error ? `<p class="job-error">${escapeHTML({ submit: "提交", query: "查询", generate: "生成" }[job.error.stage] || job.error.stage)} · ${escapeHTML(job.error.code)}<br>${escapeHTML(job.error.message)}</p>` : ""}
+    <div class="job-footer"><small>更新于 ${escapeHTML(new Date(job.updatedAt).toLocaleString())}</small>${job.canRetryQuery ? `<button class="secondary" data-retry-job="${escapeHTML(job.jobId)}" ${retryingJobs.has(job.jobId) ? "disabled" : ""}>${retryingJobs.has(job.jobId) ? "正在恢复…" : "恢复查询"}</button>` : ""}</div>
+  </article>`;
+}
+function renderJobs() {
+  const list = $("#job-list");
+  if (!list) return;
+  const expanded = new Set([...list.querySelectorAll(".job-card")]
+    .filter((card) => card.querySelector("details")?.open).map((card) => card.dataset.jobId));
+  const conversation = $("#conversation");
+  const followLatest = conversation.scrollHeight - conversation.scrollTop - conversation.clientHeight < 80;
+  list.innerHTML = (snapshot?.jobs || []).map((job) => jobCard(job, expanded.has(job.jobId))).join("");
+  list.hidden = !snapshot?.jobs?.length;
+  icons(list);
+  if (followLatest) conversation.scrollTop = conversation.scrollHeight;
+}
 function draftHTML() {
   return snapshot?.draft?.text
     ? `<div id="assistant-draft" class="message draft" aria-busy="true"><div class="agent-name"><img src="./mark.svg" alt="" />vagent <span class="demo-label">正在回复 · 草稿</span></div><span class="draft-text">${escapeHTML(snapshot.draft.text)}</span></div>`
@@ -239,7 +318,7 @@ function renderDraft() {
   const existing = $("#assistant-draft .draft-text");
   if (existing) existing.textContent = snapshot.draft.text;
   else {
-    const after = conversation.querySelector(".artifact-card, .run-details");
+    const after = conversation.querySelector(".artifact-card, .job-list, .run-details");
     if (after) after.insertAdjacentHTML("beforebegin", draftHTML());
     else conversation.insertAdjacentHTML("beforeend", draftHTML());
   }
@@ -252,7 +331,7 @@ function render() {
       conversation.scrollTop -
       conversation.clientHeight <
     80;
-  const chatting = Boolean(snapshot?.messages.length || snapshot?.run);
+  const chatting = Boolean(snapshot?.messages.length || snapshot?.run || snapshot?.jobs?.length);
   document.body.classList.toggle("chat-open", chatting);
   $("#welcome").hidden = chatting;
   $("#inspiration").hidden = chatting;
@@ -264,7 +343,8 @@ function render() {
   $("#project-label").textContent = activeId
     ? `项目 ${activeId.slice(0, 8)}`
     : "新项目";
-  const detailsOpen = $("#conversation details")?.open;
+  const detailsOpen = $("#conversation .run-details")?.open;
+  const oldJobs = $("#job-list");
   $("#conversation").innerHTML =
     (snapshot?.messages || [])
       .map(
@@ -272,6 +352,9 @@ function render() {
           `<div class="message ${m.role === "user" ? "user" : ""}">${m.role === "assistant" ? '<div class="agent-name"><img src="./mark.svg" alt="" />vagent <span class="demo-label">Agent 回复</span></div>' : ""}${escapeHTML(m.text)}</div>`,
       )
       .join("") + draftHTML() + (snapshot?.artifacts || []).map(artifactCard).join("");
+  if (oldJobs) conversation.append(oldJobs);
+  else conversation.insertAdjacentHTML("beforeend", '<section id="job-list" class="job-list" aria-label="模拟视频任务" hidden></section>');
+  renderJobs();
   const run = currentRun();
   if (run) {
     const events = (run.events || []).filter(
@@ -283,7 +366,7 @@ function render() {
     );
     $("#run-status").hidden = false;
     $("#run-status").innerHTML =
-      `<span class="run-state ${run.status}">${statusNames[run.status] || run.status}</span><span>模型 ${run.modelSteps} 步 · 工具 ${run.toolCalls} 次</span><button data-action="observe">查看编排</button>${run.resumable && run.status !== "running" ? '<button data-action="resume">从检查点继续</button>' : ""}${run.errorCode ? `<p>${escapeHTML(run.errorCode)} · ${escapeHTML(run.answer)}</p>` : ""}`;
+      `<span class="run-state ${run.status}">${statusNames[run.status] || run.status}</span><span>模型 ${run.modelSteps} 步 · 工具 ${run.toolCalls} 次</span><button data-action="observe">查看编排</button>${run.resumable && (!isRunning() || run.waitResumeError) ? '<button data-action="resume">从检查点继续</button>' : ""}${run.errorCode ? `<p>${escapeHTML(run.errorCode)} · ${escapeHTML(run.answer)}</p>` : ""}${run.status === "waiting_external" ? `<p class="wait-notice">Agent 正在等待${snapshot.wait?.resource?.kind === "job" ? `任务 ${escapeHTML(snapshot.wait.resource.id)}` : "外部结果"}。等待期间不调用模型；停止 Agent 后，Job 仍会继续。${snapshot.wait?.deadlineAt ? `本次等待截止：${escapeHTML(new Date(snapshot.wait.deadlineAt).toLocaleString())}。` : ""}</p>` : ""}${run.waitResumeError ? `<p>${escapeHTML(run.waitResumeError.code)} · ${escapeHTML(run.waitResumeError.message)}</p>` : ""}`;
   } else $("#run-status").hidden = true;
   icons($("#conversation"));
   if (followLatest) conversation.scrollTop = conversation.scrollHeight;
@@ -316,6 +399,7 @@ function renderObserve() {
     <h3>MCP 服务</h3>${(health?.mcp || []).map((s) => `<div class="capability"><strong>${escapeHTML(s.name)} · 已连接</strong><small>${escapeHTML(s.transport)} / ${escapeHTML(s.protocolVersion)}<br>${s.tools.map(escapeHTML).join("<br>")}</small></div>`).join("") || '<p class="meta">未启用 MCP 服务</p>'}
     <h3>工具目录</h3>${(health?.tools || []).map((t) => `<div class="tool-line"><span>${escapeHTML(t.name)}</span><small>${t.effect === "read" ? "读取" : "写入"} · ${escapeHTML(t.source)}</small></div>`).join("")}
     <h3>模型用量</h3><div class="metrics">${metric("已知输入 Token", value(usage?.observedInputTokens))}${metric("已知输出 Token", value(usage?.observedOutputTokens))}${metric("缓存命中 Token", value(usage?.cacheHitTokens))}${metric("缓存命中率", usage?.cacheHitRate == null ? "未知" : `${(usage.cacheHitRate * 100).toFixed(1)}%`)}</div>
+    <h3>执行时间</h3><div class="metrics">${metric("活动时间（秒）", run?.activeSeconds == null ? "—" : run.activeSeconds.toFixed(1))}${metric("外部等待（秒）", run ? ((run.externalWaitSeconds || 0) + (run.externalWaitStartedAt ? Math.max(0, (Date.now() - Date.parse(run.externalWaitStartedAt)) / 1000) : 0)).toFixed(1) : "—")}</div>
     <p class="meta">${usage?.tokenUsageComplete ? "本次调用 Token 用量完整" : "未知用量不计作零消耗"}。Redis ${health?.answerCacheEnabled ? "可用于只读任务" : "回答缓存未启用"}。</p>
     ${Array.isArray(run?.toolTrace) ? `<h3>工具输入与结果</h3>${run.toolTrace.map((t) => `<details class="trace-item"><summary>${escapeHTML(t.name)}</summary><small>输入</small><pre>${escapeHTML(JSON.stringify(t.arguments, null, 2))}</pre><small>结果</small><pre>${escapeHTML(t.result || "等待工具完成")}</pre></details>`).join("") || '<p class="meta">暂无工具调用</p>'}` : ""}
     <h3>执行事件</h3><div class="event-list">${(run?.events || []).map((e) => `<div><small>#${e.sequence}</small> ${escapeHTML(e.type)} ${escapeHTML(e.name || "")}${e.ok === false ? " ×" : ""}</div>`).join("") || "暂无事件"}</div>`;
@@ -437,7 +521,7 @@ $("#composer").addEventListener("submit", async (event) => {
   if (isRunning()) {
     try {
       await post(`/api/runs/${currentRun().id}/stop`);
-      toast("已请求停止，等待当前操作结束。");
+      toast("已请求停止 Agent，已登记的 Job 继续跟踪。");
     } catch (error) {
       toast(error.message);
     }
@@ -538,7 +622,25 @@ document.addEventListener("click", async (event) => {
     const artifact = event.target.closest("[data-artifact]");
     if (artifact) {
       $("#dialog").close();
-      await showArtifact(artifact.dataset.artifact);
+      await showArtifact(artifact.dataset.artifact, Number(artifact.dataset.version) || undefined);
+      return;
+    }
+    const retry = event.target.closest("[data-retry-job]");
+    if (retry) {
+      const id = retry.dataset.retryJob, generation = viewGeneration;
+      if (retryingJobs.has(id)) return;
+      retryingJobs.add(id);
+      renderJobs();
+      try {
+        const job = await post(`/api/jobs/${encodeURIComponent(id)}/retry-query`);
+        if (generation === viewGeneration && snapshot) {
+          snapshot.jobs = upsertJob(snapshot.jobs || [], job, activeId);
+          toast("已恢复原任务的状态查询。");
+        }
+      } finally {
+        retryingJobs.delete(id);
+        if (generation === viewGeneration) renderJobs();
+      }
       return;
     }
     const action = event.target.closest("[data-action]")?.dataset.action;
@@ -569,7 +671,7 @@ document.addEventListener("click", async (event) => {
     if (action === "help")
       openDialog(
         "和 Agent 一起完成创作",
-        '<p>描述需求后，Agent 会按需读取 Skills、管理项目记忆、调用工具并保存方案。侧栏「编排观测」显示每次执行的上下文、工具结果和模型用量。</p><p>会话与产物保存在本机。可以停止执行并从检查点继续；旧版产物可在预览中切换。只读分析模式禁止修改项目或保存产物。当前不提供视频生成。</p><div class="actions"><button class="primary" data-action="close-dialog">开始创作</button></div>',
+        `<p>描述需求后，Agent 会按需读取 Skills、管理项目记忆、调用工具并保存方案。侧栏「编排观测」显示每次执行的上下文、工具结果和模型用量。</p><p>会话与产物保存在本机。可以停止执行并从检查点继续；旧版产物可在预览中切换。只读分析可读取和等待已有 Job，不能创建任务或修改产物。</p><p>${health?.videoMode === "mock" ? "已启用模拟视频任务，只提供模拟结果描述，没有真实媒体。任务卡片会持续更新；停止 Agent 不会取消 Job，关闭页面不影响服务中的任务。查询暂停时可点击恢复查询。" : "当前视频模式为 off，不提供新的视频任务。已有 Job 仍可查看，服务会继续跟踪。"}</p><div class="actions"><button class="primary" data-action="close-dialog">开始创作</button></div>`,
       );
     if (action === "settings") await showSettings();
     if (action === "library") {
@@ -618,6 +720,9 @@ async function initialize() {
     renderConnection();
     $("#skills-label").textContent =
       `${health.skills.length} Skills · ${health.mcp.length} MCP`;
+    $("#video-mode-label").hidden = health.videoMode !== "mock";
+    $("#video-workflow").innerHTML = health.videoMode === "mock"
+      ? "模拟视频任务 <small>无真实媒体</small>" : "视频生成 <small>未启用</small>";
     $("#execution-label").textContent =
       health.modelKind === "deepseek"
         ? "真实 Agent · 按实际模型用量计费"
@@ -630,7 +735,7 @@ async function initialize() {
     if (saved && sessions.some((s) => s.id === saved))
       await selectSession(saved);
     else render();
-    if (!health.apiKeyConfigured && health.modelKind === "deepseek") await showSettings();
+    if (!health.apiKeyConfigured && health.modelKind === "deepseek" && !snapshot?.jobs?.length) await showSettings();
   } catch (error) {
     health = null;
     $("#connection-label").textContent = "Agent 服务未连接";

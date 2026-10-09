@@ -1,8 +1,8 @@
 # M1-B 契约与恢复协议
 
-日期：2026-10-09。B0 提供契约/等待实验，B1 提供 Job/Mock Worker/schema v2，B2 接入四工具和模式，B3 已接入生产等待/停止/计时与跨存储恢复。新 mock Run 使用 execution v2；文本及历史 execution v1 保持原路径。Worker 应用生命周期与 Job 入口待 B4。
+日期：2026-10-09。B0 提供契约/等待实验，B1 提供 Job/Mock Worker/schema v2，B2 接入四工具和模式，B3 接入生产等待/停止/计时与跨存储恢复，B4 接入 Worker 生命周期和 CLI/Web Job 入口。新 mock Run 使用 execution v2；文本及历史 execution v1 保持原路径。
 
-范围依据：[M1-B 任务规划](./M1B_PLAN.md)。验证证据见 [B0 验收](./M1B_B0_ACCEPTANCE.md)、[B1 验收](./M1B_B1_ACCEPTANCE.md)、[B2 验收](./M1B_B2_ACCEPTANCE.md) 与 [B3 验收](./M1B_B3_ACCEPTANCE.md)。
+范围依据：[M1-B 任务规划](./M1B_PLAN.md)。验证证据见 [B0 验收](./M1B_B0_ACCEPTANCE.md)、[B1 验收](./M1B_B1_ACCEPTANCE.md)、[B2 验收](./M1B_B2_ACCEPTANCE.md)、[B3 验收](./M1B_B3_ACCEPTANCE.md) 与 [B4 验收](./M1B_B4_ACCEPTANCE.md)。
 
 ## 1. 模块与版本
 
@@ -101,7 +101,7 @@ pending_submit → submitting → queued → running → succeeded / failed
 - queryState=retrying/paused 时，Job 仍为最近一次确认的 queued/running。只有 polling/retrying 有 nextPollAt，暂停与终态不自动安排下一次查询。
 - B1 增加可缺省的 `queryStartedAt`。发起 query 前先累计 queryAttempts、保存开始时间，并将 nextPollAt 设为本次超时截止。进程在查询中退出后，这次已记账的查询消费一个失败窗口；重试时间锚定原截止，不因再次重启而重置。正常响应、异常和 Worker 停止都会清除此字段。
 
-这些类型约束、持久队列、查询调用、原子去重及 Worker start/stop 已由 B1 实现，Agent 等待协调已由 B3 接入；JobWorker 应用生命周期待 B4。Mock 的 `mock-video.json` 与 `state.json` 分别原子提交；Worker 只使用 capabilities/submit/query，不能读取私有账本来消除 unknown。
+这些类型约束、持久队列、查询调用、原子去重及 Worker start/stop 已由 B1 实现，Agent 等待协调由 B3 接入，JobWorker 应用生命周期由 B4 管理。Mock 的 `mock-video.json` 与 `state.json` 分别原子提交；Worker 只使用 capabilities/submit/query，不能读取私有账本来消除 unknown。
 
 ## 5. 通用等待与恢复指针
 

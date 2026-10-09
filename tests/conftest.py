@@ -102,3 +102,29 @@ def video_service(store, video_clock):
     video_run(store)
     adapter = MockVideoAdapter(store, clock=video_clock)
     return JobService(store, [adapter], clock=video_clock)
+
+
+@pytest.fixture
+def job_runtime(monkeypatch, video_clock):
+    """Application Worker tests advance persisted deadlines, never real poll intervals."""
+    from types import SimpleNamespace
+
+    import vagent.application as application
+    from vagent.video.providers.mock import MockScenario
+    from vagent.video.worker import JobWorker
+
+    runtime = SimpleNamespace(clock=video_clock, scenario=MockScenario(), adapters=[])
+
+    def adapter(store):
+        provider = MockVideoAdapter(store, clock=video_clock, scenario=runtime.scenario)
+        runtime.adapters.append(provider)
+        return provider
+
+    monkeypatch.setattr(application, "MockVideoAdapter", adapter)
+    monkeypatch.setattr(
+        application, "JobService", lambda store, adapters: JobService(store, adapters, clock=video_clock)
+    )
+    monkeypatch.setattr(
+        application, "JobWorker", lambda service: JobWorker(service, idle_interval_seconds=0.005)
+    )
+    return runtime

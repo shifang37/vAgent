@@ -4,7 +4,7 @@
 
 当前已实现 **Python CLI + 本地 Web Agent**，前端通过同源 API/SSE 调用共享 LangGraph Runner。2026-10-08 完成真实 DeepSeek、持久记忆、Skills、8 种工具（含 2 个本地 MCP 工具）的编排验收，随后补齐记忆冲突与正文长度的后端校验。当前交付文本创作材料，尚未接入视频生成 API；首轮发现见 [编排测试报告](./docs/AGENT_ORCHESTRATION_ACCEPTANCE.md)，修复与验证范围见 [质量校验验收](./docs/QUALITY_ACCEPTANCE.md)。
 
-任务 2 已补齐本地配置向导、CLI/Web 流式回复和 9 类固定评测。**2026-10-09 完成 A5：完整真实套件 9/9 通过，M1-A 已验收。** 最终套件包含 3 次显式恢复，累计 27 次模型调用、25 次工具调用；此前失败记录完整保留，详见 [M1-A 验收记录](./docs/M1A_ACCEPTANCE.md)。同日完成 M1-B 的 **B0 契约、B1 持久 Job/Mock Worker、B2 视频工具与能力接入、B3 持久等待与恢复**。默认 off 保持文本行为，mock 下的新 Run 可挂起等待，按原工具调用和原预算继续；停止与正常退出有不同语义。详见 [B3 验收](./docs/M1B_B3_ACCEPTANCE.md)，下一步按 [M1-B 任务规划](./docs/M1B_PLAN.md) 实施 B4 的 Worker 生命周期、CLI 与 Job 页面。
+任务 2 已补齐本地配置向导、CLI/Web 流式回复和 9 类固定评测。**2026-10-09 完成 A5：完整真实套件 9/9 通过，M1-A 已验收。** 最终套件包含 3 次显式恢复，累计 27 次模型调用、25 次工具调用；此前失败记录完整保留，详见 [M1-A 验收记录](./docs/M1A_ACCEPTANCE.md)。同日完成 M1-B 的 **B0–B4**：契约、持久 Job/Mock Worker、四工具、持久等待与恢复，以及 CLI/Web 入口。应用自动推进 Job，CLI 持续等待，页面显示模拟任务、来源版本和恢复查询；停止 Agent 与正常退出保持不同语义。详见 [B4 验收](./docs/M1B_B4_ACCEPTANCE.md)，下一步按 [M1-B 任务规划](./docs/M1B_PLAN.md) 执行 B5 的完整验收与真实 DeepSeek + Mock 联调。
 
 ## 当前进度
 
@@ -20,7 +20,7 @@
 | 04 本地 Web | 已接入真实 Agent | 单 Key 配置向导、模型切换与验证、逐段文本流、断线补齐、停止/恢复、产物与编排观测 |
 | MCP | 已实现并验证 stdio | 显式只读白名单、工具发现、Schema 校验、取消/超时、结果大小限制 |
 | 内容质量校验 | 已通过回归与真实纠错验收 | 记忆字段职责、旧事实残留检查、持久字数上限、保存前计数、未纠正错误禁止报告完成 |
-| M1-B 模拟视频 | B0–B3 已完成，B4–B5 待实施 | 持久 Job/Mock Worker、四工具、模式/只读/缓存边界、生产等待协调与旧检查点恢复；自动 Worker 和 Job 入口待 B4，详见 [B3 验收](./docs/M1B_B3_ACCEPTANCE.md) |
+| M1-B 模拟视频 | B0–B4 已完成，B5 待实施 | 自动 Worker、四工具、持久等待/停止/恢复、CLI Job 命令与非阻塞输入、Job API/SSE/任务卡片；详见 [B4 验收](./docs/M1B_B4_ACCEPTANCE.md) |
 | M1-C 真实视频 | 待实施 | 真实供应商接入、媒体下载/播放与真实视频验收 |
 
 每个独立完成的代码部分都同步更新本 README、提交并推送 GitHub。阶段目标见 [M1 计划](./M1_PLAN.md) 和 [Harness 设计](./AGENT_HARNESS_DESIGN.md)。
@@ -153,11 +153,27 @@ $env:VAGENT_VIDEO_MODE = 'mock'
 
 用户停止会先持久关闭自动继续，并补齐可见的终止工具结果；Job 继续独立跟踪。正常退出保留等待意图，重启只自动继续有效等待。结果之后已经开始过模型尝试的中断要求显式 `resume`；缺少原配置、检查点或预算时保留结果，原因记录在 `waitResumeError`。
 
-**B4 的入口交付仍待实施。** 当前 CLI/Web 不会自动调度 JobWorker，需通过 Python `JobWorker.run_once()` 或 `start()` 显式推进；安装验证使用相同边界。CLI 单次命令在挂起后返回等待态并退出，持续等待与非阻塞交互、Job 命令/API/SSE/卡片尚未交付。旧 B2 execution v1 仍按 `EXTERNAL_WAIT_UNAVAILABLE` 结束未完成等待，其 preparing 记录不会被后台唤醒。
+`ApplicationService` 统一管理 JobWorker 和等待协调器。`run/chat/resume` 等待原 Run 完成，图挂起期间 Worker 仍独立推进；`chat` 输入不会阻塞 Worker，也不留下阻止 Windows 退出的输入线程。缺少恢复配置时显示原因并保存结果。旧 B2 execution v1 仍按 `EXTERNAL_WAIT_UNAVAILABLE` 结束未完成等待，其 preparing 记录不会被后台唤醒。
+
+以下 Job 命令不需要 DeepSeek Key：
+
+```powershell
+vagent jobs list
+vagent jobs list --session coffee
+vagent jobs get JOB_ID
+vagent jobs retry-query JOB_ID
+vagent jobs work
+```
+
+`list/get` 只读本地状态，`retry-query` 只为已暂停且有上游 ID 的任务恢复查询窗口，不重新 submit；三者不启动 Worker、模型或 MCP。`jobs work` 持续推进持久队列及有效等待；缺少原模型配置时继续推进 Job，保留等待结果。启动模式控制新 Run 的工具，已登记 mock Job 即使在 off 模式启动也继续跟踪。
+
+CLI 退出后没有后台守护进程；重新运行 Web 或 `jobs work` 才继续推进队列。`run/chat/resume` 的 Ctrl+C 停止当前 Agent，`jobs work` 的 Ctrl+C 只关闭本地循环并保留等待意图。同一数据目录被 Web 占用时，CLI 提示 `STORE_LOCKED`。
+
+Web 提供 `GET /api/jobs`（可选 `sessionId`）、`GET /api/jobs/:id` 和 `POST /api/jobs/:id/retry-query`。会话快照含当前项目 Job；`job.updated` 绑定创建 Job 的会话/Run，客户端按 jobId 与 revision 去重，溢出和重连通过快照补齐。任务卡片显示模拟标记、模型/参数、来源版本、生成与查询状态；Run 结束后仍更新，等待时可停止 Agent，查询暂停时可恢复查询。
 
 只读任务隐藏并拒绝 `video_generate`，允许读取已有 Job 和保存等待记账。视频工具可见时，整次 Run 跳过 Redis 回答缓存，包括第一次模型调用之前；供应商前缀缓存 Token 统计保持。新 Run 保存模式与工具/能力配置，恢复时核对；旧 off Run 即使在 mock 启动配置下恢复，也使用原系统规则与工具集合。
 
-Mock 始终标记 `simulated: true`、`mediaAvailable: false`，不产生 MP4 或播放/下载链接。调用真实 Agent 仍需要 DeepSeek Key 并消耗文本 Token；B3 的工程验证全部使用离线模型，没有调用真实模型或视频 API。
+Mock 始终标记 `simulated: true`、`mediaAvailable: false`，不产生 MP4 或播放/下载链接。调用真实 Agent 仍需要 DeepSeek Key 并消耗文本 Token；B0–B4 的工程验证全部使用离线模型，没有调用真实模型或视频 API。
 
 ## 从检查点继续
 
@@ -334,9 +350,9 @@ description: 说明哪些任务需要这个技能。
 - B1 已登记但尚未提交的 Job 可由 Worker 继续推进；丢失提交结果的任务进入 `unknown`，不自动重提。已确认上游 ID 只用于继续查询，失败窗口和累计次数跨重启保留。
 - 应用快照和 SQLite 检查点分别提交，依靠同步图检查点、操作幂等和恢复时补交会话处理提交间隙；并非跨 JSON/SQLite 的单一数据库事务。
 - 异常断电可能留下 `instance.lock`；确认没有进程使用该数据目录后才手动移除，程序不会自动抢锁。
-- CLI/Web 已支持流式草稿，完成后以持久回复替换；草稿不写入检查点，中断后不作为下一次模型输入。自动摘要、跨项目偏好记忆和 Job 页面尚未实现。
+- CLI/Web 已支持流式草稿，完成后以持久回复替换；草稿不写入检查点，中断后不作为下一次模型输入。自动摘要和跨项目偏好记忆尚未实现。
 
-B1 的 JobService、MockVideoAdapter 和 JobWorker 已可通过 Python API 独立使用和测试，不需要模型或 Key。Worker 支持单步推进及 start/stop，尚未由 CLI/Web 应用自动启动。B2 已接入视频工具和模式，B3 已接入持久等待与恢复，B4 待交付 Worker 生命周期、Job 命令与页面。Mock 只保存带 `simulated: true`、`mediaAvailable: false` 的描述，不生成媒体文件。当前 Agent 只需要 DeepSeek Key，视频服务 Key 在真实视频阶段单独配置。
+B1 的 JobService、MockVideoAdapter 和 JobWorker 可通过 Python API 独立使用和测试，不需要模型或 Key；B4 已管理应用启动与退出。B2 的视频工具/模式和 B3 的等待/恢复通过同一服务接入 CLI/Web。Mock 只保存带 `simulated: true`、`mediaAvailable: false` 的描述，不生成媒体文件。当前真实 Agent 只需要 DeepSeek Key，视频服务 Key 在真实视频阶段单独配置。
 
 ## 验证与打包
 
@@ -346,11 +362,13 @@ B1 的 JobService、MockVideoAdapter 和 JobWorker 已可通过 Python API 独�
 .\.venv\Scripts\python.exe -m ruff check src/vagent tests scripts
 .\.venv\Scripts\python.exe -m ruff format --check src/vagent tests scripts
 node --check web/app.js
+node --check web/job-state.js
+node --test tests/test_job_state.mjs
 .\.venv\Scripts\python.exe -m pytest -q
 .\.venv\Scripts\python.exe -m build --no-isolation --outdir dist/python
 ```
 
-本地 Python 3.12 测试结果：**427 passed，1 skipped**。跳过的是当前 Windows 账户无符号链接创建权限的测试。B0 新增 44 项，B1 新增 61 项，B2 新增 58 项，B3 新增 54 项，包含 16 项生产图强退恢复，覆盖持久等待、停止竞争、独立计时、原工具结果和预算保持。两个固定的旧文本上下文指纹继续通过 schema v1→v2 迁移；另固定 B2 源码的四个 mock 指纹，验证当前 Runner 按历史配置恢复同一个 execution v1 Run。原工具闭环、质量、MCP、流式、CLI、缓存、评测及故障矩阵继续通过。Node 仅用于开发时检查前端语法，运行 Agent 无需安装。
+本地 Python 3.12 测试结果：**452 passed，1 skipped**，另有 **7 项前端状态测试通过**。跳过的是当前 Windows 账户无符号链接创建权限的测试。B4 新增 25 项 Python 测试，覆盖自动 Worker、独立 Job 事件、API/SSE、CLI 持续等待/恢复和 Windows SIGINT 退出；B0–B3 的迁移、原图指纹、16 项生产强退、预算与工具去重继续通过。原工具闭环、质量、MCP、流式、缓存与评测回归保持。Node 仅用于开发时检查前端语法与状态逻辑，运行 Agent 无需安装。
 
 B3 的源码包和 wheel 已构建到 `dist/m1b-b3/`。独立虚拟环境在仓库外通过 10 项安装检查，包括持久等待跨服务重启后续接原 Run，以及安装版 SQLite 节点 pending writes 强退恢复；Worker 由脚本显式推进。完整范围与证据见 [B3 验收](./docs/M1B_B3_ACCEPTANCE.md)。
 
@@ -360,4 +378,4 @@ B3 的源码包和 wheel 已构建到 `dist/m1b-b3/`。独立虚拟环境在仓�
 
 上下文 v2 的 wheel 已在同一独立环境重新安装验证：仓库外执行 `skills list`、取消后 `resume`、`inspect`、`usage --run` 均通过，格式版本保持 2、最终仍仅有一个产物，`pip check` 通过。v1 检查点兼容由自动化测试覆盖，详细记录见 [上下文优化验收](./docs/CONTEXT_OPTIMIZATION_ACCEPTANCE.md)。
 
-自动化测试验证工程行为。2026-10-09 的完整真实套件 9/9 通过，保留了此前连接故障、步数耗尽和超长拒绝的全部证据；单套通过不代表生产成功率或创作质量保证。M1-A 已验收，M1-B 已完成 B0–B3，下一步为 B4。B0–B3 没有新增真实模型或视频 API 调用；证据见 [M1-A 验收](./docs/M1A_ACCEPTANCE.md) 和 [B3 验收](./docs/M1B_B3_ACCEPTANCE.md)。
+自动化测试验证工程行为。2026-10-09 的完整真实套件 9/9 通过，保留了此前连接故障、步数耗尽和超长拒绝的全部证据；单套通过不代表生产成功率或创作质量保证。M1-A 已验收，M1-B 已完成 B0–B4，下一步为 B5。B0–B4 没有新增真实模型或视频 API 调用；证据见 [M1-A 验收](./docs/M1A_ACCEPTANCE.md) 和 [B4 验收](./docs/M1B_B4_ACCEPTANCE.md)。

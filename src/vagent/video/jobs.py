@@ -2,6 +2,7 @@
 
 import copy
 from collections.abc import Callable, Iterable
+from contextlib import suppress
 from datetime import UTC, datetime, timedelta
 from typing import TYPE_CHECKING
 from uuid import uuid4
@@ -169,9 +170,11 @@ class JobService:
         *,
         clock: Callable[[], datetime] = utc_now,
         policy: PollingPolicy | None = None,
+        on_change: Callable[[Job], None] | None = None,
     ):
         self.store, self.clock = store, clock
         self.policy = policy or PollingPolicy()
+        self.on_change = on_change
         self._adapters = {}
         self._capabilities = {}
         for adapter in adapters:
@@ -257,9 +260,19 @@ class JobService:
             with self.store.locked():
                 # Scope is checked even for a replay, whose mutation callback is skipped.
                 _check_context(self.store.snapshot(), context)
-                return self.store.operation(context.operation_key, "video_generate", args, register)
+                result = self.store.operation(context.operation_key, "video_generate", args, register)
+            if result.get("ok"):
+                self.publish(self.get(result["data"]["jobId"], project_id=context.project_id))
+            return result
         except AppError as error:
             return failure(error.code, str(error))
+
+    def publish(self, job: Job) -> None:
+        # Notifications are advisory and only follow a successful durable commit.
+        # A display/notification failure must not turn an accepted write into an error.
+        if self.on_change:
+            with suppress(Exception):
+                self.on_change(job)
 
     @staticmethod
     def _registration(job: Job) -> dict:
@@ -271,17 +284,18 @@ class JobService:
             "mediaAvailable": False,
         }
 
-    def get(self, job_id: str, *, project_id: str) -> Job:
+    def get(self, job_id: str, *, project_id: str | None = None) -> Job:
+        """Local application lookup; Agent tools must supply their injected project ID."""
         raw = self.store.snapshot()["jobs"].get(job_id)
-        if raw is None or raw["context"]["projectId"] != project_id:
+        if raw is None or (project_id is not None and raw["context"]["projectId"] != project_id):
             raise AppError("JOB_NOT_FOUND", "当前项目中没有这个视频任务。")
         return Job.model_validate(raw)
 
-    def list(self, *, project_id: str, session_id: str | None = None) -> tuple[Job, ...]:
+    def list(self, *, project_id: str | None = None, session_id: str | None = None) -> tuple[Job, ...]:
         return tuple(
             Job.model_validate(raw)
             for raw in self.store.snapshot()["jobs"].values()
-            if raw["context"]["projectId"] == project_id
+            if (project_id is None or raw["context"]["projectId"] == project_id)
             and (session_id is None or raw["context"]["sessionId"] == session_id)
         )
 
@@ -293,7 +307,9 @@ class JobService:
             draft["jobs"][job.id] = job.model_dump(mode="json", by_alias=True)
             return draft["jobs"][job.id]
 
-        return Job.model_validate(self.store.transaction(commit))
+        saved = Job.model_validate(self.store.transaction(commit))
+        self.publish(saved)
+        return saved
 
     def update(self, job: Job, **changes) -> Job:
         return self.save(changed_job(job, self.timestamp(), **changes), expected_revision=job.revision)

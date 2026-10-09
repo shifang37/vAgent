@@ -375,6 +375,9 @@ class WaitService:
         self.store.transaction(
             lambda draft: draft["runs"][run_id].update(waitResumeError=value, updatedAt=now())
         )
+        if self.on_event:
+            with contextlib.suppress(Exception):
+                self.on_event({"type": "run.resume_blocked", "runId": run_id, "error": value})
 
     def recovery_binding(self, run_id: str) -> WaitBinding | None:
         bindings = [

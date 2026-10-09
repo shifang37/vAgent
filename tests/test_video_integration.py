@@ -62,7 +62,13 @@ class VideoRegistrationModel:
             assert last["error"]["code"] == "JOB_ALREADY_EXISTS" and self.job_id in last["error"]["message"]
             assert json.loads(messages[-2].content)["data"]["jobId"] == self.job_id
             return tool_call("job_get", {"jobId": self.job_id}, call_id="lookup")
-        assert self.calls == 5 and last["data"]["status"] == "pending_submit"
+        assert self.calls == 5 and last["data"]["status"] in {
+            "pending_submit",
+            "submitting",
+            "queued",
+            "running",
+            "succeeded",
+        }
         assert last["data"]["simulated"] and not last["data"]["mediaAvailable"]
         return AIMessage(content=f"已登记模拟任务 {self.job_id}，尚无真实媒体。")
 
@@ -85,8 +91,12 @@ async def test_application_model_discovers_capability_and_creates_one_job(tmp_pa
         assert len(state["jobs"]) == 1 and not state["artifacts"] and not state["waits"]
         job = service.video_jobs.get(model.job_id, project_id="coffee")
         assert job.context.run_id == record["id"] and job.context.model_step == 2
-        assert job.context.tool_call_id == "generate" and job.submit_attempts == 0
-        assert job.status == "pending_submit"  # B4 owns automatic Worker lifecycle.
+        assert job.context.tool_call_id == "generate"
+        async with asyncio.timeout(3):
+            while not job.provider_task_id:
+                await asyncio.sleep(0.01)
+                job = service.video_jobs.get(model.job_id, project_id="coffee")
+        assert job.submit_attempts == 1  # B4 now advances registered Jobs automatically.
         assert model.job_id in record["answer"]
         duplicate = await service.start("coffee", "登记模拟视频", "registration")
         assert duplicate["id"] == record["id"] and model.calls == 5

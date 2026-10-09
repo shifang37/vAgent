@@ -1084,6 +1084,116 @@ dialog input:disabled {
   color: #b97068;
   background: #fbf1ed;
 }
+.run-state.waiting_external {
+  color: #8a6f39;
+  background: #fbf5e9;
+}
+.run-status .wait-notice {
+  color: #7e8795;
+  overflow-wrap: anywhere;
+}
+.simulation-label {
+  display: inline-block;
+  padding: 3px 7px;
+  border-radius: 5px;
+  color: #6d7e91;
+  background: #edf2f6;
+  font-size: 10px;
+  white-space: nowrap;
+}
+.job-card {
+  border: 1px solid #dfe7ef;
+  border-radius: 12px;
+  padding: 18px;
+  margin: 16px 0;
+  background: #fcfdff;
+  font-size: 12px;
+  line-height: 1.7;
+  overflow-wrap: anywhere;
+}
+.job-heading, .job-heading strong, .job-spec, .job-footer {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  flex-wrap: wrap;
+}
+.job-heading, .job-footer {
+  justify-content: space-between;
+}
+.job-heading strong {
+  font-size: 13px;
+  font-weight: 500;
+  color: #536c85;
+}
+.job-heading [data-icon] {
+  width: 18px;
+  height: 18px;
+}
+.job-state {
+  border-radius: 5px;
+  padding: 3px 8px;
+  color: #5c80b0;
+  background: #edf2fa;
+  font-size: 11px;
+}
+.job-state.succeeded {
+  color: #547d66;
+  background: #edf5ef;
+}
+.job-state.attention {
+  color: #8a6f39;
+  background: #fbf5e9;
+}
+.job-state.failed {
+  color: #a95c54;
+  background: #fbefed;
+}
+.job-id, .job-footer small {
+  font-size: 10px;
+  color: #8795a7;
+}
+.job-id code {
+  user-select: all;
+}
+.job-spec, .job-sources, .job-request {
+  color: #65758a;
+}
+.job-sources button {
+  color: #547db2;
+  font-size: 12px;
+  text-decoration: underline;
+  text-underline-offset: 3px;
+}
+.job-request summary {
+  cursor: pointer;
+}
+.job-request p, .job-result {
+  white-space: pre-wrap;
+}
+.job-result {
+  padding: 12px;
+  background: #f0f5f3;
+  border-radius: 7px;
+  color: #4b6d5c;
+}
+.job-notice {
+  color: #7a8798;
+  font-size: 11px;
+}
+.job-error {
+  color: #a66855;
+  background: #fbf5ee;
+  border-radius: 7px;
+  padding: 10px;
+}
+.job-footer {
+  border-top: 1px solid #e9edf3;
+  padding-top: 10px;
+  margin-top: 12px;
+}
+.job-footer button {
+  font-size: 11px;
+}
 .observe-panel {
   width: 360px;
 }

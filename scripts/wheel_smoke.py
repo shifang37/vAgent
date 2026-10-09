@@ -16,9 +16,7 @@ from vagent.application import ApplicationService
 from vagent.config import load_config
 from vagent.models import DemoModel
 from vagent.video.contracts import VideoCapabilities, VideoRequest, VideoSpec, validate_video_request
-from vagent.video.jobs import JobService
 from vagent.video.providers.mock import MockVideoAdapter
-from vagent.video.worker import JobWorker
 from vagent.waiting import WAIT_EXECUTION_VERSION, DeferredToolResult, ExternalResourceRef, WaitBinding
 from vagent.web import create_app
 
@@ -99,31 +97,39 @@ async def smoke_video_tools(directory):
     async with ApplicationService.open(config, model=model) as service:
         assert service.configuration()["sources"]["videoMode"] == "environment"
         assert not service.configuration()["editable"]["videoMode"]
-        registered = await service.runner().run("wheel", "register a simulated job")
+        first = await service.start("wheel", "register a simulated job", "register")
+        registered = await service.wait_for_run(first["id"])
         assert registered["status"] == "completed" and registered["videoMode"] == "mock"
         assert registered["modelSteps"] == 3 and registered["toolCalls"] == 2
         assert len(service.store.snapshot()["jobs"]) == 1
         waiting_model = WaitDemo(model.job_id)
-        pending = await service.runner(model=waiting_model, read_only=True).run("wheel", "await pending job")
+        service.model = waiting_model
+        first_wait = await service.start("wheel", "await pending job", "wait", read_only=True)
+        await service.task
+        pending = service.run_record(first_wait["id"])
         assert pending["status"] == "waiting_external" and pending["resumable"]
         assert pending["executionVersion"] == 2
         assert waiting_model.calls == 1 and pending["toolCalls"] == 1
         binding = WaitBinding.model_validate(next(iter(service.store.snapshot()["waits"].values())))
         assert binding.status == "armed" and binding.context.run_id == pending["id"]
         assert binding.context.operation_key not in service.store.snapshot()["operations"]
-    # B4 will manage the Worker lifecycle. This smoke test explicitly advances
-    # B1's Worker with a virtual clock, without sleeping or invoking a model.
+        # Let the application confirm its first submit before testing a normal exit.
+        async with asyncio.timeout(3):
+            while not service.job(model.job_id)["providerTaskId"]:
+                await asyncio.sleep(0.01)
+        original_handle = service.job(model.job_id)["providerTaskId"]
+    # The installed application owns Worker + coordinator. Only move the test
+    # clock to durable deadlines; never manually call Worker.run_once().
     resumed_model = WaitDemo(model.job_id, resuming=True)
     async with ApplicationService.open(config, model=resumed_model) as service:
         current = datetime.fromisoformat(binding.started_at)
-        provider = MockVideoAdapter(service.store, clock=lambda: current)
-        jobs = JobService(service.store, [provider], clock=lambda: current)
-        worker = JobWorker(jobs)
-        for expected in ("queued", "running", "succeeded"):
-            job = await worker.run_once()
-            assert job.id == model.job_id and job.status == expected
-            if job.next_poll_at:
-                current = datetime.fromisoformat(job.next_poll_at)
+        service.video_jobs.clock = lambda: current
+        async with asyncio.timeout(5):
+            while (job := service.video_jobs.get(model.job_id)).status != "succeeded":
+                if job.next_poll_at and not job.query_started_at:
+                    current = max(current, datetime.fromisoformat(job.next_poll_at))
+                await asyncio.sleep(0.01)
+        assert job.provider_task_id == original_handle
         marker = service.tools.execute(
             "await_job",
             {"jobId": model.job_id},
@@ -133,13 +139,7 @@ async def smoke_video_tools(directory):
             context=binding.context,
         )
         assert marker == binding.deferred()  # Original interrupt position is preserved.
-        service.wait_coordinator.notify()
-        async with asyncio.timeout(5):
-            while service.run_record(pending["id"])["status"] == "waiting_external":
-                await asyncio.sleep(0.01)
-            while service.run_record(pending["id"])["status"] == "running":
-                await asyncio.sleep(0.01)
-        finished = service.run_record(pending["id"])
+        finished = await asyncio.wait_for(service.wait_for_run(pending["id"]), 5)
         assert finished["status"] == "completed" and finished["modelSteps"] == 2
         assert finished["id"] == pending["id"] and finished["toolCalls"] == 1
         assert finished["policy"] == pending["policy"] and resumed_model.calls == 1
@@ -148,9 +148,19 @@ async def smoke_video_tools(directory):
         assert delivered.status == "delivered"
         assert service.store.snapshot()["operations"][binding.context.operation_key]["result"]["ok"]
         assert await service.wait_coordinator.run_once() is None and resumed_model.calls == 1
+        provider = MockVideoAdapter(service.store)
         assert provider.ledger_snapshot()["submitCalls"] == 1
         assert provider.ledger_snapshot()["queryCalls"] == 2
         assert not service.store.snapshot()["artifacts"]
+        app = create_app(config)
+        app.state.service = service
+        async with httpx.AsyncClient(
+            transport=httpx.ASGITransport(app=app), base_url="http://127.0.0.1:3210"
+        ) as client:
+            snapshot = (await client.get("/api/sessions/wheel")).json()
+            assert snapshot["jobs"][0] == (await client.get(f"/api/jobs/{model.job_id}")).json()
+            assert snapshot["jobs"][0]["status"] == "succeeded" and snapshot["run"]["status"] == "completed"
+            assert (await client.get("/job-state.js")).status_code == 200
     assert not (home / "instance.lock").exists()
 
 

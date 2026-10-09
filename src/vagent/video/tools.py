@@ -9,6 +9,7 @@ from vagent.storage import FileStore
 from vagent.tools import Arguments, ToolDefinition, ToolFeature, ToolRegistry
 from vagent.video.contracts import Job, VideoRequest
 from vagent.video.jobs import JobService
+from vagent.video.views import job_snapshot
 from vagent.waiting import ExternalResourceRef, ToolExecutionContext, ToolResultError, WaitBinding
 
 VIDEO_TOOLS_VERSION = 2
@@ -39,27 +40,6 @@ LEGACY_AWAIT_DESCRIPTION = (
 
 class JobLookup(Arguments):
     job_id: Identifier
-
-
-def job_snapshot(job: Job) -> dict:
-    """Bounded public fields, without operation keys or the provider's private ledger."""
-    return {
-        "jobId": job.id,
-        "revision": job.revision,
-        "mode": job.mode,
-        "simulated": True,
-        "mediaAvailable": False,
-        "status": job.status,
-        "queryState": job.query_state,
-        "request": job.request.model_dump(mode="json", by_alias=True),
-        "submitAttempts": job.submit_attempts,
-        "queryAttempts": job.query_attempts,
-        "createdAt": job.created_at,
-        "updatedAt": job.updated_at,
-        "nextPollAt": job.next_poll_at,
-        "error": job.error.model_dump(mode="json", by_alias=True) if job.error else None,
-        "result": job.result.model_dump(mode="json", by_alias=True) if job.result else None,
-    }
 
 
 def completed_job_data(job: Job) -> dict:

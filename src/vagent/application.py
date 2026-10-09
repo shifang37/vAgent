@@ -2,7 +2,7 @@
 
 import asyncio
 import copy
-from contextlib import AsyncExitStack, asynccontextmanager
+from contextlib import AsyncExitStack, asynccontextmanager, suppress
 from uuid import uuid4
 
 from vagent.cache import AnswerCache
@@ -17,14 +17,29 @@ from vagent.skills import SkillCatalog, register_skill_tool
 from vagent.storage import FileStore, now
 from vagent.tools import create_project_tools
 from vagent.usage import summarize_usage
+from vagent.video.contracts import Job
 from vagent.video.jobs import JobService
 from vagent.video.providers.mock import MockVideoAdapter
 from vagent.video.tools import register_video_tools, resolve_job_wait
+from vagent.video.views import job_view
+from vagent.video.worker import JobWorker
 from vagent.wait_runtime import WaitCoordinator, execution_control
 
 
 class ApplicationService:
-    def __init__(self, config, store, catalog, tools, http_client, *, model=None, policy=None, cache=None):
+    def __init__(
+        self,
+        config,
+        store,
+        catalog,
+        tools,
+        http_client,
+        *,
+        model=None,
+        policy=None,
+        cache=None,
+        on_event=None,
+    ):
         self.config, self.store, self.catalog, self.tools = config, store, catalog, tools
         self.http_client, self.model, self.cache = http_client, model, cache
         self.policy = policy or RunPolicy()
@@ -37,20 +52,24 @@ class ApplicationService:
         self.validation = {"status": "unverified"}
         self.config_busy = False
         self.video_jobs = None
+        self.job_worker = None
+        self._job_revisions = {key: job["revision"] for key, job in store.snapshot()["jobs"].items()}
+        self.on_event = on_event
         self.wait_coordinator = None
         self.shutdown = asyncio.Event()
 
     @classmethod
     @asynccontextmanager
-    async def open(cls, config: Config, *, model=None, policy=None, existing_store=None):
+    async def open(cls, config: Config, *, model=None, policy=None, existing_store=None, on_event=None):
         async with AsyncExitStack() as stack:
             store = existing_store or stack.enter_context(FileStore.open(config.home))
             client = await stack.enter_async_context(ModelHttpClient(timeout=60))
             catalog = SkillCatalog.discover(config.skills_root)
             tools = register_skill_tool(create_project_tools(), catalog)
-            video_jobs = None
+            # Startup mode controls new tools. Previously registered mock Jobs keep
+            # their saved adapter even when new Runs start with video mode off.
+            video_jobs = JobService(store, [MockVideoAdapter(store)])
             if config.video_mode == "mock":
-                video_jobs = JobService(store, [MockVideoAdapter(store)])
                 register_video_tools(tools, video_jobs)
             mcp_status = await stack.enter_async_context(
                 connect_mcp(tools, server_configs(config.mcp_config, config.mcp_local))
@@ -58,24 +77,118 @@ class ApplicationService:
             cache = AnswerCache.connect(config.redis_url, ttl=config.cache_ttl) if config.redis_url else None
             if cache:
                 stack.push_async_callback(cache.aclose)
-            service = cls(config, store, catalog, tools, client, model=model, policy=policy, cache=cache)
+            service = cls(
+                config,
+                store,
+                catalog,
+                tools,
+                client,
+                model=model,
+                policy=policy,
+                cache=cache,
+                on_event=on_event,
+            )
             service.mcp_status = mcp_status
             service.video_jobs = video_jobs
+            video_jobs.on_change = service._job_event
+            service.job_worker = JobWorker(video_jobs)
             service.wait_coordinator = WaitCoordinator(
                 store,
                 service._waiting_runner,
                 resolvers={"job": lambda binding: resolve_job_wait(store, binding)},
                 on_event=service._wait_event,
             )
+            stack.push_async_callback(service.aclose)
             service.wait_coordinator.start()
-            try:
-                yield service
-            finally:
-                service.shutdown.set()
-                await service.wait_coordinator.stop()
-                if service.task and not service.task.done():
-                    service.task.cancel()
-                    await service.task
+            service.job_worker.start()
+            yield service
+
+    async def aclose(self):
+        # Exit is not a user stop. Close both scheduling gates before awaiting any
+        # provider cancellation, so its final write cannot wake another model call.
+        self.shutdown.set()
+        if self.wait_coordinator:
+            self.wait_coordinator.shutdown.set()
+        async with AsyncExitStack() as closing:
+            closing.push_async_callback(self._close_execution)
+            if self.wait_coordinator:
+                closing.push_async_callback(self.wait_coordinator.stop)
+            if self.job_worker:
+                closing.push_async_callback(self.job_worker.stop)
+
+    async def _close_execution(self):
+        if self.task and not self.task.done():
+            self.task.cancel()
+            with suppress(asyncio.CancelledError):
+                await self.task
+
+    def _observe_event(self, event):
+        if self.on_event:
+            with suppress(Exception):
+                self.on_event(event)
+
+    def _job_event(self, job):
+        if job.revision <= self._job_revisions.get(job.id, -1):
+            return
+        self._job_revisions[job.id] = job.revision
+        event = {
+            "type": "job.updated",
+            "sessionId": job.context.session_id,
+            "runId": job.context.run_id,
+            "job": job_view(job),
+        }
+        self.notify(job.context.session_id, event)
+        self._observe_event(event)
+        if self.wait_coordinator:
+            self.wait_coordinator.notify()
+
+    def jobs(self, session_id=None):
+        if session_id is not None:
+            assert_id(session_id)
+        return [job_view(job) for job in reversed(self.video_jobs.list(session_id=session_id))]
+
+    def job(self, job_id):
+        assert_id(job_id)
+        return job_view(self.video_jobs.get(job_id))
+
+    def retry_query(self, job_id):
+        assert_id(job_id)
+        job = self.video_jobs.get(job_id)
+        return job_view(self.video_jobs.retry_query(job_id, project_id=job.context.project_id))
+
+    async def work(self):
+        """Keep the shared background services alive without creating a new Run."""
+        done, _ = await asyncio.wait(
+            [self.job_worker.start(), self.wait_coordinator.start()], return_when=asyncio.FIRST_COMPLETED
+        )
+        for task in done:
+            task.result()
+        raise AppError("BACKGROUND_STOPPED", "后台工作循环已退出，请检查状态后重启服务。")
+
+    async def wait_for_run(self, run_id):
+        """CLI waits for notifications; the graph releases execution while suspended."""
+        queue = self.subscribe(self.run_record(run_id)["sessionId"])
+        try:
+            while True:
+                record = self.run_record(run_id)
+                executing = execution_control(self.store).run_id == run_id or (
+                    self.active_run_id == run_id and self.task and not self.task.done()
+                )
+                if not executing and (
+                    record["status"] not in {"running", "waiting_external"} or record.get("waitResumeError")
+                ):
+                    return record
+                for background in (self.job_worker._task, self.wait_coordinator._task):
+                    if background.done():
+                        background.result()
+                        raise AppError("BACKGROUND_STOPPED", "后台工作循环已退出，任务状态已保留。")
+                try:
+                    # Re-read durable state after notification loss or a missed startup event.
+                    await asyncio.wait_for(queue.get(), timeout=0.5)
+                except TimeoutError:
+                    pass
+        finally:
+            self.subscribers.pop(queue, None)
 
     def _waiting_runner(self, record):
         if self.config_busy:
@@ -134,6 +247,9 @@ class ApplicationService:
             "videoMode": self.config.video_mode,
             "videoSimulated": self.config.video_mode == "mock",
             "videoMediaAvailable": False,
+            "jobWorkerRunning": bool(
+                self.job_worker and self.job_worker._task and not self.job_worker._task.done()
+            ),
             "configuration": self.configuration(),
         }
 
@@ -149,7 +265,9 @@ class ApplicationService:
                 for key, source in sources.items()
             },
             "validation": copy.deepcopy(self.validation),
-            "busy": self.config_busy or bool(self.task and not self.task.done()),
+            "busy": self.config_busy
+            or bool(self.task and not self.task.done())
+            or execution_control(self.store).lock.locked(),
         }
 
     def _check_config_idle(self):
@@ -268,7 +386,22 @@ class ApplicationService:
             "messages": visible,
             "run": self.run_view(run) if run else None,
             "artifacts": [a for a in state["artifacts"].values() if a["projectId"] == session_id],
+            "jobs": [
+                job_view(Job.model_validate(job))
+                for job in reversed(list(state["jobs"].values()))
+                if job["context"]["projectId"] == session_id
+            ],
+            "wait": self._wait_view(state["waits"].get((run or {}).get("activeWaitId"))),
             "draft": copy.deepcopy(self.drafts.get(session_id)),
+        }
+
+    @staticmethod
+    def _wait_view(binding):
+        if not binding:
+            return None
+        return {
+            key: copy.deepcopy(binding.get(key))
+            for key in ("id", "resource", "status", "startedAt", "deadlineAt", "autoResume")
         }
 
     @staticmethod
@@ -389,6 +522,7 @@ class ApplicationService:
             if event.get("runId"):
                 run_id = event["runId"]
                 self.active_run_id = run_id
+            event = {**event, "runId": run_id, "sessionId": session_id}
             if event["type"] == "assistant.delta":
                 draft = self.drafts.get(session_id)
                 if draft is None or (draft["runId"], draft["step"]) != (event["runId"], event["step"]):
@@ -397,6 +531,7 @@ class ApplicationService:
                 draft["text"] += event["text"]
                 draft["sequence"] = event["sequence"]
                 self.notify(session_id, event)
+                self._observe_event(event)
                 return  # Drafts never enter state.json or the event journal.
             if event["type"] in {"model.started", "model.completed", "assistant.discarded", "run.completed"}:
                 self.drafts.pop(session_id, None)
@@ -409,7 +544,11 @@ class ApplicationService:
                 self.store.transaction(record_event)
                 if ready:
                     ready.set()
-            self.notify(session_id)
+            if event["type"] in {"run.waiting", "run.resumed", "run.resume_blocked", "run.completed"}:
+                self.notify(session_id, event)
+            else:
+                self.notify(session_id)
+            self._observe_event(event)
 
         return event_sink
 

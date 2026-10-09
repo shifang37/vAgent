@@ -76,7 +76,7 @@ def create_app(config, *, port=3210, model=None, policy=None):
     async def app_error(_request, error):
         status = (
             404
-            if error.code == "NOT_FOUND"
+            if error.code in {"NOT_FOUND", "JOB_NOT_FOUND"}
             else 409
             if error.code
             in {
@@ -87,6 +87,8 @@ def create_app(config, *, port=3210, model=None, policy=None):
                 "RESUME_CONFIG_CHANGED",
                 "CONFIG_BUSY",
                 "CONFIG_OVERRIDE",
+                "JOB_QUERY_NOT_PAUSED",
+                "JOB_REVISION_CONFLICT",
             }
             else 400
         )
@@ -156,6 +158,18 @@ def create_app(config, *, port=3210, model=None, policy=None):
     async def artifacts():
         return {"artifacts": list(app.state.service.store.snapshot()["artifacts"].values())}
 
+    @app.get("/api/jobs")
+    async def jobs(sessionId: str | None = None):
+        return {"jobs": app.state.service.jobs(sessionId)}
+
+    @app.get("/api/jobs/{job_id}")
+    async def job(job_id: str):
+        return app.state.service.job(job_id)
+
+    @app.post("/api/jobs/{job_id}/retry-query")
+    async def retry_query(job_id: str):
+        return app.state.service.retry_query(job_id)
+
     @app.get("/api/artifacts/{artifact_id}")
     async def artifact(artifact_id: str, version: int | None = None):
         saved = app.state.service.store.snapshot()["artifacts"].get(artifact_id)
@@ -188,9 +202,22 @@ def create_app(config, *, port=3210, model=None, policy=None):
                             event = await queue.get()
                         if event["type"] == "snapshot":
                             yield snapshot()
-                        else:
+                        elif event["type"] in {
+                            "assistant.delta",
+                            "job.updated",
+                            "run.waiting",
+                            "run.resumed",
+                            "run.resume_blocked",
+                            "run.completed",
+                        }:
+                            if event["type"].startswith("run."):
+                                # Capture current state at delivery, not when queued:
+                                # a prior overflow snapshot may already be newer.
+                                event = {**event, "snapshot": service.session(sessionId)}
                             data = json.dumps(event, ensure_ascii=False, separators=(",", ":"))
-                            yield f"event: assistant.delta\ndata: {data}\n\n"
+                            yield f"event: {event['type']}\ndata: {data}\n\n"
+                        else:
+                            yield snapshot()
                     except TimeoutError:
                         yield ": heartbeat\n\n"
             finally:
@@ -203,7 +230,10 @@ def create_app(config, *, port=3210, model=None, policy=None):
     @app.get("/{asset:path}")
     async def asset(asset: str):
         name = asset or "index.html"
-        if name not in {"index.html", "app.js", "styles.css", "mark.svg"} or not (root / name).is_file():
+        if (
+            name not in {"index.html", "app.js", "job-state.js", "styles.css", "mark.svg"}
+            or not (root / name).is_file()
+        ):
             raise AppError("NOT_FOUND", "页面不存在。")
         return FileResponse(root / name)
 

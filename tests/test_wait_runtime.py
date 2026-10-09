@@ -544,6 +544,7 @@ async def test_application_exit_preserves_wait_and_startup_resumes_original_run(
     job_id = None
     original_model = ScriptedModel(lambda *_: tool_call("await_job", {"jobId": job_id}, call_id="original"))
     async with ApplicationService.open(config, model=original_model) as service:
+        await service.job_worker.stop()  # B3 controls the provider completion boundary explicitly.
         adapter = MockVideoAdapter(service.store, scenario=MockScenario(states=["succeeded"]))
         jobs = JobService(service.store, [adapter])
         job_id = jobs.generate(video_request(adapter), context=video_run(service.store))["data"]["jobId"]
@@ -560,6 +561,7 @@ async def test_application_exit_preserves_wait_and_startup_resumes_original_run(
     assert not (tmp_path / "instance.lock").exists()
     model = ScriptedModel(lambda *_: AIMessage(content="完成模拟等待"))
     async with ApplicationService.open(config, model=model) as service:
+        await service.job_worker.stop()
         provider = MockVideoAdapter(service.store, scenario=MockScenario(states=["succeeded"]))
         await JobWorker(JobService(service.store, [provider])).run_once()
         service.wait_coordinator.notify()
@@ -600,6 +602,7 @@ async def test_application_configuration_validation_defers_automatic_continuatio
         )
     )
     async with ApplicationService.open(config, model=model) as service:
+        await service.job_worker.stop()
         adapter = MockVideoAdapter(service.store, scenario=MockScenario(states=["succeeded"]))
         jobs = JobService(service.store, [adapter])
         job_id = jobs.generate(video_request(adapter), context=video_run(service.store))["data"]["jobId"]
@@ -688,6 +691,7 @@ async def test_application_exit_during_preparation_reconstructs_interrupt(tmp_pa
     with monkeypatch.context() as patch:
         patch.setattr(AsyncSqliteSaver, "aput_writes", suspend_interrupt_write)
         async with ApplicationService.open(config, model=model) as service:
+            await service.job_worker.stop()
             adapter = MockVideoAdapter(service.store, scenario=MockScenario(states=["succeeded"]))
             jobs = JobService(service.store, [adapter])
             job_id = jobs.generate(video_request(adapter), context=video_run(service.store))["data"]["jobId"]
@@ -698,6 +702,7 @@ async def test_application_exit_during_preparation_reconstructs_interrupt(tmp_pa
     assert model.calls == 1 and next(iter(saved["waits"].values()))["autoResume"]
     model = ScriptedModel(lambda *_: AIMessage(content="resumed after normal shutdown"))
     async with ApplicationService.open(config, model=model) as service:
+        await service.job_worker.stop()
         adapter = MockVideoAdapter(service.store, scenario=MockScenario(states=["succeeded"]))
         await JobWorker(JobService(service.store, [adapter])).run_once()
         service.wait_coordinator.notify()

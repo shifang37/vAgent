@@ -4,17 +4,21 @@ import json
 import sys
 from contextlib import AsyncExitStack
 from dataclasses import asdict, replace
+from uuid import uuid4
 
 from dotenv import load_dotenv
 
 from vagent import __version__
 from vagent.application import ApplicationService
-from vagent.config import load_config
+from vagent.config import assert_id, load_config
+from vagent.console import read_prompt
 from vagent.errors import AppError, public_error
 from vagent.models import DemoModel
 from vagent.skills import SkillCatalog
 from vagent.storage import FileStore
 from vagent.usage import summarize_usage
+from vagent.video.jobs import JobService
+from vagent.video.views import job_view
 
 
 def print_json(value: object) -> None:
@@ -37,15 +41,26 @@ def show_event(event: dict) -> None:
         print(f"[工具] {event['name']}", flush=True)
     elif event["type"] == "tool.completed":
         print(f"[工具结果] {event['name']}: {'成功' if event['ok'] else '失败'}", flush=True)
+    elif event["type"] == "run.waiting":
+        print("[等待] Agent 已挂起，正在等待外部结果；Ctrl+C 停止 Agent，Job 保留。", flush=True)
+    elif event["type"] == "run.resume_blocked":
+        print(f"[等待恢复受阻] {event['error']['code']} · {event['error']['message']}", flush=True)
+    elif event["type"] == "job.updated":
+        job = event["job"]
+        print(f"[模拟 Job] {job['jobId']} · {job['status']} / {job['queryState']} · 无真实媒体", flush=True)
 
 
 class EventDisplay:
     def __init__(self):
         self.text = ""
         self.final_text = None
+        self.pending_events = []
 
     def __call__(self, event):
         kind = event["type"]
+        if kind == "job.updated" and self.text:
+            self.pending_events.append(event)
+            return
         if kind == "assistant.delta":
             if not self.text:
                 print("\nAgent > ", end="", flush=True)
@@ -58,6 +73,9 @@ class EventDisplay:
                 print("[草稿未完成，已丢弃]", flush=True)
             self.final_text = self.text if kind == "model.completed" and event.get("final") else None
             self.text = ""
+            for pending in self.pending_events:
+                show_event(pending)
+            self.pending_events.clear()
         show_event(event)
 
     def finish(self, result, *, chat=False):
@@ -87,45 +105,117 @@ async def run_agent(args: argparse.Namespace) -> int:
         service = await stack.enter_async_context(
             ApplicationService.open(runtime_config, model=model, existing_store=store)
         )
-        display = EventDisplay()
-        runner = service.runner(
-            read_only=read_only, on_event=display, video_mode=saved.get("videoMode", "off") if saved else None
-        )
         session_id = saved["sessionId"] if saved else args.session
-        print(f"模型：{runner.model.name}\n会话：{session_id}\n数据：{config.home}")
-        if args.command == "chat":
-            if not sys.stdin.isatty():
-                raise AppError("TTY_REQUIRED", "交互模式需要终端；自动化调用请使用 run。")
-            while True:
-                # Read locally between runs; no background input thread remains after Ctrl+C.
-                try:
-                    prompt = input("\n你 > ")
-                except EOFError:
-                    return 0
-                if prompt.strip() == "/exit":
-                    return 0
-                if not prompt.strip():
-                    continue
-                display = EventDisplay()
-                runner.on_event = display
-                result = await runner.run(args.session, prompt)
-                display.finish(result, chat=True)
-                show_usage(result)
-                show_resume_hint(result)
-                if result["status"] == "cancelled":
-                    return 130
-        if args.command == "resume":
-            result = await runner.resume(args.run_id)
+        print(f"模型：{model.name if model else config.model}\n会话：{session_id}\n数据：{config.home}")
+        try:
+            if args.command == "chat":
+                if not sys.stdin.isatty():
+                    raise AppError("TTY_REQUIRED", "交互模式需要终端；自动化调用请使用 run。")
+                while True:
+                    try:
+                        prompt = await read_prompt("\n你 > ")
+                    except EOFError:
+                        return 0
+                    except asyncio.CancelledError:
+                        for record in service.store.snapshot()["runs"].values():
+                            if record["status"] in {"running", "waiting_external"}:
+                                service.stop(record["id"])
+                        return 130
+                    if prompt.strip() == "/exit":
+                        return 0
+                    if not prompt.strip():
+                        continue
+                    display = service.on_event = EventDisplay()
+                    result = await execute_cli(service, session_id, prompt=prompt, read_only=read_only)
+                    display.finish(result, chat=True)
+                    show_usage(result)
+                    show_resume_hint(result)
+                    if result["status"] == "cancelled":
+                        return 130
+                    if result.get("waitResumeError"):
+                        return 1
+            display = service.on_event = EventDisplay()
+            if args.command == "resume":
+                result = await execute_cli(service, session_id, resume_id=args.run_id)
+            else:
+                prompt = "演示读取项目和保存咖啡店方案。" if args.command == "demo" else args.prompt
+                result = await execute_cli(
+                    service,
+                    session_id,
+                    prompt=prompt,
+                    request_id=getattr(args, "request_id", None),
+                    read_only=read_only,
+                )
+            display.finish(result)
+            show_usage(result)
+            show_resume_hint(result)
+            return 0 if result["status"] == "completed" else 130 if result["status"] == "cancelled" else 1
+        finally:
+            show_job_exit_hint(service)
+
+
+async def execute_cli(service, session_id, *, prompt=None, request_id=None, read_only=False, resume_id=None):
+    run_id = resume_id
+    try:
+        result = (
+            await service.resume(resume_id)
+            if resume_id
+            else await service.start(session_id, prompt, request_id or str(uuid4()), read_only=read_only)
+        )
+        run_id = result["id"]
+        return await service.wait_for_run(run_id)
+    except asyncio.CancelledError:
+        # Ctrl+C is a user stop for run/chat/resume, including a persisted wait.
+        # Normal application closure (and jobs work) preserves auto-resume intent.
+        run_id = run_id or service.active_run_id
+        if run_id is None:
+            raise
+        service.stop(run_id)
+        if service.task and not service.task.done():
+            await asyncio.shield(service.task)
+        return service.run_record(run_id)
+
+
+def show_job_exit_hint(service):
+    if any(job["status"] in {"pending_submit", "submitting", "queued", "running"} for job in service.jobs()):
+        print("[Job] 未结束的任务已保存。CLI 退出后停止推进；使用 vagent web 或 vagent jobs work 继续。")
+
+
+async def work_jobs(config):
+    async with ApplicationService.open(config, on_event=EventDisplay()) as service:
+        print(
+            f"Job 工作循环已启动 · 数据：{config.home}\nCtrl+C 退出；保留 Job 和 Agent 的等待意图。",
+            flush=True,
+        )
+        try:
+            await service.work()
+        except asyncio.CancelledError:
+            return 130
+        finally:
+            show_job_exit_hint(service)
+
+
+def local_jobs(config, args):
+    # Status/retry commands are local only: no adapters, MCP processes, model
+    # connections or background workers start merely to read a Job.
+    with FileStore.open(config.home) as store:
+        service = JobService(store, [])
+        if args.action == "list":
+            if args.session is not None:
+                assert_id(args.session)
+            print_json({"jobs": [job_view(job) for job in reversed(service.list(session_id=args.session))]})
         else:
-            prompt = "演示读取项目和保存咖啡店方案。" if args.command == "demo" else args.prompt
-            result = await runner.run(args.session, prompt, request_id=getattr(args, "request_id", None))
-        display.finish(result)
-        show_usage(result)
-        show_resume_hint(result)
-        return 0 if result["status"] == "completed" else 130 if result["status"] == "cancelled" else 1
+            assert_id(args.job_id)
+            job = service.get(args.job_id)
+            if args.action == "retry-query":
+                job = service.retry_query(job.id, project_id=job.context.project_id)
+            print_json(job_view(job))
 
 
 def show_resume_hint(result: dict) -> None:
+    if result.get("waitResumeError"):
+        error = result["waitResumeError"]
+        print(f"[恢复受阻] {error['code']} · {error['message']}")
     if result.get("resumable"):
         print(f"可在剩余预算内继续：vagent resume {result['id']}")
 
@@ -176,6 +266,13 @@ def parser() -> argparse.ArgumentParser:
     demo.add_argument("-s", "--session", default="demo")
     commands.add_parser("config").add_subparsers(dest="action", required=True).add_parser("show")
     commands.add_parser("skills").add_subparsers(dest="action", required=True).add_parser("list")
+    jobs = commands.add_parser("jobs", help="查看本地模拟任务、恢复查询或运行持久队列")
+    actions = jobs.add_subparsers(dest="action", required=True)
+    listing = actions.add_parser("list", help="列出本地任务，不调用模型或供应商")
+    listing.add_argument("-s", "--session")
+    actions.add_parser("get", help="查看一个本地任务").add_argument("job_id")
+    actions.add_parser("retry-query", help="恢复已暂停的原任务查询，不重新提交").add_argument("job_id")
+    actions.add_parser("work", help="持续推进任务和有效等待；Ctrl+C 退出并保留状态")
     web = commands.add_parser("web", help="启动本地 Web 与真实 Agent 编排")
     web.add_argument("--port", type=int, default=3210)
     web.add_argument("--no-open", action="store_true")
@@ -220,6 +317,10 @@ def main() -> None:
             print_json({**safe, "api_key_configured": bool(key and key.strip()), "thinking": "disabled"})
         elif args.command == "skills":
             print_json(SkillCatalog.discover(config.skills_root).list())
+        elif args.command == "jobs":
+            if args.action == "work":
+                raise SystemExit(asyncio.run(work_jobs(config)))
+            local_jobs(config, args)
         elif args.command == "usage":
             with FileStore.open(config.home) as store:
                 runs = store.snapshot()["runs"]
@@ -273,6 +374,9 @@ def main() -> None:
                                         "errorCode",
                                         "resumable",
                                         "activeSeconds",
+                                        "externalWaitSeconds",
+                                        "activeWaitId",
+                                        "waitResumeError",
                                         "policy",
                                         "videoMode",
                                     )
