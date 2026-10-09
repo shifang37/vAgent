@@ -75,8 +75,8 @@ async def test_application_model_discovers_capability_and_creates_one_job(tmp_pa
         await service.task
         record = service.run_record(service.active_run_id)
         assert record["status"] == "completed", record["answer"]
-        assert record["videoMode"] == "mock" and record["executionVersion"] == 1
-        assert record["toolFeatures"]["video"]["toolsVersion"] == 1
+        assert record["videoMode"] == "mock" and record["executionVersion"] == 2
+        assert record["toolFeatures"]["video"]["toolsVersion"] == 2
         assert record["toolFeatures"]["video"]["capabilities"] == [
             item.model_dump(mode="json", by_alias=True) for item in service.video_jobs.capabilities()
         ]
@@ -358,7 +358,9 @@ async def test_deferred_boundary_stops_batch_without_false_success_or_next_model
         )
     )
     events = []
-    runner = AgentRunner(store=store, model=model, tools=registry, on_event=events.append)
+    runner = AgentRunner(
+        store=store, model=model, tools=registry, on_event=events.append, execution_version=1
+    )
     result = await runner.run("coffee", "保存然后等待")
     assert result["status"] == "failed" and result["errorCode"] == "EXTERNAL_WAIT_UNAVAILABLE"
     assert not result["resumable"] and result["toolCalls"] == 2 and model.calls == 1

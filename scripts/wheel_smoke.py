@@ -68,13 +68,14 @@ class VideoDemo:
 class WaitDemo:
     name = "wheel-wait-fixture"
 
-    def __init__(self, job_id):
+    def __init__(self, job_id, *, resuming=False):
         self.job_id, self.calls = job_id, 0
+        self.resuming = resuming
 
     async def generate(self, messages, tools):
         self.calls += 1
         assert "video_generate" not in {item["function"]["name"] for item in tools}
-        if self.calls == 1:
+        if self.calls == 1 and not self.resuming:
             return AIMessage(
                 content="",
                 tool_calls=[
@@ -86,7 +87,7 @@ class WaitDemo:
                 ],
             )
         data = json.loads(messages[-1].content)["data"]
-        assert self.calls == 2 and data["status"] == "succeeded"
+        assert self.calls == (1 if self.resuming else 2) and data["status"] == "succeeded"
         assert data["result"]["simulated"] and not data["mediaAvailable"]
         return AIMessage(content="Simulation complete; no playable media.")
 
@@ -104,14 +105,16 @@ async def smoke_video_tools(directory):
         assert len(service.store.snapshot()["jobs"]) == 1
         waiting_model = WaitDemo(model.job_id)
         pending = await service.runner(model=waiting_model, read_only=True).run("wheel", "await pending job")
-        assert pending["errorCode"] == "EXTERNAL_WAIT_UNAVAILABLE" and not pending["resumable"]
+        assert pending["status"] == "waiting_external" and pending["resumable"]
+        assert pending["executionVersion"] == 2
         assert waiting_model.calls == 1 and pending["toolCalls"] == 1
         binding = WaitBinding.model_validate(next(iter(service.store.snapshot()["waits"].values())))
-        assert binding.status == "preparing" and binding.context.run_id == pending["id"]
+        assert binding.status == "armed" and binding.context.run_id == pending["id"]
         assert binding.context.operation_key not in service.store.snapshot()["operations"]
     # B4 will manage the Worker lifecycle. This smoke test explicitly advances
     # B1's Worker with a virtual clock, without sleeping or invoking a model.
-    async with ApplicationService.open(config, model=WaitDemo(model.job_id)) as service:
+    resumed_model = WaitDemo(model.job_id, resuming=True)
+    async with ApplicationService.open(config, model=resumed_model) as service:
         current = datetime.fromisoformat(binding.started_at)
         provider = MockVideoAdapter(service.store, clock=lambda: current)
         jobs = JobService(service.store, [provider], clock=lambda: current)
@@ -130,8 +133,21 @@ async def smoke_video_tools(directory):
             context=binding.context,
         )
         assert marker == binding.deferred()  # Original interrupt position is preserved.
-        finished = await service.runner(read_only=True).run("wheel", "read completed simulation")
+        service.wait_coordinator.notify()
+        async with asyncio.timeout(5):
+            while service.run_record(pending["id"])["status"] == "waiting_external":
+                await asyncio.sleep(0.01)
+            while service.run_record(pending["id"])["status"] == "running":
+                await asyncio.sleep(0.01)
+        finished = service.run_record(pending["id"])
         assert finished["status"] == "completed" and finished["modelSteps"] == 2
+        assert finished["id"] == pending["id"] and finished["toolCalls"] == 1
+        assert finished["policy"] == pending["policy"] and resumed_model.calls == 1
+        assert finished["activeWaitId"] is None
+        delivered = WaitBinding.model_validate(service.store.snapshot()["waits"][binding.id])
+        assert delivered.status == "delivered"
+        assert service.store.snapshot()["operations"][binding.context.operation_key]["result"]["ok"]
+        assert await service.wait_coordinator.run_once() is None and resumed_model.calls == 1
         assert provider.ledger_snapshot()["submitCalls"] == 1
         assert provider.ledger_snapshot()["queryCalls"] == 2
         assert not service.store.snapshot()["artifacts"]
@@ -212,7 +228,7 @@ async def main():
             assert not (Path(directory) / "state" / "instance.lock").exists()
             await smoke_video_tools(directory)
     print(
-        "PASS: installed wheel, Web assets, config, streaming, text/quality, MCP, mock video tools, unique Job, deferred boundary, restart/replay, manual Worker, readonly terminal result, cleanup."
+        "PASS: installed wheel, Web assets, config, streaming, text/quality, MCP, mock video tools, unique Job, durable wait, original Run restart/automatic continuation, manual Worker, readonly delivery, unchanged budgets, cleanup."
     )
 
 

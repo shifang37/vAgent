@@ -1,8 +1,8 @@
 # M1-B 任务规划：模拟视频 Job 与持久等待
 
-更新日期：2026-10-09。状态：**B0–B2 完成，B3–B5 待实施**。B1 提供 schema v2、Job/Mock Worker；B2 已注册四工具、off/mock 启动模式、服务端执行上下文、延迟结果、只读与缓存边界。CLI/Web 尚未管理 Worker 或挂起生产 Run，未执行真实模型联调。证据见 [B0 验收](./M1B_B0_ACCEPTANCE.md)、[B1 验收](./M1B_B1_ACCEPTANCE.md) 与 [B2 验收](./M1B_B2_ACCEPTANCE.md)。
+更新日期：2026-10-09。状态：**B0–B3 完成，B4–B5 待实施**。B1 提供 schema v2、Job/Mock Worker；B2 接入四工具、模式、上下文及只读/缓存边界；B3 接入 execution v2、持久等待协调、停止与计时、启动/退出及跨存储恢复。应用尚未管理 JobWorker 或交付 Job 页面，未执行真实模型联调。证据见 [B0 验收](./M1B_B0_ACCEPTANCE.md)、[B1 验收](./M1B_B1_ACCEPTANCE.md)、[B2 验收](./M1B_B2_ACCEPTANCE.md) 与 [B3 验收](./M1B_B3_ACCEPTANCE.md)。
 
-依据：[M1 总计划](../M1_PLAN.md)、[Harness 设计](../AGENT_HARNESS_DESIGN.md)、[M1-A 验收](./M1A_ACCEPTANCE.md)。规划基线为 `a03f249`；当前能力以 [README](../README.md) 为准。数据、Job/Worker、模式配置和 Agent 工具已按 [M1-B 契约](./M1B_CONTRACTS.md) 落地，生产等待协调、Job 命令和页面仍为拟实施项。
+依据：[M1 总计划](../M1_PLAN.md)、[Harness 设计](../AGENT_HARNESS_DESIGN.md)、[M1-A 验收](./M1A_ACCEPTANCE.md)。规划基线为 `a03f249`；当前能力以 [README](../README.md) 为准。数据、Job/Worker、模式配置、Agent 工具和生产等待协调已按 [M1-B 契约](./M1B_CONTRACTS.md) 落地；Worker 应用生命周期、Job 命令和页面仍待 B4。
 
 M1-B 的交付目标是：用户通过 Agent 登记一个模拟视频任务，Worker 独立推进任务；Agent 可以先回复任务 ID，也可以持久等待结果。刷新页面或重启进程后，任务、原工具调用和预算保持一致，已确认的提交不重复执行。
 
@@ -20,18 +20,18 @@ M1-B 的交付目标是：用户通过 Agent 登记一个模拟视频任务，Wo
 
 | 位置 | 当前实现 | M1-B 工作 |
 |---|---|---|
-| `src/vagent/video/contracts.py`、`waiting.py` | B0 已定义视频/Job 与通用等待契约，并有独立离线验证 | B2/B3 接入工具执行与等待协调器 |
-| `src/vagent/storage.py` | B1 已迁移 schema v2，保存 jobs/waits；Job 与登记 Operation 同事务，保留 v1 快照与旧指纹 | B3 接入等待记录和 Run 的跨存储协调 |
-| `src/vagent/video/jobs.py`、`worker.py`、`providers/mock.py` | B1 已实现原子登记、两层去重、独立账本、串行 Worker 与持久查询重试 | B2–B4 接入工具、等待协调和应用生命周期 |
-| `src/vagent/tools.py`、`video/tools.py` | B2 已支持服务端上下文、延迟结果与四工具；保留旧原始数据执行器和 MCP 只读限制 | B3 使用通用延迟结果挂起，不在工具内部触发图中断 |
-| `src/vagent/runner.py` | B2 按工具模式生成规则、保存能力配置、绕过动态状态回答缓存；仍是 execution v1 | B3 增加持久挂起和原调用继续，保留旧版本路径 |
-| `src/vagent/journal.py`、`checkpoints.py` | 活动时间按单次执行累计；JSON 与 SQLite 分别提交 | 暂停等待计时、同步中断检查点、处理两份存储的提交间隙 |
-| `src/vagent/application.py` | 单活动任务；退出时停止运行；事件依附当前 Run | 管理 Worker/等待协调器生命周期；独立发布 Job 变化；支持停止等待 |
+| `src/vagent/video/contracts.py`、`waiting.py` | B0 契约；B3 增加批次位置、领域超时错误，工具与生产等待已接入 | B4 展示已保存的等待/结果 |
+| `src/vagent/storage.py` | schema v2、Job/Operation 原子登记、v1 迁移；B3 启动保留有效等待名额及模型尝试边界 | 保持单写进程与旧数据兼容 |
+| `src/vagent/video/jobs.py`、`worker.py`、`providers/mock.py` | B1 已实现原子登记、两层去重、独立账本、串行 Worker 与持久查询重试；B2/B3 已接入工具和等待 | B4 接入 Worker 应用生命周期 |
+| `src/vagent/tools.py`、`video/tools.py` | 四工具、通用解析器与延迟结果；当前视频规则 v2，保留 B2 的 v1 视图与 MCP 只读限制 | B4 共享服务统一入口 |
+| `src/vagent/runner.py`、`wait_runtime.py` | B3 持久挂起、领取/原调用交付、启动补偿、停止和配置/预算检查；保留 execution v1 | B4 使用同一协调器和执行互斥 |
+| `src/vagent/journal.py`、`checkpoints.py` | B3 暂停活动计时、独立累计外部等待；识别未解决中断与已完成节点的持久 pending writes | 持续保持故障回归 |
+| `src/vagent/application.py` | 已管理等待协调器启动/退出、后台原 Run 事件与停止等待 | B4 管理 JobWorker、发布独立 Job 变化 |
 | `src/vagent/cli.py` | 直接调用 Runner；交互输入使用同步 `input()` | 接入共享等待协调；避免输入阻塞 Worker；明确退出后的 Job 行为 |
 | `src/vagent/web.py`、`web/app.js` | SSE 只分发快照与文本增量；页面只识别现有 Run 状态 | 增加 Job 快照、Job 事件、等待态和查询恢复入口 |
 | `src/vagent/cache.py` | 回答缓存键含项目/产物，不含 Job 与能力状态 | 视频工具可见时跳过应用回答缓存，防止复用过时的任务状态 |
 
-B0 已验证等待机制，B1 提供 Job/Worker 和 v2 存储，B2 完成工具接入。B2 的未完成 `await_job` 保存 preparing 记录后返回延迟标记，execution v1 明确以 `EXTERNAL_WAIT_UNAVAILABLE` 结束 Run，不把它当作工具成功。B3 接入生产挂起与恢复；B4 接入 Worker 生命周期，仅注册工具不能视为整个 M1-B 已完成。
+B3 已验证生产 Runner 的同批等待、停止、外部时间、原工具结果与跨重启交付。无等待解析器的文本 Run 保持 execution v1；新 mock Run 默认 execution v2。旧 B2 的 preparing 记录及失败 Run 不自动唤醒。JobWorker 目前通过 Python API 显式推进；B4 仍需完成应用自动调度与入口闭环。
 
 ## 3. 契约设计
 
@@ -158,7 +158,7 @@ Job 事件绑定 Job 自己的 session/run 信息，不能写到当前活动的�
 | **B0 契约与等待验证（已完成）** | M1-A 已验收 | 数据、状态、工具返回、错误与迁移协议；LangGraph 同批中断/继续；提交顺序和 execution v1/v2 兼容路径；新增契约类型、实验与回归 | 离线验证通过，同批多等待与五处强退按原调用恢复，旧图指纹和恢复结果保持；见 B0 验收记录 |
 | **B1 持久 Job 与 Mock Worker（已完成）** | B0 | 新增 `video/jobs.py`、`video/worker.py`、`video/providers/mock.py`；存储迁移、请求冻结、两层去重、持久 Mock 轨迹、查询重试与恢复查询 | 不接模型也能登记/完成/失败；61 项新增回归、七处强退及旧检查点迁移恢复通过，见 B1 验收 |
 | **B2 视频工具与能力接入（已完成）** | B1 | 四工具、通用上下文/延迟结果、启动模式/来源、能力配置指纹、按模式规则、只读和缓存边界 | 58 项新增回归；确定性模型创建唯一 Job，非法参数/来源拒绝，off/MCP/旧检查点兼容，详见 B2 验收 |
-| **B3 持久等待与恢复** | B2、B0 验证结论 | 扩展 `runner.py`、`journal.py`、`checkpoints.py`；新增通用等待协调模块；完成自动继续、停止、计时、退出/启动扫描和故障间隙处理 | 等待零新增模型调用；原调用结果交付一次；停止后不唤醒；提交/等待/恢复各强退点通过，原预算不增加 |
+| **B3 持久等待与恢复（已完成）** | B2、B0 验证结论 | execution v2、`wait_runtime.py`、独立活动/等待时间、自动继续/停止、应用退出/启动扫描、SQLite pending writes 补偿、旧图视图 | 54 项新增回归、16 项生产强退；等待零模型调用、原结果交付、停止不唤醒、原预算保持；见 B3 验收 |
 | **B4 CLI/Web 交付** | B3 | 共享服务管理 Worker；CLI 查询/工作循环/非阻塞交互；Job API、快照和 SSE；`web/app.js`、`index.html`、`styles.css` 增加状态卡片和模拟标记 | CLI 与 Web 使用同一状态；页面刷新补齐；Run 完成后仍见 Job 更新；等待、停止、查询暂停/恢复可操作 |
 | **B5 验收与打包** | B4 | 新增 `scripts/evaluate_m1b.py` 和 `docs/M1B_ACCEPTANCE.md`；扩展 wheel smoke；更新 README 和总计划 | 离线故障矩阵、真实 DeepSeek + Mock 套件、仓库外 wheel 流程有独立证据；未验证部分明确保留，不提前勾选完成 |
 
@@ -166,7 +166,7 @@ Job 事件绑定 Job 自己的 session/run 信息，不能写到当前活动的�
 
 ## 7. 验收矩阵
 
-按职责增加测试，并复用已有恢复、只读、流式和缓存夹具。B0/B1 已有契约、Job、Worker、迁移测试；B2 增加 `test_video_tools.py`、`test_video_integration.py`，扩展旧图兼容测试。下表保留整个 M1-B 的验收矩阵；生产等待、页面和真实模型联调仍待 B3–B5，不能由当前服务与工具测试代替。
+按职责增加测试，并复用已有恢复、只读、流式和缓存夹具。B0/B1 已有契约、Job、Worker、迁移测试；B2 增加四工具与模式验证；B3 增加 `test_wait_runtime.py`、`test_wait_recovery.py`、`test_wait_compatibility.py`。下表保留整个 M1-B 的验收矩阵；页面、自动 Worker 和真实模型联调仍待 B4–B5，不能用库级等待测试代替。
 
 | 场景 | 必须独立断言的结果 | 证据方式 |
 |---|---|---|
@@ -206,8 +206,8 @@ node --check web/app.js
 - [x] B0：契约、迁移协议及持久等待验证完成；实际 schema 迁移见 B1。
 - [x] B1：Mock Job、Worker、两层去重与故障状态完成，见 [B1 验收](./M1B_B1_ACCEPTANCE.md)。
 - [x] B2：四工具、模式、只读与缓存边界完成，见 [B2 验收](./M1B_B2_ACCEPTANCE.md)。
-- [ ] B3：等待、停止、计时和跨重启恢复完成。
+- [x] B3：等待、停止、计时和跨重启恢复完成，见 [B3 验收](./M1B_B3_ACCEPTANCE.md)。
 - [ ] B4：CLI/Web 状态与操作闭环完成。
 - [ ] B5：离线/真实证据分开记录，独立安装通过，验收文档完成。
 
-下一项可执行任务为 **B2：接入四个视频工具与服务端执行上下文，增加 off/mock 模式、只读边界、按模式的规则和回答缓存策略；继续保持 execution v1 兼容。**
+下一项可执行任务为 **B4：共享服务管理 JobWorker，交付 CLI 持续等待/Job 命令/非阻塞交互，以及 Job API、快照、SSE 和模拟任务卡片。继续使用 B3 的等待协调、停止、计时与旧检查点兼容路径。**

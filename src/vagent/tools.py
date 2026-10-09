@@ -2,7 +2,7 @@
 
 import copy
 from collections.abc import Awaitable, Callable
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from typing import Annotated, Literal
 from uuid import uuid4
 
@@ -111,6 +111,35 @@ class ToolRegistry:
     def __init__(self):
         self._definitions: dict[str, ToolDefinition] = {}
         self._features: dict[str, ToolFeature] = {}
+        self.wait_resolvers: dict[str, Callable] = {}
+        self._resolver_features: dict[str, str | None] = {}
+        self._execution_variants: dict[int, tuple[list[ToolFeature], dict[str, str]]] = {}
+
+    def register_wait_resolver(self, kind: str, resolve: Callable, *, feature=None) -> "ToolRegistry":
+        if kind in self.wait_resolvers:
+            raise ValueError(f"Duplicate wait resolver: {kind}")
+        self.wait_resolvers[kind] = resolve
+        self._resolver_features[kind] = feature
+        return self
+
+    def register_execution_variant(self, version: int, *, features, descriptions) -> None:
+        """Keep historical prompts/specs without teaching the Runner domain rules."""
+        old_features, old_descriptions = self._execution_variants.get(version, ([], {}))
+        self._execution_variants[version] = (
+            [*old_features, *copy.deepcopy(features)],
+            {**old_descriptions, **descriptions},
+        )
+
+    def for_execution_version(self, version: int) -> "ToolRegistry":
+        registry = self._filtered(lambda _: True)
+        features, descriptions = self._execution_variants.get(version, ([], {}))
+        for feature in features:
+            if feature.name in registry._features:
+                registry._features[feature.name] = copy.deepcopy(feature)
+        for name, description in descriptions.items():
+            if name in registry._definitions:
+                registry._definitions[name] = replace(registry._definitions[name], description=description)
+        return registry
 
     def register(self, definition: ToolDefinition) -> "ToolRegistry":
         if definition.name in self._definitions:
@@ -180,9 +209,15 @@ class ToolRegistry:
     def _filtered(self, include: Callable[[ToolDefinition], bool]) -> "ToolRegistry":
         registry = ToolRegistry()
         registry._features = copy.deepcopy(self._features)
+        registry._execution_variants = copy.deepcopy(self._execution_variants)
         for definition in self._definitions.values():
             if include(definition):
                 registry.register(definition)
+        active = {definition.feature for definition in registry._definitions.values()}
+        for kind, resolver in self.wait_resolvers.items():
+            feature = self._resolver_features[kind]
+            if feature is None or feature in active:
+                registry.register_wait_resolver(kind, resolver, feature=feature)
         return registry
 
     @property

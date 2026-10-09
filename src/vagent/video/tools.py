@@ -9,19 +9,32 @@ from vagent.storage import FileStore
 from vagent.tools import Arguments, ToolDefinition, ToolFeature, ToolRegistry
 from vagent.video.contracts import Job, VideoRequest
 from vagent.video.jobs import JobService
-from vagent.waiting import ExternalResourceRef, ToolExecutionContext, WaitBinding
+from vagent.waiting import ExternalResourceRef, ToolExecutionContext, ToolResultError, WaitBinding
 
-VIDEO_TOOLS_VERSION = 1
-VIDEO_RULES_VERSION = 1
+VIDEO_TOOLS_VERSION = 2
+VIDEO_RULES_VERSION = 2
 WAIT_TIMEOUT_SECONDS = 600
 
-VIDEO_RULES = """当前启用 mock 视频模式，只能登记模拟任务；所有结果均为 simulated=true、mediaAvailable=false。
+LEGACY_VIDEO_RULES = """当前启用 mock 视频模式，只能登记模拟任务；所有结果均为 simulated=true、mediaAvailable=false。
 需要生成时先调用 video_capabilities，根据返回的模型、能力版本和完整规格组合构造 video_generate。
 sourceRefs 可省略；引用文本产物时先读取并使用工具确认的 artifactId 和确切 version。
 video_generate 只返回本地 jobId 与登记状态；每个 Run 最多新建一个 Job，不能自动降低规格、拆分或重提。
 已登记不等于已完成。当前入口不会自动推进 Job，也不能挂起等待未完成任务；先报告 jobId 与真实状态。
 job_get 可读取本地状态，await_job 可取得已有终态；不要循环查询。提交不确定或查询暂停时明确报告原因。
 成功也只是模拟结果描述，没有可播放或下载的媒体；不能声称已生成真实视频。"""
+
+VIDEO_RULES = LEGACY_VIDEO_RULES.replace(
+    "已登记不等于已完成。当前入口不会自动推进 Job，也不能挂起等待未完成任务；先报告 jobId 与真实状态。\n"
+    "job_get 可读取本地状态，await_job 可取得已有终态；不要循环查询。提交不确定或查询暂停时明确报告原因。",
+    "已登记不等于已完成。可以先报告 jobId 与真实状态；需要等待结果时调用 await_job，Run 会持久挂起。\n"
+    "Job 由独立 Worker 推进；等待不会请求模型或占用活动时间，结果就绪后续接原调用。\n"
+    "job_get 读取本地状态；不要循环查询。等待到期、提交不确定或查询暂停时明确报告原因。",
+)
+
+LEGACY_AWAIT_DESCRIPTION = (
+    "读取当前项目 Job 的终态；未结束时保存持久等待并返回通用延迟标记。"
+    "当前执行器尚不支持挂起，遇到未完成任务会结束本次 Run；不要用它轮询。"
+)
 
 
 class JobLookup(Arguments):
@@ -62,6 +75,19 @@ def completed_job_data(job: Job) -> dict:
     raise AppError("JOB_NOT_READY", "视频任务尚未结束。")
 
 
+def resolve_job_wait(store: FileStore, binding: WaitBinding) -> dict | None:
+    """Resolve local facts even when the original adapter/model is unavailable."""
+    raw = store.snapshot()["jobs"].get(binding.resource.id)
+    if raw is None or raw["context"]["projectId"] != binding.context.project_id:
+        return failure("JOB_NOT_FOUND", "没有这个视频任务。")
+    try:
+        return {"ok": True, "data": completed_job_data(Job.model_validate(raw))}
+    except AppError as error:
+        if error.code == "JOB_NOT_READY":
+            return None
+        return failure(error.code, str(error))
+
+
 def register_video_tools(registry: ToolRegistry, service: JobService) -> ToolRegistry:
     capabilities = [item.model_dump(mode="json", by_alias=True) for item in service.capabilities()]
     if not capabilities or any(item["mode"] != "mock" for item in capabilities):
@@ -78,6 +104,26 @@ def register_video_tools(registry: ToolRegistry, service: JobService) -> ToolReg
             instructions=VIDEO_RULES,
             bypass_answer_cache=True,
         )
+    )
+    registry.register_execution_variant(
+        1,
+        features=[
+            ToolFeature(
+                name="video",
+                configuration={
+                    "mode": "mock",
+                    "toolsVersion": 1,
+                    "rulesVersion": 1,
+                    "capabilities": capabilities,
+                },
+                instructions=LEGACY_VIDEO_RULES,
+                bypass_answer_cache=True,
+            )
+        ],
+        descriptions={"await_job": LEGACY_AWAIT_DESCRIPTION},
+    )
+    registry.register_wait_resolver(
+        "job", lambda binding: resolve_job_wait(service.store, binding), feature="video"
     )
 
     def check_store(store: FileStore):
@@ -148,6 +194,9 @@ def register_video_tools(registry: ToolRegistry, service: JobService) -> ToolReg
             deadline_at=(
                 datetime.fromisoformat(timestamp) + timedelta(seconds=WAIT_TIMEOUT_SECONDS)
             ).isoformat(),
+            timeout_error=ToolResultError(
+                code="JOB_WAIT_TIMEOUT", message=f"任务 {job.id} 的本次等待已到期；Job 将继续独立跟踪。"
+            ),
         )
         store.transaction(
             lambda draft: draft["waits"].__setitem__(
@@ -185,7 +234,7 @@ def register_video_tools(registry: ToolRegistry, service: JobService) -> ToolReg
         ToolDefinition(
             "await_job",
             "读取当前项目 Job 的终态；未结束时保存持久等待并返回通用延迟标记。"
-            "当前执行器尚不支持挂起，遇到未完成任务会结束本次 Run；不要用它轮询。",
+            "执行器挂起并在结果就绪后续接原调用；不要用它轮询。停止等待不会取消 Job。",
             JobLookup,
             "read",
             context_execute=await_job,

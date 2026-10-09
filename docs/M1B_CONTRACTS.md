@@ -1,8 +1,8 @@
 # M1-B 契约与恢复协议
 
-日期：2026-10-09。B0 提供契约/等待实验，B1 提供 Job/Mock Worker/schema v2，B2 已接入四工具、模式和执行边界。当前应用仍使用 execution v1；生产 Run 挂起与自动恢复由 B3 接入。
+日期：2026-10-09。B0 提供契约/等待实验，B1 提供 Job/Mock Worker/schema v2，B2 接入四工具和模式，B3 已接入生产等待/停止/计时与跨存储恢复。新 mock Run 使用 execution v2；文本及历史 execution v1 保持原路径。Worker 应用生命周期与 Job 入口待 B4。
 
-范围依据：[M1-B 任务规划](./M1B_PLAN.md)。验证证据见 [B0 验收](./M1B_B0_ACCEPTANCE.md)、[B1 验收](./M1B_B1_ACCEPTANCE.md) 与 [B2 验收](./M1B_B2_ACCEPTANCE.md)。
+范围依据：[M1-B 任务规划](./M1B_PLAN.md)。验证证据见 [B0 验收](./M1B_B0_ACCEPTANCE.md)、[B1 验收](./M1B_B1_ACCEPTANCE.md)、[B2 验收](./M1B_B2_ACCEPTANCE.md) 与 [B3 验收](./M1B_B3_ACCEPTANCE.md)。
 
 ## 1. 模块与版本
 
@@ -13,15 +13,16 @@
 | `src/vagent/waiting.py` | 通用 ToolExecutionContext、延迟结果、WaitBinding、ResumeToken、成功/失败工具结果；不导入视频模块 |
 | `src/vagent/video/jobs.py`、`worker.py`、`providers/mock.py` | B1：原子 Job 登记、两层去重、来源冻结、独立上游账本、串行 Worker、查询恢复 |
 | `src/vagent/video/tools.py`、`tools.py` | B2：四工具、服务端上下文、原样返回已记账结果/延迟标记、能力配置和规则版本 |
+| `src/vagent/wait_runtime.py`、`runner.py`、`checkpoints.py`、`journal.py` | B3：通用等待解析/领取/交付、同 Store 执行互斥、同步中断/节点结果补偿、原预算与独立等待时间 |
 | `scripts/probe_m1b_wait.py` | 使用真实 FileStore、项目工具和 SQLite 的离线图实验；不向应用注册工具或启动后台服务 |
 
 | 版本维度 | 当前值 | 后续规则 |
 |---|---|---|
 | 视频对象 `contractVersion` | 1 | B0 Job 的字段契约；与存储/执行版本分开 |
 | JSON `schemaVersion` | 2 | B1 在实例锁下自动迁移 v1，先保存原始快照，再增加 jobs/waits |
-| Run `executionVersion` | 1 | 保留旧图；`WAIT_EXECUTION_VERSION=2` 只是为 B3 新图保留的版本 |
+| Run `executionVersion` | 1 或 2 | 未注册等待解析器时默认 1，新 mock 默认 2；恢复选择 Run 原版本，`CHECKPOINT_VERSION=1` 未全局升级 |
 | Run `contextVersion` | 1 或 2 | 与 executionVersion 独立；两种旧布局都需要继续支持 |
-| `toolFeatures.video.toolsVersion` / `rulesVersion` | 1 / 1 | B2 保存完整能力快照并纳入签名；工具 Schema 和实际系统规则也独立参与签名 |
+| `toolFeatures.video.toolsVersion` / `rulesVersion` | 2 / 2；旧版为 1 / 1 | 当前规则支持挂起；历史 execution v1 选择 B2 原规则/工具描述，能力、Schema 与系统规则均校验签名 |
 
 契约使用 Pydantic 严格校验、camelCase JSON 和 `extra=forbid`。请求及嵌套规格/来源不可变；JSON 数组在内存中转成 tuple。持久写入使用 `model_dump(mode="json", by_alias=True)`，读取使用 `model_validate`。不要用跳过校验的 `model_construct` 或 `model_copy(update=...)` 形成待提交状态。
 
@@ -100,7 +101,7 @@ pending_submit → submitting → queued → running → succeeded / failed
 - queryState=retrying/paused 时，Job 仍为最近一次确认的 queued/running。只有 polling/retrying 有 nextPollAt，暂停与终态不自动安排下一次查询。
 - B1 增加可缺省的 `queryStartedAt`。发起 query 前先累计 queryAttempts、保存开始时间，并将 nextPollAt 设为本次超时截止。进程在查询中退出后，这次已记账的查询消费一个失败窗口；重试时间锚定原截止，不因再次重启而重置。正常响应、异常和 Worker 停止都会清除此字段。
 
-这些类型约束、持久队列、查询调用、原子去重及 Worker start/stop 已由 B1 实现；应用生命周期和 Agent 等待协调仍待接入。Mock 的 `mock-video.json` 与 `state.json` 分别原子提交；Worker 只使用 capabilities/submit/query，不能读取私有账本来消除 unknown。
+这些类型约束、持久队列、查询调用、原子去重及 Worker start/stop 已由 B1 实现，Agent 等待协调已由 B3 接入；JobWorker 应用生命周期待 B4。Mock 的 `mock-video.json` 与 `state.json` 分别原子提交；Worker 只使用 capabilities/submit/query，不能读取私有账本来消除 unknown。
 
 ## 5. 通用等待与恢复指针
 
@@ -119,6 +120,8 @@ B2 新建 WaitBinding 同时保存 `operationFingerprint`，覆盖原工具名�
 
 `revision` 用于状态变更比较；`generation` 用于拒绝已失效的等待指针。B3 显式重新等待时由服务端管理代次，并先复用已提交的原 Operation，不能覆盖其结果或重复加工具额度。
 
+B3 增加可缺省的 `batchIndex` 与 `timeoutError`。原等待停止且尚无稳定结果时，显式恢复增加 generation 并重新保存截止时间；有稳定结果/Operation 时保留原指针和结果，兼容 SQLite 已记录的恢复值。模型另发新的 await 调用仍独立占用一次工具额度。
+
 恢复入口只传指针，不接受调用方声称的生成结果：
 
 ```json
@@ -133,15 +136,23 @@ B2 新建 WaitBinding 同时保存 `operationFingerprint`，覆盖原工具名�
 2. **中断优先于终态判断。** 当前验证版本中，同一节点第二次中断可以出现 `snapshot.next == ()`，但 `snapshot.tasks[].interrupts` 仍非空。必须先检查中断，只有没有待处理中断、没有后续节点且最终状态有效，才能补交终态。现有 execution v1 不产生这类中断，保持原路径。
 3. **同批重放保持中断顺序。** 已经建立等待的调用在节点重放时仍经过原 interrupt 位置，哪怕它的本地 Operation 已完成。随后复用原结果；不能因为前一个 Job 已完成而跳过其 interrupt，导致第二个等待取到前一个恢复指针。未曾建立等待且资源已经完成的调用可以直接返回结果。
 
-离线实验使用真实本地写工具和 SQLite 验证这些行为；它不是已接入生产 AgentRunner 的等待实现。
+B0 离线实验仍独立保留；以上行为已由 B3 的生产 AgentRunner 回归验证。B3 还覆盖 SQLite 同时保留旧 interrupt 和已完成节点 pending writes 的情况：只有原 waitId/generation 的 `wait_deliveries`、ToolMessage 和 Operation 相互匹配，才将旧 interrupt 视为已解决。没有有效终态时用原图补交已保存节点结果，不能仅凭 `next == ()` 完成 Run。
 
 ### B2 的执行边界
 
 `await_job` 在同一个 Store 锁范围内选择即时结果或 preparing 记录。未建立等待且 Job 已成功时保存成功 Operation；失败、提交不确定、查询暂停分别返回 `JOB_FAILED`、`JOB_SUBMISSION_UNKNOWN`、`JOB_QUERY_PAUSED`。待完成时仅保存绑定、原调用指纹与固定 10 分钟截止时间，不保存虚假的成功 Operation。已建立绑定的原调用始终重放同一延迟标记，即使 Job 或 Operation 已结束。
 
-execution v1 在普通工具异常捕获之外识别延迟标记，以 `EXTERNAL_WAIT_UNAVAILABLE` 结束本次 Run，`resumable=false`；保留同批已完成结果，不启动后续工具或下一次模型请求。不会写 waiting_external、arm、claim 或交付完成标记。B3 启动扫描必须按 executionVersion 和 Run 状态筛选，不能把 B2 已结束 Run 的 preparing 记录当作可自动恢复的等待。超时交付、外部等待计时、停止及自动恢复仍由 B3 实施。
+execution v1 仍在普通工具异常捕获之外识别延迟标记，以 `EXTERNAL_WAIT_UNAVAILABLE`、`resumable=false` 结束；B3 扫描忽略这些已结束 Run 的 preparing 记录。execution v2 则在同步中断后保存 waiting_external，后续由协调器续接原调用。
 
-## 7. 提交顺序与启动补偿（供 B1/B3 实施）
+### B3 的生产边界
+
+`WaitCoordinator.run_once()` 扫描持久记录，`start()/stop()` 管理本地循环，通知只加速扫描。ApplicationService 已管理协调器并将事件归属原 Run；JobWorker 仍需显式运行。配置、Key、原工具/能力、最新会话、检查点和剩余预算均在自动执行前检查；失败原因保存在 `waitResumeError`，已经准备好的领域结果不丢失。
+
+领取后发生过新的模型尝试时，自动恢复返回 `EXPLICIT_RESUME_REQUIRED`，不重发请求；普通 failed/cancelled Run 不被后台继续。已完整落盘的图终态可直接补齐会话。活动时间在图挂起时停止；外部等待用 `externalWaitStartedAt` 和累计 `externalWaitSeconds` 结算。无变化的扫描不更新 Run，也不消费模型、工具或活动时间预算。
+
+用户停止先在 JSON 事务中关闭自动继续、保存 cancelled 与可见的终止工具消息，再取消当前图。Job 不变。正常服务退出只停止协调循环；等待准备和已领取但尚未开始模型尝试的中断保留自动意图。Run 停止后若已有更新请求，显式恢复仍拒绝覆盖新会话。
+
+## 7. 提交顺序与启动补偿（B1/B3 已实施）
 
 | 阶段 | 先持久保存 | 重启后的处理 |
 |---|---|---|
@@ -149,14 +160,15 @@ execution v1 在普通工具异常捕获之外识别延迟标记，以 `EXTERNAL
 | 提交意图 | submitting + submitAttempts=1；随后在事务外 submit | 无已确认 ID 归 unknown，不能猜测未发送 |
 | 上游受理/完成 | 原 ID、标准化状态；成功时同时保存结果描述 | 继续 query 原 ID，或直接提供已保存结果 |
 | 查询意图 | queryAttempts 累计、queryStartedAt、当前请求的超时截止 | 保留原 ID；中断查询占用原失败窗口，再按保存的策略重试或暂停 |
-| 准备等待 | WaitBinding preparing、原调用/批次位置及 Run 等待意图；结算活动时间 | 图仍在原 tools 节点时可重放到中断，复用此前已完成操作，不先调用模型 |
+| 准备等待 | 工具先保存 preparing 与原调用；Runner 再保存 batchIndex、Run 意图并结算活动时间 | 两次 JSON 提交之间退出也保留原等待名额；核对原 tools 检查点后重建中断，复用已完成操作，不先调用模型 |
 | 等待就绪 | SQLite 同步中断后再把绑定设为 armed | 若中断存在但 JSON 未更新，核对原调用后补 arm；再检查已经完成的 Job |
 | 结果就绪 | armed → ready，保存真实最终工具结果 | 不依赖内存事件；扫描即可发现可交付结果 |
 | 领取恢复 | 比较 revision、Run 最新性/状态、autoResume、配置和预算，记录 claimedModelSteps | 未开始新模型调用可补交；已发生模型尝试则走原显式恢复规则 |
 | 回填结果 | 原 Operation 保存稳定结果，再向图写原 toolCallId 的 ToolMessage | 结果已提交、图未提交时复用同一结果，不再做副作用 |
+| 节点结果写入 | SQLite pending writes 可能先保存已完成 tools 节点，旧 interrupt 尚在 | 核对交付代次、原结果与工具消息；通过原图提交缓存的节点结果，不重新执行工具 |
 | 完成交付 | 图确认原工具结果后保存 delivered | 只有交付标记缺失时补标记；重复唤醒不重开图 |
 
-等待截止时间在创建时固定，默认 10 分钟；活动时间暂停，外部等待单独累计。Job unknown、查询暂停、等待到期或停止如何结束生产 Run、自动恢复与用户停止如何串行裁决、模型请求丢失后的预算记账，由 B3 按总计划接入并验证。
+等待截止时间在创建时固定，默认 10 分钟。已 ready 的结果保持稳定；仍未准备好结果的等待超过截止时间后交付 `JOB_WAIT_TIMEOUT`，Job 继续跟踪。unknown、查询暂停和生成失败分别交付对应错误，由后续模型根据事实答复；这些工具错误不自行重提 Job。等待、停止、恢复领取和模型请求丢失均由 B3 故障测试独立验证。
 
 ## 8. schema v1 → v2 迁移协议（B1）
 
@@ -170,7 +182,7 @@ SQLite 检查点保持在原文件中，不做盲目版本升级。备份或回�
 
 ## 9. execution v1 的兼容门槛
 
-新增等待图使用单独的 execution v2 路径。B3 不能直接把当前 `CHECKPOINT_VERSION` 全局改为 2 再让旧 Run 套用新系统提示/工具集合；读取旧 Run 时选择其原版本，保留模型、工具、Skills 和上下文配置校验。
+新增等待图使用单独的 execution v2 路径。`CHECKPOINT_VERSION` 仍为 1；读取旧 Run 时通过工具注册表的历史版本视图选择原规则、描述及配置，保留模型、工具、Skills 和上下文校验。
 
 B2 为新 Run 保存 `videoMode` 和 `toolFeatures`。off 没有新能力签名项；缺失字段的旧 Run 解释为 off/空配置。启动为 mock 时，应用/CLI 和 Runner 恢复入口为旧 Run 移除视频工具与附加规则，两个旧签名保持原值。mock Run 必须匹配保存的完整能力、工具 Schema、规则及其版本；关闭模式、缺少适配器或改变配置均在新模型调用前拒绝。只读过滤保留能力配置和缓存绕过策略，不把视频身份混入 MCP 的 identities。
 
@@ -182,3 +194,5 @@ B2 为新 Run 保存 `videoMode` 和 `toolFeatures`。off 没有新能力签名�
 | 2 | 1 | `349273b9b922fca6637f83651e760dad4303343352ade27da2b30ca74ddcc7ae` |
 
 测试固定历史指纹，不从当前提示词重新推导期望值。B1 将同一旧执行检查点与 v1 JSON 状态一起重新打开，实际经过 schema v2 迁移后继续完成原 Run，保留原产物、Operation 和累计预算；后续接入仍需满足此门槛。
+
+B3 另从原提交 `41be04a` 的源码捕获四个 B2 mock 指纹，覆盖 context v1/v2 与普通/只读模式，固定在 `tests/test_wait_compatibility.py`。当前默认 v2 Runner 可恢复同一 v1 Run，保持原指纹、原 Operation 和累计预算；B2 已结束的等待不自动复活。

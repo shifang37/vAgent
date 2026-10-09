@@ -20,9 +20,16 @@ from langchain_core.messages import (
     messages_to_dict,
 )
 from langgraph.graph import END, START, StateGraph
+from langgraph.types import Command, interrupt
 
 from vagent.cache import AnswerCache
-from vagent.checkpoints import CHECKPOINT_VERSION, open_checkpointer
+from vagent.checkpoints import (
+    CHECKPOINT_VERSION,
+    completed_tool_task,
+    open_checkpointer,
+    pending_interrupts,
+    terminal_snapshot,
+)
 from vagent.config import assert_id
 from vagent.context import RUN_BUDGET_HEADER, ContextBuilder
 from vagent.errors import AppError, failure, public_error
@@ -32,7 +39,8 @@ from vagent.quality import requested_content_limits, updated_content_limits
 from vagent.storage import FileStore, now
 from vagent.tools import ToolRegistry
 from vagent.usage import extract_usage
-from vagent.waiting import DeferredToolResult, ToolExecutionContext
+from vagent.wait_runtime import WaitService, close_pending_calls, execution_control, utc_now
+from vagent.waiting import WAIT_EXECUTION_VERSION, DeferredToolResult, ResumeToken, ToolExecutionContext
 
 SYSTEM_PROMPT = """你是 vagent 视频创作 Agent，使用中文协助用户规划和修改创作方案。
 根据需求自主选择工具，观察工具真实结果后再行动。普通交流无需工具。
@@ -91,6 +99,10 @@ class GraphState(TypedDict):
     dropped_messages: int
     error_code: str | None
     answer: str
+
+
+class WaitingGraphState(GraphState):
+    wait_deliveries: dict[str, int]
 
 
 def text_content(message: BaseMessage) -> str:
@@ -178,12 +190,22 @@ class AgentRunner:
         read_only: bool = False,
         answer_cache: AnswerCache | None = None,
         stream_output: bool = True,
+        execution_version: int | None = None,
+        clock=utc_now,
     ):
-        self.store, self.model, self.tools = store, model, tools
+        self.store, self.model = store, model
         self.read_only = read_only
         self.answer_cache = answer_cache
-        if read_only:
-            self.tools = tools.read_only()
+        self.base_tools = tools.read_only() if read_only else tools
+        self.execution_version = (
+            execution_version
+            if execution_version is not None
+            else (WAIT_EXECUTION_VERSION if self.base_tools.wait_resolvers else CHECKPOINT_VERSION)
+        )
+        if self.execution_version not in {CHECKPOINT_VERSION, WAIT_EXECUTION_VERSION}:
+            raise AppError("NO_CHECKPOINT", "不支持此图执行版本。")
+        self.tools = self.base_tools.for_execution_version(self.execution_version)
+        self.clock = clock
         self.policy = policy or RunPolicy()
         self.context = context or ContextBuilder()
         self.skills = skills or []
@@ -219,7 +241,7 @@ class AgentRunner:
     def context_signature(self, format_version: int | None = None) -> str:
         context = self.context if format_version is None else self.context.for_version(format_version)
         payload = {
-            "version": CHECKPOINT_VERSION,
+            "version": self.execution_version,
             "model": self.model.name,
             "system": self.system_prompt,
             "tools": context.prepare_tools(self.tools.specs()),
@@ -244,6 +266,7 @@ class AgentRunner:
         *,
         request_id: str | None = None,
         cancelled: asyncio.Event | None = None,
+        shutdown: asyncio.Event | None = None,
     ) -> dict:
         assert_id(session_id)
         request_id = request_id or str(uuid4())
@@ -261,7 +284,9 @@ class AgentRunner:
                     if previous.get("readOnly", False) != self.read_only:
                         raise AppError("REQUEST_CONFLICT", "相同请求 ID 不能改变只读模式。")
                     return previous, False
-            if any(run["status"] == "running" for run in draft["runs"].values()):
+            if execution_control(store).lock.locked():
+                raise AppError("RUN_BUSY", "已有任务正在运行，请等待完成或停止后重试。")
+            if any(run["status"] in {"running", "waiting_external"} for run in draft["runs"].values()):
                 raise AppError("RUN_BUSY", "已有任务正在运行，请等待完成或停止后重试。")
             if not self.read_only:
                 changes = requested_content_limits(prompt)
@@ -293,7 +318,7 @@ class AgentRunner:
                 "answer": "",
                 "createdAt": now(),
                 "updatedAt": now(),
-                "executionVersion": CHECKPOINT_VERSION,
+                "executionVersion": self.execution_version,
                 "contextSignature": self.context_signature(),
                 "contextVersion": self.context.format_version,
                 "policy": {
@@ -312,6 +337,10 @@ class AgentRunner:
                 "videoMode": self.video_mode,
                 "toolFeatures": self.tools.features,
             }
+            if self.execution_version == WAIT_EXECUTION_VERSION:
+                record.update(
+                    activeWaitId=None, externalWaitSeconds=0, externalWaitStartedAt=None, waitResumeError=None
+                )
             draft["runs"][record["id"]] = record
             draft["sessions"][session_id]["latestRunId"] = record["id"]
             return record, True
@@ -319,16 +348,46 @@ class AgentRunner:
         record, created = store.transaction(begin)
         if not created:
             return record
-        return await self._execute(record, cancelled=cancelled)
+        return await self._execute(record, cancelled=cancelled, shutdown=shutdown)
 
-    async def resume(self, run_id: str, *, cancelled: asyncio.Event | None = None) -> dict:
+    def for_record(self, record: dict):
+        restored = copy.copy(self)
+        restored.execution_version = record.get("executionVersion")
+        if record.get("videoMode", "off") == "off":
+            restored.base_tools = self.base_tools.without_feature("video")
+        restored.tools = restored.base_tools.for_execution_version(restored.execution_version)
+        return restored
+
+    def validate_resume(self, record: dict, state: dict) -> None:
+        if record.get("executionVersion") not in {
+            CHECKPOINT_VERSION,
+            WAIT_EXECUTION_VERSION,
+        } or not record.get("policy"):
+            raise AppError("NO_CHECKPOINT", "旧版 Run 没有持久图检查点，请发起新请求。")
+        if state["sessions"][record["sessionId"]].get("latestRunId") != record["id"]:
+            raise AppError("STALE_RUN", "该会话已有更新的请求，不能恢复旧 Run 覆盖后续对话。")
+        if (
+            record.get("videoMode", "off") != self.video_mode
+            or record.get("toolFeatures", {}) != self.tools.features
+        ):
+            raise AppError("RESUME_CONFIG_CHANGED", "工具模式或能力版本已变化，请恢复原配置。")
+        if record.get("contextSignature") != self.context_signature(record.get("contextVersion", 1)):
+            raise AppError("RESUME_CONFIG_CHANGED", "模型、工具、Skills 或上下文配置已变化，请恢复原配置。")
+        if not (self.store.home / "checkpoints.sqlite").is_file():
+            raise AppError("NO_CHECKPOINT", "检查点文件缺失，不能重建并重跑原任务。")
+
+    async def resume(self, run_id: str, *, cancelled: asyncio.Event | None = None, shutdown=None) -> dict:
         assert_id(run_id)
         saved = self.store.snapshot()["runs"].get(run_id)
-        if saved and saved.get("videoMode", "off") == "off" and self.video_mode != "off":
-            # New startup capabilities cannot alter an old execution-v1 graph.
-            legacy = copy.copy(self)
-            legacy.tools = self.tools.without_feature("video")
-            return await legacy.resume(run_id, cancelled=cancelled)
+        if saved and saved["status"] == "completed":
+            return saved
+        if saved and (
+            saved.get("executionVersion") != self.execution_version
+            or (saved.get("videoMode", "off") == "off" and self.video_mode != "off")
+        ):
+            return await self.for_record(saved).resume(run_id, cancelled=cancelled, shutdown=shutdown)
+        if execution_control(self.store).lock.locked():
+            raise AppError("RUN_BUSY", "已有任务正在运行，请等待完成或停止后重试。")
 
         def claim(draft):
             record = draft["runs"].get(run_id)
@@ -336,40 +395,74 @@ class AgentRunner:
                 raise AppError("NOT_FOUND", "没有这个 Run，请使用 inspect 查看运行 ID。")
             if record["status"] == "completed":
                 return record, False
-            if any(run["status"] == "running" for run in draft["runs"].values()):
+            if any(
+                run["status"] in {"running", "waiting_external"}
+                and not (run["id"] == run_id and run["status"] == "waiting_external")
+                for run in draft["runs"].values()
+            ):
                 raise AppError("RUN_BUSY", "已有任务正在运行，请等待完成或停止后重试。")
-            if record.get("executionVersion") != CHECKPOINT_VERSION or not record.get("policy"):
-                raise AppError("NO_CHECKPOINT", "旧版 Run 没有持久图检查点，请发起新请求。")
+            self.validate_resume(record, draft)
             if not record.get("resumable"):
                 raise AppError("NOT_RESUMABLE", "此 Run 已因限额或不可恢复错误结束，请查看 errorCode。")
-            if draft["sessions"][record["sessionId"]].get("latestRunId") != run_id:
-                raise AppError("STALE_RUN", "该会话已有更新的请求，不能恢复旧 Run 覆盖后续对话。")
-            if (
-                record.get("videoMode", "off") != self.video_mode
-                or record.get("toolFeatures", {}) != self.tools.features
-            ):
-                raise AppError("RESUME_CONFIG_CHANGED", "工具模式或能力版本已变化，请恢复原配置。")
-            if record.get("contextSignature") != self.context_signature(record.get("contextVersion", 1)):
-                raise AppError(
-                    "RESUME_CONFIG_CHANGED", "模型、工具、Skills 或上下文配置已变化，请恢复原配置。"
-                )
-            if not (self.store.home / "checkpoints.sqlite").is_file():
-                raise AppError("NO_CHECKPOINT", "检查点文件缺失，不能重建并重跑原任务。")
-            record.update(status="running", errorCode=None, answer="", updatedAt=now())
+            if self.execution_version == CHECKPOINT_VERSION:
+                record.update(status="running", errorCode=None, answer="", updatedAt=now())
             return record, True
 
         record, claimed = self.store.transaction(claim)
-        return await self._execute(record, resume=True, cancelled=cancelled) if claimed else record
+        return (
+            await self._execute(record, resume=True, cancelled=cancelled, shutdown=shutdown)
+            if claimed
+            else record
+        )
 
-    async def _execute(self, record: dict, *, resume: bool = False, cancelled=None) -> dict:
+    async def advance_wait(self, run_id: str, *, shutdown=None) -> dict:
+        """Automatic continuation accepts only an original persisted wait, never a result."""
+        state = self.store.snapshot()
+        record = state["runs"].get(run_id)
+        if record is None:
+            raise AppError("NOT_FOUND", "没有这个 Run。")
+        restored = self.for_record(record)
+        if record.get("executionVersion") != WAIT_EXECUTION_VERSION or record["status"] not in {
+            "waiting_external",
+            "interrupted",
+            "running",
+        }:
+            return record
+        restored.validate_resume(record, state)
+        return await restored._execute(record, resume=True, automatic=True, shutdown=shutdown)
+
+    def stop(self, run_id: str) -> bool:
+        return WaitService(self.store, clock=self.clock, on_event=self.emit).stop_run(run_id)
+
+    async def _execute(
+        self, record: dict, *, resume=False, cancelled=None, automatic=False, shutdown=None
+    ) -> dict:
+        control = execution_control(self.store)
+        if control.lock.locked():
+            raise AppError("RUN_BUSY", "已有任务正在运行，请等待完成或停止后重试。")
+        async with control.lock:
+            control.run_id = record["id"]
+            control.cancelled = cancelled if cancelled is not None else asyncio.Event()
+            try:
+                return await self._execute_graph(
+                    record, resume=resume, cancelled=control.cancelled, automatic=automatic, shutdown=shutdown
+                )
+            finally:
+                control.run_id = control.cancelled = None
+
+    async def _execute_graph(
+        self, record: dict, *, resume=False, cancelled=None, automatic=False, shutdown=None
+    ) -> dict:
         store, model, tools = self.store, self.model, self.tools
         session_id = record["sessionId"]
         limits = record["policy"]
         policy = RunPolicy(limits["maxSteps"], limits["maxToolCalls"], limits["timeoutSeconds"])
         context = self.context.for_version(record.get("contextVersion", 1))
-        journal = RunJournal(store, record["id"])
+        durable_waits = record.get("executionVersion") == WAIT_EXECUTION_VERSION
+        journal = RunJournal(store, record["id"], active=not (resume and durable_waits))
+        waits = WaitService(store, clock=self.clock, on_event=self.emit)
         cancelled = cancelled if cancelled is not None else asyncio.Event()
-        deadline = journal.started + policy.timeout_seconds - journal.previous_seconds
+        deadline = time.monotonic() + policy.timeout_seconds - journal.previous_seconds
         initial: GraphState = {
             "messages": messages_from_dict(record["messages"]),
             "status": "running",
@@ -382,6 +475,8 @@ class AgentRunner:
             "error_code": None,
             "answer": "",
         }
+        if durable_waits:
+            initial["wait_deliveries"] = {}
         latest = journal.stats(initial)
 
         def publish_progress(state: GraphState) -> None:
@@ -393,25 +488,9 @@ class AgentRunner:
         def finish_error(state: GraphState, error: AppError) -> GraphState:
             # The UI snapshot closes pending calls; SQLite retains the original
             # pending node so an explicit resume can execute unfinished tools.
-            pending = {}
-            for message in state["messages"]:
-                if isinstance(message, AIMessage):
-                    pending.update({call["id"]: call for call in message.tool_calls})
-                elif isinstance(message, ToolMessage):
-                    pending.pop(message.tool_call_id, None)
             return {
                 **state,
-                "messages": [
-                    *state["messages"],
-                    *[
-                        ToolMessage(
-                            content=json.dumps(failure(error.code, str(error)), ensure_ascii=False),
-                            tool_call_id=call["id"],
-                            name=call["name"],
-                        )
-                        for call in pending.values()
-                    ],
-                ],
+                "messages": close_pending_calls(state["messages"], error),
                 "status": "cancelled" if error.code == "CANCELLED" else "failed",
                 "error_code": error.code,
                 "answer": str(error),
@@ -475,6 +554,10 @@ class AgentRunner:
                     )
 
             try:
+                if durable_waits:
+                    # The tools checkpoint is durable before a subsequent model
+                    # attempt. Commit delivery evidence before spending that attempt.
+                    waits.synchronize(await compiled.aget_state(config), record["id"])
                 check_active(cancelled, deadline)
                 if next_state["model_steps"] >= policy.max_steps:
                     raise AppError("STEP_LIMIT", "已达到模型步数上限，保留已完成产物。")
@@ -634,11 +717,23 @@ class AgentRunner:
             calls = state["messages"][-1].tool_calls
             next_state = journal.stats(state)
             results = []
+            deliveries = dict(state.get("wait_deliveries", {}))
             keys = [f"{record['id']}:{state['model_steps']}:{call['id']}" for call in calls]
             admitted = journal.record["toolCallKeys"]
             over_budget = len(admitted) + sum(key not in admitted for key in keys) > policy.max_tool_calls
-            for call, key in zip(calls, keys, strict=True):
+            for index, (call, key) in enumerate(zip(calls, keys, strict=True)):
                 started = time.monotonic()
+                execution_context = (
+                    ToolExecutionContext(
+                        project_id=session_id,
+                        session_id=session_id,
+                        run_id=record["id"],
+                        model_step=state["model_steps"],
+                        tool_call_id=call["id"],
+                    )
+                    if tools.requires_context(call["name"])
+                    else None
+                )
                 try:
                     if over_budget:
                         raise AppError("TOOL_LIMIT", "已达到工具调用上限，本批工具未执行。")
@@ -655,15 +750,7 @@ class AgentRunner:
                             store=store,
                             project_id=session_id,
                             operation_key=key,
-                            context=ToolExecutionContext(
-                                project_id=session_id,
-                                session_id=session_id,
-                                run_id=record["id"],
-                                model_step=state["model_steps"],
-                                tool_call_id=call["id"],
-                            )
-                            if tools.requires_context(call["name"])
-                            else None,
+                            context=execution_context,
                         ),
                         cancelled,
                         deadline,
@@ -674,7 +761,6 @@ class AgentRunner:
                     next_state = finish_error(next_state, safe)
                     result = failure(safe.code, str(safe))
                 if isinstance(result, DeferredToolResult):
-                    # B3 supplies the execution-v2 interrupt/coordinator here.
                     # A marker is neither a completed ToolMessage nor JSON data.
                     publish_progress({**next_state, "messages": [*state["messages"], *results]})
                     self.emit(
@@ -685,10 +771,24 @@ class AgentRunner:
                             "waitId": result.wait_id,
                         }
                     )
-                    raise AppError(
-                        "EXTERNAL_WAIT_UNAVAILABLE",
-                        "当前执行版本不能挂起等待外部任务，本次 Run 已结束；已登记任务保留，可稍后发起新请求查询。",
+                    if not durable_waits:
+                        raise AppError(
+                            "EXTERNAL_WAIT_UNAVAILABLE",
+                            "当前执行版本不能挂起等待外部任务，本次 Run 已结束；已登记任务保留，可稍后发起新请求查询。",
+                        )
+                    waits.prepare(
+                        result, execution_context, call, index, [*state["messages"], *results], journal
                     )
+                    # GraphInterrupt must escape the ordinary tool exception boundary.
+                    token = ResumeToken.model_validate(
+                        interrupt(result.model_dump(mode="json", by_alias=True))
+                    )
+                    check_active(cancelled, deadline)
+                    binding = waits.get(token.wait_id)
+                    if binding.status == "ready":
+                        waits.claim(binding)
+                    result = waits.commit_result(token, execution_context, call)
+                    deliveries[token.wait_id] = token.generation
                 results.append(
                     ToolMessage(
                         content=json.dumps(result, ensure_ascii=False),
@@ -707,12 +807,14 @@ class AgentRunner:
                     }
                 )
             next_state["messages"] = [*state["messages"], *results]
+            if durable_waits:
+                next_state["wait_deliveries"] = deliveries
             publish_progress(next_state)
             if next_state["error_code"] == "CANCELLED":
                 raise AppError("CANCELLED", next_state["answer"])
             return next_state
 
-        graph = StateGraph(GraphState)
+        graph = StateGraph(WaitingGraphState if durable_waits else GraphState)
         graph.add_node("model", model_node)
         graph.add_node("tools", tools_node)
         graph.add_edge(START, "model")
@@ -722,25 +824,191 @@ class AgentRunner:
             "configurable": {"thread_id": record["id"]},
             "recursion_limit": policy.max_steps * 2 + 4,
         }
+        invoked = False
+
+        def wait_state(snapshot):
+            state = journal.stats(snapshot.values)
+            messages = list(state["messages"])
+            if messages and isinstance(messages[-1], AIMessage):
+                operations = store.snapshot()["operations"]
+                for call in messages[-1].tool_calls:
+                    operation = operations.get(f"{record['id']}:{state['model_steps']}:{call['id']}")
+                    if operation is None:
+                        break
+                    messages.append(
+                        ToolMessage(
+                            content=json.dumps(operation["result"], ensure_ascii=False),
+                            tool_call_id=call["id"],
+                            name=call["name"],
+                        )
+                    )
+            return {**state, "messages": messages}
+
+        def suspend(snapshot):
+            nonlocal latest
+            pending = pending_interrupts(snapshot)
+            binding = waits.get(pending[-1].value["waitId"])
+            if not binding.auto_resume or binding.status == "stopped":
+                raise AppError("CANCELLED", "等待已停止，外部任务仍独立跟踪。")
+            latest = wait_state(snapshot)
+            active_seconds = journal.pause()
+            with store.locked():
+                current = journal.record
+                if current["status"] == "cancelled":
+                    raise AppError("CANCELLED", "等待已停止，外部任务仍独立跟踪。")
+                fields = dict(
+                    status="waiting_external",
+                    activeWaitId=binding.id,
+                    externalWaitStartedAt=current.get("externalWaitStartedAt") or binding.started_at,
+                    activeSeconds=active_seconds,
+                    inFlightSeconds=0,
+                    resumable=True,
+                    messages=messages_to_dict(latest["messages"]),
+                    errorCode=None,
+                    answer="",
+                    waitResumeError=None,
+                )
+                if any(current.get(key) != value for key, value in fields.items()):
+                    store.transaction(
+                        lambda draft: draft["runs"][record["id"]].update(**fields, updatedAt=now())
+                    )
+            if invoked:
+                self.emit(
+                    {
+                        "type": "run.waiting",
+                        "runId": record["id"],
+                        "waitId": binding.id,
+                        "resource": binding.resource.model_dump(by_alias=True),
+                    }
+                )
+            return journal.record
+
+        def validate_auto(snapshot):
+            current = journal.record
+            binding = waits.recovery_binding(record["id"])
+            if binding is None:
+                raise AppError("WAIT_NOT_READY", "Run 没有有效的自动等待意图。")
+            boundary = (
+                binding.claimed_model_steps
+                if binding.claimed_model_steps is not None
+                else binding.context.model_step
+            )
+            if current["modelSteps"] > boundary:
+                raise AppError(
+                    "EXPLICIT_RESUME_REQUIRED", "外部结果继续后已经开始模型尝试；请显式恢复原 Run。"
+                )
+            if any(
+                other["id"] != record["id"] and other["status"] in {"running", "waiting_external"}
+                for other in store.snapshot()["runs"].values()
+            ):
+                raise AppError("RUN_BUSY", "已有其他任务占用当前数据目录。")
+            if (
+                not pending_interrupts(snapshot)
+                and snapshot.next not in {("tools",), ("model",)}
+                and not completed_tool_task(snapshot)
+            ):
+                raise AppError("WAIT_CONTEXT_INVALID", "检查点没有可恢复的原工具或后续模型节点。")
+
+        def validate_auto_budget():
+            current = journal.record
+            if current["activeSeconds"] >= policy.timeout_seconds:
+                raise AppError("TIMEOUT", "原 Run 的活动时间预算已耗尽，不能自动继续。")
+            if current["modelSteps"] >= policy.max_steps:
+                raise AppError("STEP_LIMIT", "原 Run 的模型步数预算已耗尽，不能自动继续。")
+            if current["toolCalls"] > policy.max_tool_calls:
+                raise AppError("TOOL_LIMIT", "原 Run 的工具预算已耗尽，不能自动继续。")
+
+        def preserve_shutdown_wait() -> bool:
+            if not durable_waits or shutdown is None or not shutdown.is_set():
+                return False
+            binding = waits.recovery_binding(record["id"])
+            if binding is None:
+                return False
+            boundary = (
+                binding.claimed_model_steps
+                if binding.claimed_model_steps is not None
+                else binding.context.model_step
+            )
+            if journal.record["modelSteps"] > boundary:
+                return False
+            journal.pause()
+            journal.update(
+                status="waiting_external",
+                activeWaitId=None if binding.status == "delivered" else binding.id,
+                inFlightSeconds=0,
+            )
+            return True
+
         try:
             async with open_checkpointer(store.home) as saver:
                 compiled = graph.compile(checkpointer=saver)
+                command = initial
                 if resume:
                     if await saver.aget_tuple(config) is None:
                         raise AppError("NO_CHECKPOINT", "没有此 Run 的图检查点，未重新执行任务。")
                     snapshot = await compiled.aget_state(config)
                     if snapshot.values:
                         latest = journal.stats(snapshot.values)
+                    if durable_waits:
+                        waits.synchronize(snapshot, record["id"])
                     # A crash after the terminal graph commit may precede the JSON
                     # session commit. Finalize from SQLite without another model call.
-                    if not snapshot.next:
+                    if terminal_snapshot(snapshot) if durable_waits else not snapshot.next:
                         journal.publish(latest, final=True)
                         return journal.record
+                    command = None
+                    if durable_waits:
+                        if automatic:
+                            validate_auto(snapshot)
+                        elif any(binding.status == "stopped" for binding in waits.bindings(record["id"])):
+                            waits.rearm(record["id"])
+                            waits.synchronize(snapshot, record["id"])
+                        pending = pending_interrupts(snapshot)
+                        if pending:
+                            binding = waits.resolve(
+                                waits.get(pending[-1].value["waitId"]), tools.wait_resolvers
+                            )
+                            if binding.status not in {"ready", "claimed"}:
+                                return suspend(snapshot)
+                            if automatic:
+                                validate_auto_budget()
+                            # Recheck pointer against persistence before writing a
+                            # Command; callers cannot supply arbitrary tool results.
+                            binding.confirmed_result(binding.resume_token())
+                            binding = waits.claim(binding)
+                            command = Command(
+                                resume={
+                                    pending[-1].id: binding.resume_token().model_dump(
+                                        mode="json", by_alias=True
+                                    )
+                                }
+                            )
+                        else:
+                            if automatic:
+                                validate_auto_budget()
+                            journal.update(status="running", errorCode=None, answer="", waitResumeError=None)
+                        journal.restart()
+                        deadline = journal.started + policy.timeout_seconds - journal.previous_seconds
                 self.emit({"type": "run.resumed" if resume else "run.started", "runId": record["id"]})
-                latest = await compiled.ainvoke(None if resume else initial, config, durability="sync")
+                invoked = True
+                latest = await compiled.ainvoke(command, config, durability="sync")
+                if durable_waits:
+                    snapshot = await compiled.aget_state(config)
+                    self.emit({"type": "wait.checkpointed", "runId": record["id"]})
+                    waits.synchronize(snapshot, record["id"])
+                    if pending_interrupts(snapshot):
+                        for binding in waits.bindings(record["id"]):
+                            waits.resolve(binding, tools.wait_resolvers)
+                        return suspend(snapshot)
+                    if not terminal_snapshot(snapshot):
+                        raise AppError("CHECKPOINT_ERROR", "图既未挂起也未到达有效终态，未标记完成。")
                 journal.publish(latest, final=True)
         except asyncio.CancelledError:
+            if preserve_shutdown_wait():
+                return journal.record
             cancelled.set()
+            if durable_waits and waits.bindings(record["id"]):
+                waits.stop_run(record["id"])
             journal.publish(
                 finish_error(latest, AppError("CANCELLED", "执行已停止，保留已完成产物。")),
                 final=True,
@@ -748,6 +1016,14 @@ class AgentRunner:
             )
         except Exception as error:
             safe = public_error(error)
+            if safe.code == "CANCELLED" and preserve_shutdown_wait():
+                return journal.record
+            if automatic and not invoked:
+                if safe.code == "CANCELLED":
+                    return journal.record
+                raise safe from None
+            if durable_waits and safe.code == "CANCELLED" and waits.bindings(record["id"]):
+                waits.stop_run(record["id"])
             journal.publish(finish_error(latest, safe), final=True, resumable=safe.code in RECOVERABLE_ERRORS)
         self.emit({"type": "run.completed", "status": journal.record["status"], "runId": record["id"]})
         return store.snapshot()["runs"][record["id"]]

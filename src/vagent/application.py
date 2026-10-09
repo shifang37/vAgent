@@ -19,7 +19,8 @@ from vagent.tools import create_project_tools
 from vagent.usage import summarize_usage
 from vagent.video.jobs import JobService
 from vagent.video.providers.mock import MockVideoAdapter
-from vagent.video.tools import register_video_tools
+from vagent.video.tools import register_video_tools, resolve_job_wait
+from vagent.wait_runtime import WaitCoordinator, execution_control
 
 
 class ApplicationService:
@@ -36,6 +37,8 @@ class ApplicationService:
         self.validation = {"status": "unverified"}
         self.config_busy = False
         self.video_jobs = None
+        self.wait_coordinator = None
+        self.shutdown = asyncio.Event()
 
     @classmethod
     @asynccontextmanager
@@ -58,12 +61,34 @@ class ApplicationService:
             service = cls(config, store, catalog, tools, client, model=model, policy=policy, cache=cache)
             service.mcp_status = mcp_status
             service.video_jobs = video_jobs
+            service.wait_coordinator = WaitCoordinator(
+                store,
+                service._waiting_runner,
+                resolvers={"job": lambda binding: resolve_job_wait(store, binding)},
+                on_event=service._wait_event,
+            )
+            service.wait_coordinator.start()
             try:
                 yield service
             finally:
+                service.shutdown.set()
+                await service.wait_coordinator.stop()
                 if service.task and not service.task.done():
-                    service.cancelled.set()
+                    service.task.cancel()
                     await service.task
+
+    def _waiting_runner(self, record):
+        if self.config_busy:
+            raise AppError("CONFIG_BUSY", "配置验证正在进行，外部结果已保留，稍后继续原 Run。")
+        return self.runner(
+            read_only=record.get("readOnly", False),
+            video_mode=record.get("videoMode", "off"),
+            on_event=self._event_sink(record["sessionId"], run_id=record["id"]),
+        )
+
+    def _wait_event(self, event):
+        record = self.run_record(event["runId"])
+        self._event_sink(record["sessionId"], run_id=record["id"])(event)
 
     def runner(self, *, read_only=False, on_event=None, model=None, video_mode=None):
         mode = self.config.video_mode if video_mode is None else video_mode
@@ -128,7 +153,11 @@ class ApplicationService:
         }
 
     def _check_config_idle(self):
-        if self.config_busy or (self.task and not self.task.done()):
+        if (
+            self.config_busy
+            or (self.task and not self.task.done())
+            or execution_control(self.store).lock.locked()
+        ):
             raise AppError("CONFIG_BUSY", "请等待当前执行或配置验证结束后再修改配置。")
 
     def save_configuration(self, update: ConfigUpdate):
@@ -258,6 +287,10 @@ class ApplicationService:
             "contextBytes",
             "droppedMessages",
             "activeSeconds",
+            "activeWaitId",
+            "externalWaitSeconds",
+            "externalWaitStartedAt",
+            "waitResumeError",
             "policy",
             "readOnly",
             "contextVersion",
@@ -329,6 +362,11 @@ class ApplicationService:
             raise AppError("CONFIG_BUSY", "配置验证正在进行，请稍后发送需求。")
         if self.task and not self.task.done():
             raise AppError("RUN_BUSY", "已有任务正在运行，请等待完成或停止后重试。")
+        if any(
+            record["status"] in {"running", "waiting_external"}
+            for record in self.store.snapshot()["runs"].values()
+        ):
+            raise AppError("RUN_BUSY", "已有任务正在运行或等待外部结果，请完成或停止后重试。")
         runner = self.runner(read_only=read_only)  # Missing keys fail before creating a run.
         return await self._launch(runner, session_id, prompt=prompt, request_id=request_id)
 
@@ -345,15 +383,12 @@ class ApplicationService:
         )
         return await self._launch(runner, record["sessionId"], resume_id=run_id)
 
-    async def _launch(self, runner, session_id, *, prompt=None, request_id=None, resume_id=None):
-        ready = asyncio.Event()
-        errors = []
-        self.active_run_id = resume_id
-        self.cancelled = asyncio.Event()
-
+    def _event_sink(self, session_id, *, run_id=None, ready=None):
         def event_sink(event):
+            nonlocal run_id
             if event.get("runId"):
-                self.active_run_id = event["runId"]
+                run_id = event["runId"]
+                self.active_run_id = run_id
             if event["type"] == "assistant.delta":
                 draft = self.drafts.get(session_id)
                 if draft is None or (draft["runId"], draft["step"]) != (event["runId"], event["step"]):
@@ -365,24 +400,39 @@ class ApplicationService:
                 return  # Drafts never enter state.json or the event journal.
             if event["type"] in {"model.started", "model.completed", "assistant.discarded", "run.completed"}:
                 self.drafts.pop(session_id, None)
-            if self.active_run_id:
+            if run_id:
 
                 def record_event(draft):
-                    events = draft["runs"][self.active_run_id].setdefault("events", [])
+                    events = draft["runs"][run_id].setdefault("events", [])
                     events.append({**event, "sequence": len(events) + 1, "at": now()})
 
                 self.store.transaction(record_event)
-                ready.set()
+                if ready:
+                    ready.set()
             self.notify(session_id)
 
-        runner.on_event = event_sink
+        return event_sink
+
+    async def _launch(self, runner, session_id, *, prompt=None, request_id=None, resume_id=None):
+        ready = asyncio.Event()
+        errors = []
+        self.active_run_id = resume_id
+        self.cancelled = asyncio.Event()
+
+        runner.on_event = self._event_sink(session_id, run_id=resume_id, ready=ready)
 
         async def execute():
             try:
                 result = (
-                    await runner.resume(resume_id, cancelled=self.cancelled)
+                    await runner.resume(resume_id, cancelled=self.cancelled, shutdown=self.shutdown)
                     if resume_id
-                    else await runner.run(session_id, prompt, request_id=request_id, cancelled=self.cancelled)
+                    else await runner.run(
+                        session_id,
+                        prompt,
+                        request_id=request_id,
+                        cancelled=self.cancelled,
+                        shutdown=self.shutdown,
+                    )
                 )
                 self.active_run_id = result["id"]
             except Exception as error:
@@ -400,6 +450,10 @@ class ApplicationService:
 
     def stop(self, run_id):
         record = self.run_record(run_id)
+        if record.get("executionVersion") == 2 and self.wait_coordinator:
+            stopped = self.wait_coordinator.stop_run(run_id)
+            self.notify(record["sessionId"])
+            return {"runId": run_id, "stopRequested": stopped}
         if self.active_run_id == run_id and self.task and not self.task.done():
             self.cancelled.set()
         elif record["status"] == "running":

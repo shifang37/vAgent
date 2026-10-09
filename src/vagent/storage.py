@@ -19,7 +19,7 @@ from pydantic.alias_generators import to_camel
 from vagent.config import assert_id
 from vagent.errors import AppError, failure
 from vagent.video.contracts import Job
-from vagent.waiting import WaitBinding
+from vagent.waiting import WAIT_EXECUTION_VERSION, WaitBinding
 
 T = TypeVar("T")
 
@@ -158,6 +158,8 @@ class RunRecord(RunRecordV1):
     tool_features: dict[str, dict[str, JsonValue]] = Field(default_factory=dict)
     active_wait_id: str | None = None
     external_wait_seconds: float = Field(default=0, ge=0, allow_inf_nan=False)
+    external_wait_started_at: str | None = None
+    wait_resume_error: dict[str, str] | None = None
 
 
 class Success(Record):
@@ -267,6 +269,38 @@ class FileStore:
                         for call in run.get("modelCalls", []):
                             if call["status"] == "started":
                                 call.update(status="interrupted", errorCode="INTERRUPTED")
+                        if run.get("executionVersion") == WAIT_EXECUTION_VERSION:
+                            bindings = [
+                                WaitBinding.model_validate(raw)
+                                for raw in draft["waits"].values()
+                                if raw["context"]["runId"] == run["id"]
+                                and raw["autoResume"]
+                                and raw["status"] != "stopped"
+                            ]
+                            binding = max(
+                                bindings,
+                                key=lambda b: (b.context.model_step, b.batch_index or 0, b.started_at),
+                                default=None,
+                            )
+                            boundary = (
+                                binding.claimed_model_steps
+                                if binding and binding.claimed_model_steps is not None
+                                else binding.context.model_step
+                                if binding
+                                else -1
+                            )
+                            if binding and run["modelSteps"] <= boundary:
+                                # Reserve the unfinished Run slot even before a model
+                                # configuration is available to inspect SQLite. The
+                                # coordinator still must verify the actual checkpoint.
+                                run.update(
+                                    status="waiting_external",
+                                    activeWaitId=None if binding.status == "delivered" else binding.id,
+                                )
+                                if binding.status in {"preparing", "armed", "ready"}:
+                                    run["externalWaitStartedAt"] = (
+                                        run.get("externalWaitStartedAt") or binding.started_at
+                                    )
                 recover_interrupted_jobs(draft, now())
 
             store.transaction(recover)

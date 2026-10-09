@@ -8,9 +8,9 @@ from vagent.storage import FileStore, ModelCall, now
 
 
 class RunJournal:
-    def __init__(self, store: FileStore, run_id: str):
+    def __init__(self, store: FileStore, run_id: str, *, active=True):
         self.store, self.run_id = store, run_id
-        self.started = time.monotonic()
+        self.started = time.monotonic() if active else None
         self.previous_seconds = self.record.get("activeSeconds", 0)
 
     @property
@@ -19,7 +19,17 @@ class RunJournal:
 
     @property
     def elapsed(self) -> float:
-        return self.previous_seconds + time.monotonic() - self.started
+        return self.previous_seconds + (time.monotonic() - self.started if self.started is not None else 0)
+
+    def pause(self) -> float:
+        """Freeze active time before yielding the graph to an external resource."""
+        self.previous_seconds = self.elapsed
+        self.started = None
+        return self.previous_seconds
+
+    def restart(self) -> None:
+        self.previous_seconds = self.record.get("activeSeconds", 0)
+        self.started = time.monotonic()
 
     def update(self, **fields) -> dict:
         def save(draft):
