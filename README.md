@@ -4,7 +4,7 @@
 
 当前已实现 **Python CLI + 本地 Web Agent**，前端通过同源 API/SSE 调用共享 LangGraph Runner。2026-10-08 完成真实 DeepSeek、持久记忆、Skills、8 种工具（含 2 个本地 MCP 工具）的编排验收，随后补齐记忆冲突与正文长度的后端校验。当前交付文本创作材料，尚未接入视频生成 API；首轮发现见 [编排测试报告](./docs/AGENT_ORCHESTRATION_ACCEPTANCE.md)，修复与验证范围见 [质量校验验收](./docs/QUALITY_ACCEPTANCE.md)。
 
-任务 2 已补齐本地配置向导、CLI/Web 流式回复和 9 类固定评测。**2026-10-09 完成 A5：完整真实套件 9/9 通过，M1-A 已验收。** 最终套件包含 3 次显式恢复，累计 27 次模型调用、25 次工具调用；此前失败记录完整保留。下一阶段为 M1-B 模拟视频 Job，详见 [M1-A 验收记录](./docs/M1A_ACCEPTANCE.md)。
+任务 2 已补齐本地配置向导、CLI/Web 流式回复和 9 类固定评测。**2026-10-09 完成 A5：完整真实套件 9/9 通过，M1-A 已验收。** 最终套件包含 3 次显式恢复，累计 27 次模型调用、25 次工具调用；此前失败记录完整保留，详见 [M1-A 验收记录](./docs/M1A_ACCEPTANCE.md)。同日完成 M1-B 的 **B0 契约与持久等待验证**，新增严格视频/Job/等待类型、离线中断实验和旧检查点兼容回归；应用仍未启用视频任务。详见 [B0 验收记录](./docs/M1B_B0_ACCEPTANCE.md)，下一步按 [M1-B 任务规划](./docs/M1B_PLAN.md) 实施 B1。
 
 ## 当前进度
 
@@ -20,7 +20,8 @@
 | 04 本地 Web | 已接入真实 Agent | 单 Key 配置向导、模型切换与验证、逐段文本流、断线补齐、停止/恢复、产物与编排观测 |
 | MCP | 已实现并验证 stdio | 显式只读白名单、工具发现、Schema 校验、取消/超时、结果大小限制 |
 | 内容质量校验 | 已通过回归与真实纠错验收 | 记忆字段职责、旧事实残留检查、持久字数上限、保存前计数、未纠正错误禁止报告完成 |
-| 视频工具 | 待实现 | 模拟视频 Job、真实供应商接入 |
+| M1-B 模拟视频 | B0 已完成，B1–B5 待实施 | 视频/Job/等待契约、同批中断与五处强退实验、旧检查点兼容；尚无应用 JobService/Worker，详见 [任务规划](./docs/M1B_PLAN.md) |
+| M1-C 真实视频 | 待实施 | 真实供应商接入、媒体下载/播放与真实视频验收 |
 
 每个独立完成的代码部分都同步更新本 README、提交并推送 GitHub。阶段目标见 [M1 计划](./M1_PLAN.md) 和 [Harness 设计](./AGENT_HARNESS_DESIGN.md)。
 
@@ -237,8 +238,12 @@ src/vagent/
   tools.py     工具注册、Pydantic 校验、项目与产物操作
   storage.py   单写锁、事务、原子替换、操作日志
   skills.py    技能发现、元信息与按需正文读取
+  contracts.py B0：不依赖 Store/SDK 的严格 JSON 类型
+  waiting.py   B0：通用等待与恢复指针契约，尚未接入生产 Runner
+  video/contracts.py B0：视频能力、请求、Job、供应商协议与状态约束
 skills/        内置 SKILL.md，随 wheel 分发
 tests/         pytest 行为与协议测试
+scripts/probe_m1b_wait.py B0：独立临时目录中的持久等待实验
 ```
 
 LangGraph 提供图执行底座，项目自己定义状态、路由、上下文策略、工具边界、版本控制和运行记录。`ChatDeepSeek.bind_tools(...).astream(...)` 只执行单个模型步；保留非流式 `generate` 接口以兼容测试和其他调用方。流式工具参数必须通过严格 JSON 解码和完成标记检查后才执行，模型不会直接执行工具。
@@ -311,7 +316,7 @@ node --check web/app.js
 .\.venv\Scripts\python.exe -m build --no-isolation --outdir dist/python
 ```
 
-本地 Python 3.12 测试结果：**210 passed，1 skipped**。跳过的是当前 Windows 账户无符号链接创建权限的测试。覆盖工具闭环、去重、错误、取消、持久恢复、版本与项目隔离、事务回滚、上下文与 Skills、缓存统计和内容质量校验。A5 新增剩余预算在重启后的准确性、上下文计数与稳定前缀、连接重试上限、请求发出后禁止重试、取消和重定向保护。配置与流式协议、草稿重连、CLI 防重复输出和评测评分继续通过。Node 仅用于开发时检查前端语法，运行 Agent 无需安装。
+本地 Python 3.12 测试结果：**254 passed，1 skipped**。跳过的是当前 Windows 账户无符号链接创建权限的测试。B0 在 A5 的 210 项基础上新增 44 项：严格视频契约、请求冻结/来源、Job 状态、等待恢复指针、同批多个中断、五处真实子进程强退及两种旧上下文指纹兼容。原工具闭环、预算、质量校验、只读缓存、MCP、配置/流式协议、CLI 和评测继续通过。Node 仅用于开发时检查前端语法，运行 Agent 无需安装。
 
 已验证离线 CLI，以及 wheel 安装到独立虚拟环境后在仓库目录之外运行 `skills list`、`demo`、`inspect`。本次新增验证：新建独立虚拟环境安装 wheel，保存产物后取消，再从仓库外通过 CLI `resume` 完成原 Run，仍仅有一个产物；`pip check` 通过。源码包与 wheel 仅本地构建，未发布 PyPI。GitHub Actions 配置 Ubuntu/Windows、Python 3.11/3.12 检查，远端结果见 [Actions](https://github.com/shifang37/vAgent/actions)。
 
@@ -319,4 +324,4 @@ node --check web/app.js
 
 上下文 v2 的 wheel 已在同一独立环境重新安装验证：仓库外执行 `skills list`、取消后 `resume`、`inspect`、`usage --run` 均通过，格式版本保持 2、最终仍仅有一个产物，`pip check` 通过。v1 检查点兼容由自动化测试覆盖，详细记录见 [上下文优化验收](./docs/CONTEXT_OPTIMIZATION_ACCEPTANCE.md)。
 
-自动化测试验证工程行为。2026-10-09 的完整真实套件 9/9 通过，保留了此前连接故障、步数耗尽和超长拒绝的全部证据；单套通过不代表生产成功率或创作质量保证。M1-A 验收完成，下一步为 M1-B 的视频能力契约、模拟 Job 和持久任务恢复。详细数据与独立 wheel 验证见 [M1-A 验收记录](./docs/M1A_ACCEPTANCE.md)。
+自动化测试验证工程行为。2026-10-09 的完整真实套件 9/9 通过，保留了此前连接故障、步数耗尽和超长拒绝的全部证据；单套通过不代表生产成功率或创作质量保证。M1-A 验收完成，M1-B 已完成 B0 契约与等待实验，下一步是 B1 的持久 Job、Mock Worker 和存储迁移。B0 没有新增真实模型调用；两阶段证据分别见 [M1-A 验收记录](./docs/M1A_ACCEPTANCE.md) 与 [B0 验收记录](./docs/M1B_B0_ACCEPTANCE.md)。

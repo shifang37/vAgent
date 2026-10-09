@@ -1,9 +1,9 @@
 # vagent M1 实施计划：先实现 Agent，再接入视频生成
 
 > 更新日期：2026-10-09
-> 状态：M1-A 已验收，M1-B 待实施；当前已完成内容、验证与限制以 [README](./README.md) 为准。
+> 状态：M1-A 已验收，M1-B 的 B0 契约与等待验证完成，B1–B5 待实施；当前已完成内容、验证与限制以 [README](./README.md) 为准。
 > 设计依据：[产品设计](./DESIGN.md)、[Agent 选型与 Harness 设计](./AGENT_HARNESS_DESIGN.md)。  
-> 当前优先级：进入 M1-B 的视频能力契约与模拟 Job，不要求真实视频 Key。
+> 当前优先级：执行 B1 的 schema v2 迁移、持久 Job 与 Mock Worker；详见 [M1-B 任务规划](./docs/M1B_PLAN.md)，不要求真实视频 Key。
 
 当前已补齐 SQLite 图检查点和 `vagent resume RUN_ID`，包含部分工具提交后的重放保护与累计预算验证，记录见 [持久恢复验收](./docs/RECOVERY_ACCEPTANCE.md)。2026-10-08 新增共享应用服务、本地 Web API/SSE 与只读 MCP；首组真实 DeepSeek 多轮编排已验证，发现记忆冗余与文本长度约束问题，详见 [编排验收](./docs/AGENT_ORCHESTRATION_ACCEPTANCE.md)。
 
@@ -188,20 +188,22 @@ A0 不调查或开通视频账户；这一阶段先解决“选什么 Agent 基�
 
 ## 9. M1-B：预先验证视频结合方式
 
-M1-A 验收后实施。目标是验证架构可以承载视频长任务，不接收费视频 API。
+M1-A 已于 2026-10-09 验收。M1-B 目标是验证架构可以承载视频长任务，不接收费视频 API。B0 契约与持久等待验证已完成，见 [B0 验收记录](./docs/M1B_B0_ACCEPTANCE.md) 和 [契约协议](./docs/M1B_CONTRACTS.md)；B1–B5 待实施。详细代码落点、故障矩阵和执行顺序见 [M1-B 任务规划](./docs/M1B_PLAN.md)。
 
 | 工作包 | 内容 | 完成门槛 |
 |---|---|---|
-| B0 能力契约 | VideoProviderAdapter、VideoCapabilities、VideoRequest、Job、产物引用 | Agent 核心无供应商依赖；不硬编码单一模型时长/分辨率 |
+| B0 能力契约与等待验证（已完成） | 视频/Job/等待类型、产物引用、迁移协议、LangGraph 挂起与旧检查点兼容实验 | 同批多等待、五处强退及旧图指纹/恢复验证通过；实际应用接入仍由 B1–B3 实施 |
 | B1 模拟任务 | MockVideoAdapter 与 Worker，模拟排队、成功、失败、查询中断、提交结果不确定 | 状态可确定复现，模拟与真实模式标记明确 |
-| B2 Agent 视频工具 | `video_capabilities`、`video_generate`、`job_get`、`await_job` | DeepSeek 能根据能力和真实工具结果发起模拟任务 |
+| B2 Agent 视频工具 | 四个视频工具、模式配置、只读与缓存边界 | 离线模型验证能力调用与唯一 Job；真实 DeepSeek 调用在 B5 验收 |
 | B3 异步恢复 | Job/Run 独立状态，等待工具结果、事件与重启恢复 | 等待期间不调用模型反复轮询；完成后通过原调用 ID 继续一次 |
+| B4 CLI/Web 交付 | Worker 生命周期、CLI Job 命令、API/SSE、任务卡片 | 页面刷新和进程重启可恢复状态；Run 结束后 Job 仍可查询 |
+| B5 验收与打包 | 离线故障矩阵、真实 DeepSeek + Mock 评测、独立 wheel | 模拟与真实文本调用证据分开；形成 M1-B 验收记录 |
 
 视频任务先持久化为本地 Job，再由 Worker 提交上游。`video_generate` 返回 jobId；`await_job` 挂起原工具调用，完成后回填其结果。Agent 也可以报告任务已登记并结束当前 Run，让 UI 独立展示后续进度。
 
 停止 Run 不自动等于取消 Job。测试覆盖“停止后 Job 完成不唤醒 Agent”“重启后仅恢复一次”“已有提交结果不重复生成”。
 
-Mock 可返回带明确模拟标记的测试素材或任务结果，不能将占位视频当作真实生成效果验收。
+本阶段默认关闭视频能力，显式启用 Mock 后只返回带模拟标记的任务结果描述，不交付占位 MP4。每个 Run 最多登记一个新视频 Job；提交结果不确定时保留 unknown，不自动重提。旧文本流程、原 Run 预算和检查点兼容纳入回归。
 
 ## 10. M1-C：接入首个真实视频模型
 
@@ -270,6 +272,10 @@ M1-B 增加 `GET /api/jobs/:id` 和 Job 事件；M1-C 增加媒体接口和下�
 - [ ] Job 完成后回填原工具调用并恢复一次；重复事件不重复唤醒。
 - [ ] Run 停止与 Job 完成/取消分离；重启可以恢复已登记任务。
 - [ ] 模拟生成明确标记，不报告为真实视频生成成功。
+- [ ] 非法规格与来源版本在登记前拒绝；重复请求和工具重放不增加 Job 或提交次数。
+- [ ] 提交 unknown、生成失败、查询暂停和等待到期可区分；恢复查询不重新生成。
+- [ ] CLI/Web 能查看独立 Job 状态，SSE 重连补齐，旧数据/检查点和只读缓存边界通过回归。
+- [ ] `docs/M1B_ACCEPTANCE.md` 区分离线故障验证、真实 DeepSeek + Mock 联调及独立安装结果。
 
 ### 12.3 M1-C：真实视频交付
 
@@ -284,7 +290,7 @@ M1-B 增加 `GET /api/jobs/:id` 和 Job 事件；M1-C 增加媒体接口和下�
 
 ## 13. 交付物与后续边界
 
-当前首个交付目标为：Agent 技术基线、Harness 契约、DeepSeek 工具循环、最小 CLI/Web 和 M1-A 验收记录。M1-B、M1-C 作为后续实施阶段保留，不与 M1-A 混合推进为一个必须先取得视频 Key 的大任务。
+M1-A 的 Agent 技术基线、Harness、DeepSeek 工具循环、最小 CLI/Web 和验收记录已交付。M1-B 的 B0 已完成，当前从 B1 继续实现模拟视频 Job 与持久等待；M1-C 真实视频接入仍是独立后续阶段，不作为 M1-B 的前置条件。
 
 公共 PyPI 发布独立于本地 wheel 验收；发布前确认包名与发布权限。多镜头生成、拼接、素材库、更多供应商、插件和 skills 留到后续产品阶段。
 

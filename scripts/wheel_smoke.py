@@ -11,6 +11,8 @@ import httpx
 import vagent
 from vagent.config import load_config
 from vagent.models import DemoModel
+from vagent.video.contracts import VideoCapabilities, VideoRequest, VideoSpec, validate_video_request
+from vagent.waiting import WAIT_EXECUTION_VERSION, DeferredToolResult, ExternalResourceRef
 from vagent.web import create_app
 
 
@@ -41,6 +43,7 @@ async def main():
                         assert (await client.get(path)).status_code == 200
                     health = (await client.get("/api/health")).json()
                     assert len(health["mcp"][0]["tools"]) == 2
+                    assert not health["videoGeneration"]
                     client.headers["X-CSRF-Token"] = (await client.get("/api/session-token")).json()["token"]
                     settings = await client.patch("/api/config", json={"apiKey": "wheel-test-placeholder"})
                     assert settings.status_code == 200 and settings.json()["apiKeyConfigured"]
@@ -58,6 +61,31 @@ async def main():
                     assert all(event["type"] != "assistant.delta" for event in result["run"]["events"])
                     assert len(result["run"]["toolTrace"]) == 3
                     assert result["artifacts"][0]["versions"][0]["contentCheck"]["characters"] > 0
+                    spec = VideoSpec(duration_seconds=5, resolution="720p", aspect_ratio="16:9")
+                    capabilities = VideoCapabilities(
+                        provider="mock", model="wheel-fixture", capabilities_version="v1", specs=[spec]
+                    )
+                    request = VideoRequest(
+                        provider="mock",
+                        model="wheel-fixture",
+                        capabilities_version="v1",
+                        prompt="offline",
+                        spec=spec,
+                        source_refs=[{"artifactId": result["artifacts"][0]["id"], "version": 1}],
+                    )
+                    validate_video_request(
+                        request,
+                        capabilities,
+                        project_id="wheel",
+                        artifacts={a["id"]: a for a in result["artifacts"]},
+                    )
+                    assert VideoRequest.model_validate_json(request.model_dump_json()) == request
+                    deferred = DeferredToolResult(
+                        wait_id="wheel-wait",
+                        generation=1,
+                        resource=ExternalResourceRef(kind="job", id="wheel-job"),
+                    )
+                    assert deferred.kind == "deferred" and WAIT_EXECUTION_VERSION == 2
                     assert (await client.get("/.env")).status_code == 404
                     bounded = await client.post(
                         "/api/sessions/quality/messages",
@@ -72,7 +100,7 @@ async def main():
                     assert any(e.get("errorCode") == "CONTENT_LENGTH" for e in rejected["run"]["events"])
             assert not (Path(directory) / "state" / "instance.lock").exists()
     print(
-        "PASS: installed wheel, Web assets, local config, streaming Runner, artifacts, quality rejection, real MCP discovery, cleanup."
+        "PASS: installed wheel, Web assets, local config, streaming Runner, artifacts, B0 contracts (video disabled), quality rejection, real MCP discovery, cleanup."
     )
 
 
