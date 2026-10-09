@@ -8,6 +8,9 @@ from vagent.context import ContextBuilder
 from vagent.runner import AgentRunner
 from vagent.storage import FileStore
 from vagent.tools import create_project_tools
+from vagent.video.jobs import JobService
+from vagent.video.providers.mock import MockVideoAdapter
+from vagent.video.tools import register_video_tools
 from vagent.waiting import WAIT_EXECUTION_VERSION
 
 # Captured from a03f249 before adding B0 contracts. Do not recompute from current
@@ -44,7 +47,8 @@ class LegacyModel:
 
 
 @pytest.mark.parametrize("version", [1, 2])
-async def test_b0_preserves_v1_execution_with_both_context_layouts(store, version):
+@pytest.mark.parametrize("enable_video", [False, True])
+async def test_b0_preserves_v1_execution_with_both_context_layouts(store, version, enable_video):
     assert CHECKPOINT_VERSION == 1 and WAIT_EXECUTION_VERSION == 2
     runner = AgentRunner(
         store=store,
@@ -64,13 +68,19 @@ async def test_b0_preserves_v1_execution_with_both_context_layouts(store, versio
     # This now covers migration as well as both original configuration signatures.
     legacy = {key: value for key, value in original.items() if key not in {"jobs", "waits"}}
     legacy["schemaVersion"] = 1
+    for run in legacy["runs"].values():
+        run.pop("videoMode", None)
+        run.pop("toolFeatures", None)
     legacy_bytes = json.dumps(legacy, ensure_ascii=False).encode("utf-8")
     (home / "state.json").write_bytes(legacy_bytes)
     with FileStore.open(home) as reopened:
         assert reopened.snapshot()["schemaVersion"] == 2
         assert next(home.glob("state-v1-*.json")).read_bytes() == legacy_bytes
         model = LegacyModel(finish=True)
-        resumed = AgentRunner(store=reopened, model=model, tools=create_project_tools())
+        tools = create_project_tools()
+        if enable_video:
+            register_video_tools(tools, JobService(reopened, [MockVideoAdapter(reopened)]))
+        resumed = AgentRunner(store=reopened, model=model, tools=tools)
         final = await resumed.resume(before["id"])
         assert final["status"] == "completed" and final["modelSteps"] == 3
         assert final["contextVersion"] == version and final["toolCalls"] == 1

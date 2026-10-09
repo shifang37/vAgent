@@ -13,6 +13,7 @@ from pydantic.alias_generators import to_camel
 from vagent.errors import AppError, failure, public_error
 from vagent.quality import check_project_memory, content_check, project_memory_conflicts
 from vagent.storage import FileStore, now
+from vagent.waiting import DeferredToolResult, ToolExecutionContext
 
 
 class Arguments(BaseModel):
@@ -90,19 +91,70 @@ class ToolDefinition:
     execute: Callable[[dict, dict, str], object] | None = None
     async_execute: Callable[[dict], Awaitable[object]] | None = None
     identity: str | None = None
+    # Context handlers own their journal/transaction and may return a deferred
+    # marker. Legacy handlers still return raw data for FileStore.operation.
+    context_execute: Callable[[dict, FileStore, ToolExecutionContext], dict | DeferredToolResult] | None = (
+        None
+    )
+    feature: str | None = None
+
+
+@dataclass(frozen=True)
+class ToolFeature:
+    name: str
+    configuration: dict
+    instructions: str
+    bypass_answer_cache: bool = False
 
 
 class ToolRegistry:
     def __init__(self):
         self._definitions: dict[str, ToolDefinition] = {}
+        self._features: dict[str, ToolFeature] = {}
 
     def register(self, definition: ToolDefinition) -> "ToolRegistry":
         if definition.name in self._definitions:
             raise ValueError(f"Duplicate tool: {definition.name}")
         if definition.async_execute and definition.effect != "read":
             raise ValueError("External tools must be explicitly read-only")
+        if (
+            sum(
+                handler is not None
+                for handler in (definition.execute, definition.async_execute, definition.context_execute)
+            )
+            != 1
+        ):
+            raise ValueError("A tool must have exactly one execution handler")
+        if definition.feature and definition.feature not in self._features:
+            raise ValueError("Register the tool feature before its tools")
         self._definitions[definition.name] = definition
         return self
+
+    def register_feature(self, feature: ToolFeature) -> "ToolRegistry":
+        if feature.name in self._features:
+            raise ValueError(f"Duplicate tool feature: {feature.name}")
+        self._features[feature.name] = copy.deepcopy(feature)
+        return self
+
+    def _active_features(self) -> list[ToolFeature]:
+        names = {definition.feature for definition in self._definitions.values()}
+        return [feature for name, feature in sorted(self._features.items()) if name in names]
+
+    @property
+    def features(self) -> dict[str, dict]:
+        return {feature.name: copy.deepcopy(feature.configuration) for feature in self._active_features()}
+
+    @property
+    def instructions(self) -> str:
+        return "\n".join(feature.instructions for feature in self._active_features())
+
+    @property
+    def bypass_answer_cache(self) -> bool:
+        return any(feature.bypass_answer_cache for feature in self._active_features())
+
+    def requires_context(self, name: str) -> bool:
+        definition = self._definitions.get(name)
+        return definition is not None and definition.context_execute is not None
 
     def specs(self) -> list[dict]:
         return [
@@ -120,9 +172,16 @@ class ToolRegistry:
         ]
 
     def read_only(self) -> "ToolRegistry":
+        return self._filtered(lambda definition: definition.effect == "read")
+
+    def without_feature(self, name: str) -> "ToolRegistry":
+        return self._filtered(lambda definition: definition.feature != name)
+
+    def _filtered(self, include: Callable[[ToolDefinition], bool]) -> "ToolRegistry":
         registry = ToolRegistry()
+        registry._features = copy.deepcopy(self._features)
         for definition in self._definitions.values():
-            if definition.effect == "read":
+            if include(definition):
                 registry.register(definition)
         return registry
 
@@ -142,11 +201,20 @@ class ToolRegistry:
         ]
 
     async def aexecute(
-        self, name: str, args: object, *, store: FileStore, project_id: str, operation_key: str
-    ) -> dict:
+        self,
+        name: str,
+        args: object,
+        *,
+        store: FileStore,
+        project_id: str,
+        operation_key: str,
+        context: ToolExecutionContext | None = None,
+    ) -> dict | DeferredToolResult:
         definition = self._definitions.get(name)
         if definition is None or definition.async_execute is None:
-            return self.execute(name, args, store=store, project_id=project_id, operation_key=operation_key)
+            return self.execute(
+                name, args, store=store, project_id=project_id, operation_key=operation_key, context=context
+            )
         if not isinstance(args, dict) or not isinstance(definition.schema, dict):
             return failure("INVALID_ARGUMENTS", "MCP 工具参数必须是 JSON 对象。")
         if next(Draft202012Validator(definition.schema).iter_errors(args), None):
@@ -167,13 +235,26 @@ class ToolRegistry:
         return store.operation(operation_key, name, payload, lambda _: result)
 
     def execute(
-        self, name: str, args: object, *, store: FileStore, project_id: str, operation_key: str
-    ) -> dict:
+        self,
+        name: str,
+        args: object,
+        *,
+        store: FileStore,
+        project_id: str,
+        operation_key: str,
+        context: ToolExecutionContext | None = None,
+    ) -> dict | DeferredToolResult:
         definition = self._definitions.get(name)
         if definition is None:
             return failure("UNKNOWN_TOOL", "该工具未注册。")
         if definition.async_execute:
             return failure("ASYNC_TOOL", "外部工具必须通过异步执行入口调用。")
+        if definition.context_execute and not isinstance(args, dict):
+            return failure("INVALID_ARGUMENTS", "工具参数必须是 JSON 对象。")
+        if definition.context_execute and next(
+            Draft202012Validator(definition.schema.model_json_schema(by_alias=True)).iter_errors(args), None
+        ):
+            return failure("INVALID_ARGUMENTS", "工具参数不符合已公布的 JSON Schema。")
         try:
             parsed = definition.schema.model_validate(args)
         except ValidationError as error:
@@ -182,12 +263,37 @@ class ToolRegistry:
             return failure("INVALID_ARGUMENTS", "参数格式不符合 Schema：" + ", ".join(fields)[:1000])
         payload = parsed.model_dump(by_alias=True, exclude_none=True)
         try:
+            if definition.context_execute:
+                with store.locked():
+                    snapshot = store.snapshot()
+                    self._check_context(context, snapshot, project_id, operation_key)
+                    if definition.effect == "write" and snapshot["runs"][context.run_id].get("readOnly"):
+                        return failure("READ_ONLY", "只读 Run 不能调用写工具。")
+                    # Keep the original JSON encoding for per-call replay checks;
+                    # semantic request normalization belongs to the domain service.
+                    return definition.context_execute(copy.deepcopy(args), store, context)
             return store.operation(
                 operation_key, name, payload, lambda draft: definition.execute(payload, draft, project_id)
             )
         except Exception as error:
             safe = public_error(error)
             return failure(safe.code, str(safe))
+
+    @staticmethod
+    def _check_context(context, state: dict, project_id: str, operation_key: str) -> None:
+        if not isinstance(context, ToolExecutionContext):
+            raise AppError("TOOL_CONTEXT_INVALID", "工具缺少服务端执行上下文。")
+        run = state["runs"].get(context.run_id)
+        if (
+            context.project_id != project_id
+            or context.project_id != context.session_id
+            or context.operation_key != operation_key
+            or context.project_id not in state["projects"]
+            or context.session_id not in state["sessions"]
+            or run is None
+            or run["sessionId"] != context.session_id
+        ):
+            raise AppError("TOOL_CONTEXT_INVALID", "工具的项目、会话、Run 或调用标识不匹配。")
 
 
 def _project_read(args: dict, state: dict, project_id: str) -> dict:

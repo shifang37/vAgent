@@ -1,9 +1,9 @@
 # vagent M1 实施计划：先实现 Agent，再接入视频生成
 
 > 更新日期：2026-10-09
-> 状态：M1-A 已验收，M1-B 的 B0、B1 完成，B2–B5 待实施；当前已完成内容、验证与限制以 [README](./README.md) 为准。
+> 状态：M1-A 已验收，M1-B 的 B0–B2 完成，B3–B5 待实施；当前已完成内容、验证与限制以 [README](./README.md) 为准。
 > 设计依据：[产品设计](./DESIGN.md)、[Agent 选型与 Harness 设计](./AGENT_HARNESS_DESIGN.md)。  
-> 当前优先级：执行 B2 的视频工具、模式配置、只读与缓存边界；B1 的迁移与 Mock Worker 见 [B1 验收](./docs/M1B_B1_ACCEPTANCE.md)，后续见 [M1-B 任务规划](./docs/M1B_PLAN.md)，不要求真实视频 Key。
+> 当前优先级：执行 B3 的生产等待、停止、计时和跨重启恢复；工具与配置接入见 [B2 验收](./docs/M1B_B2_ACCEPTANCE.md)，后续见 [M1-B 任务规划](./docs/M1B_PLAN.md)，不要求真实视频 Key。
 
 当前已补齐 SQLite 图检查点和 `vagent resume RUN_ID`，包含部分工具提交后的重放保护与累计预算验证，记录见 [持久恢复验收](./docs/RECOVERY_ACCEPTANCE.md)。2026-10-08 新增共享应用服务、本地 Web API/SSE 与只读 MCP；首组真实 DeepSeek 多轮编排已验证，发现记忆冗余与文本长度约束问题，详见 [编排验收](./docs/AGENT_ORCHESTRATION_ACCEPTANCE.md)。
 
@@ -188,13 +188,13 @@ A0 不调查或开通视频账户；这一阶段先解决“选什么 Agent 基�
 
 ## 9. M1-B：预先验证视频结合方式
 
-M1-A 已于 2026-10-09 验收。M1-B 目标是验证架构可以承载视频长任务，不接收费视频 API。B0 契约/持久等待验证和 B1 存储迁移/持久 Job/Mock Worker 已完成，见 [B0 验收](./docs/M1B_B0_ACCEPTANCE.md)、[B1 验收](./docs/M1B_B1_ACCEPTANCE.md) 和 [契约协议](./docs/M1B_CONTRACTS.md)；B2–B5 待实施。详细代码落点、故障矩阵和执行顺序见 [M1-B 任务规划](./docs/M1B_PLAN.md)。
+M1-A 已于 2026-10-09 验收。M1-B 验证视频长任务架构，不接收费视频 API。B0 契约/等待实验、B1 存储/Job/Mock Worker、B2 四工具/模式/只读/缓存边界已完成，见 [B0 验收](./docs/M1B_B0_ACCEPTANCE.md)、[B1 验收](./docs/M1B_B1_ACCEPTANCE.md)、[B2 验收](./docs/M1B_B2_ACCEPTANCE.md) 和 [契约协议](./docs/M1B_CONTRACTS.md)；B3–B5 待实施。详细代码落点、故障矩阵和执行顺序见 [M1-B 任务规划](./docs/M1B_PLAN.md)。
 
 | 工作包 | 内容 | 完成门槛 |
 |---|---|---|
 | B0 能力契约与等待验证（已完成） | 视频/Job/等待类型、产物引用、迁移协议、LangGraph 挂起与旧检查点兼容实验 | 同批多等待、五处强退及旧图指纹/恢复验证通过；实际应用接入仍由 B1–B3 实施 |
 | B1 模拟任务（已完成） | schema v2 迁移、JobService、独立 Mock 账本与 Worker、两层去重及查询重试 | 61 项新增回归、七处强退、旧检查点迁移恢复通过；应用接入留给 B2–B4 |
-| B2 Agent 视频工具 | 四个视频工具、模式配置、只读与缓存边界 | 离线模型验证能力调用与唯一 Job；真实 DeepSeek 调用在 B5 验收 |
+| B2 Agent 视频工具（已完成） | 四工具、服务端上下文/延迟结果、模式配置、只读与缓存边界 | 58 项新增回归、确定性模型唯一 Job 和旧配置恢复通过；生产等待与真实联调分别在 B3/B5 |
 | B3 异步恢复 | Job/Run 独立状态，等待工具结果、事件与重启恢复 | 等待期间不调用模型反复轮询；完成后通过原调用 ID 继续一次 |
 | B4 CLI/Web 交付 | Worker 生命周期、CLI Job 命令、API/SSE、任务卡片 | 页面刷新和进程重启可恢复状态；Run 结束后 Job 仍可查询 |
 | B5 验收与打包 | 离线故障矩阵、真实 DeepSeek + Mock 评测、独立 wheel | 模拟与真实文本调用证据分开；形成 M1-B 验收记录 |
@@ -267,7 +267,7 @@ M1-B 增加 `GET /api/jobs/:id` 和 Job 事件；M1-C 增加媒体接口和下�
 
 ### 12.2 M1-B：模拟视频结合
 
-- [ ] 注册视频工具和 MockAdapter 时，Agent 核心无需引入供应商逻辑。
+- [x] 注册视频工具和 MockAdapter 时，Agent 核心无需引入供应商逻辑（B2）。
 - [ ] 等待期间由 Worker 查询状态，不持续调用 DeepSeek。
 - [ ] Job 完成后回填原工具调用并恢复一次；重复事件不重复唤醒。
 - [ ] Run 停止与 Job 完成/取消分离；重启可以恢复已登记任务。
@@ -290,7 +290,7 @@ M1-B 增加 `GET /api/jobs/:id` 和 Job 事件；M1-C 增加媒体接口和下�
 
 ## 13. 交付物与后续边界
 
-M1-A 的 Agent 技术基线、Harness、DeepSeek 工具循环、最小 CLI/Web 和验收记录已交付。M1-B 的 B0、B1 已完成，当前从 B2 继续接入视频工具、模式与持久等待；M1-C 真实视频接入仍是独立后续阶段，不作为 M1-B 的前置条件。
+M1-A 的 Agent 技术基线、Harness、DeepSeek 工具循环、最小 CLI/Web 和验收记录已交付。M1-B 的 B0–B2 已完成，下一步 B3 接入持久等待，B4 接入 Worker 生命周期和 Job 入口；M1-C 真实视频接入仍是独立后续阶段，不作为 M1-B 的前置条件。
 
 公共 PyPI 发布独立于本地 wheel 验收；发布前确认包名与发布权限。多镜头生成、拼接、素材库、更多供应商、插件和 skills 留到后续产品阶段。
 

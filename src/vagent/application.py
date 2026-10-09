@@ -17,6 +17,9 @@ from vagent.skills import SkillCatalog, register_skill_tool
 from vagent.storage import FileStore, now
 from vagent.tools import create_project_tools
 from vagent.usage import summarize_usage
+from vagent.video.jobs import JobService
+from vagent.video.providers.mock import MockVideoAdapter
+from vagent.video.tools import register_video_tools
 
 
 class ApplicationService:
@@ -32,6 +35,7 @@ class ApplicationService:
         self.drafts: dict[str, dict] = {}
         self.validation = {"status": "unverified"}
         self.config_busy = False
+        self.video_jobs = None
 
     @classmethod
     @asynccontextmanager
@@ -41,6 +45,10 @@ class ApplicationService:
             client = await stack.enter_async_context(ModelHttpClient(timeout=60))
             catalog = SkillCatalog.discover(config.skills_root)
             tools = register_skill_tool(create_project_tools(), catalog)
+            video_jobs = None
+            if config.video_mode == "mock":
+                video_jobs = JobService(store, [MockVideoAdapter(store)])
+                register_video_tools(tools, video_jobs)
             mcp_status = await stack.enter_async_context(
                 connect_mcp(tools, server_configs(config.mcp_config, config.mcp_local))
             )
@@ -49,6 +57,7 @@ class ApplicationService:
                 stack.push_async_callback(cache.aclose)
             service = cls(config, store, catalog, tools, client, model=model, policy=policy, cache=cache)
             service.mcp_status = mcp_status
+            service.video_jobs = video_jobs
             try:
                 yield service
             finally:
@@ -56,7 +65,11 @@ class ApplicationService:
                     service.cancelled.set()
                     await service.task
 
-    def runner(self, *, read_only=False, on_event=None, model=None):
+    def runner(self, *, read_only=False, on_event=None, model=None, video_mode=None):
+        mode = self.config.video_mode if video_mode is None else video_mode
+        if mode not in {"off", self.config.video_mode}:
+            raise AppError("RESUME_CONFIG_CHANGED", "原 Run 的视频模式未启用，请恢复原启动配置。")
+        tools = self.tools.without_feature("video") if mode == "off" else self.tools
         chosen = (
             model
             or self.model
@@ -65,7 +78,7 @@ class ApplicationService:
         return AgentRunner(
             store=self.store,
             model=chosen,
-            tools=self.tools,
+            tools=tools,
             policy=self.policy,
             context=ContextBuilder(self.config.context_bytes),
             skills=self.catalog.list(),
@@ -81,7 +94,9 @@ class ApplicationService:
             "modelKind": "injected-test" if self.model else "deepseek",
             "contextBudgetBytes": self.config.context_bytes,
             "redisConfigured": bool(self.cache),
-            "answerCacheEnabled": bool(self.cache) and not self.tools.identities,
+            "answerCacheEnabled": bool(self.cache)
+            and not self.tools.identities
+            and not self.tools.bypass_answer_cache,
             "mcp": self.mcp_status,
             "skills": self.catalog.list(),
             "tools": self.tools.inventory(),
@@ -90,7 +105,10 @@ class ApplicationService:
                 "toolCalls": self.policy.max_tool_calls,
                 "seconds": self.policy.timeout_seconds,
             },
-            "videoGeneration": False,
+            "videoGeneration": self.config.video_mode == "mock",
+            "videoMode": self.config.video_mode,
+            "videoSimulated": self.config.video_mode == "mock",
+            "videoMediaAvailable": False,
             "configuration": self.configuration(),
         }
 
@@ -98,9 +116,13 @@ class ApplicationService:
         sources = config_sources(self.config)
         return {
             "model": self.config.model,
+            "videoMode": self.config.video_mode,
             "apiKeyConfigured": bool(self.config.api_key and self.config.api_key.strip()),
             "sources": sources,
-            "editable": {key: source not in {"environment", "provided"} for key, source in sources.items()},
+            "editable": {
+                key: key != "videoMode" and source not in {"environment", "provided"}
+                for key, source in sources.items()
+            },
             "validation": copy.deepcopy(self.validation),
             "busy": self.config_busy or bool(self.task and not self.task.done()),
         }
@@ -239,6 +261,7 @@ class ApplicationService:
             "policy",
             "readOnly",
             "contextVersion",
+            "videoMode",
             "events",
             "createdAt",
             "updatedAt",
@@ -317,7 +340,9 @@ class ApplicationService:
             raise AppError("CONFIG_BUSY", "配置验证正在进行，请稍后继续任务。")
         if self.task and not self.task.done():
             raise AppError("RUN_BUSY", "已有任务正在运行，请等待完成或停止后重试。")
-        runner = self.runner(read_only=record.get("readOnly", False))
+        runner = self.runner(
+            read_only=record.get("readOnly", False), video_mode=record.get("videoMode", "off")
+        )
         return await self._launch(runner, record["sessionId"], resume_id=run_id)
 
     async def _launch(self, runner, session_id, *, prompt=None, request_id=None, resume_id=None):

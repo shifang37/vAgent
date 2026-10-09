@@ -1,18 +1,25 @@
 """Run with the independently installed wheel's Python, without provider requests."""
 
 import asyncio
+import json
 import sys
 import tempfile
 from contextlib import chdir
+from datetime import datetime
 from pathlib import Path
 
 import httpx
+from langchain_core.messages import AIMessage
 
 import vagent
+from vagent.application import ApplicationService
 from vagent.config import load_config
 from vagent.models import DemoModel
 from vagent.video.contracts import VideoCapabilities, VideoRequest, VideoSpec, validate_video_request
-from vagent.waiting import WAIT_EXECUTION_VERSION, DeferredToolResult, ExternalResourceRef
+from vagent.video.jobs import JobService
+from vagent.video.providers.mock import MockVideoAdapter
+from vagent.video.worker import JobWorker
+from vagent.waiting import WAIT_EXECUTION_VERSION, DeferredToolResult, ExternalResourceRef, WaitBinding
 from vagent.web import create_app
 
 
@@ -25,6 +32,110 @@ class StreamingDemo(DemoModel):
             self.deltas += 1
             on_delta(reply.content[offset : offset + 8])
         return reply
+
+
+class VideoDemo:
+    name = "wheel-video-fixture"
+
+    def __init__(self):
+        self.calls = 0
+        self.job_id = None
+
+    async def generate(self, messages, tools):
+        self.calls += 1
+        assert {"video_capabilities", "video_generate", "job_get", "await_job"} <= {
+            item["function"]["name"] for item in tools
+        }
+        if self.calls == 1:
+            name, args = "video_capabilities", {}
+        elif self.calls == 2:
+            capability = json.loads(messages[-1].content)["data"]["models"][0]
+            name = "video_generate"
+            args = {
+                **{key: capability[key] for key in ("provider", "model", "capabilitiesVersion")},
+                "prompt": "wheel offline simulation",
+                "spec": capability["specs"][0],
+            }
+        else:
+            assert self.calls == 3
+            data = json.loads(messages[-1].content)["data"]
+            assert data["status"] == "pending_submit" and not data["mediaAvailable"]
+            self.job_id = data["jobId"]
+            return AIMessage(content=f"Simulated Job registered: {self.job_id}; no media.")
+        return AIMessage(content="", tool_calls=[{"id": name, "name": name, "args": args}])
+
+
+class WaitDemo:
+    name = "wheel-wait-fixture"
+
+    def __init__(self, job_id):
+        self.job_id, self.calls = job_id, 0
+
+    async def generate(self, messages, tools):
+        self.calls += 1
+        assert "video_generate" not in {item["function"]["name"] for item in tools}
+        if self.calls == 1:
+            return AIMessage(
+                content="",
+                tool_calls=[
+                    {
+                        "id": "await",
+                        "name": "await_job",
+                        "args": {"jobId": self.job_id},
+                    }
+                ],
+            )
+        data = json.loads(messages[-1].content)["data"]
+        assert self.calls == 2 and data["status"] == "succeeded"
+        assert data["result"]["simulated"] and not data["mediaAvailable"]
+        return AIMessage(content="Simulation complete; no playable media.")
+
+
+async def smoke_video_tools(directory):
+    home = Path(directory) / "video-state"
+    config = load_config({"VAGENT_HOME": str(home), "VAGENT_VIDEO_MODE": "mock"})
+    model = VideoDemo()
+    async with ApplicationService.open(config, model=model) as service:
+        assert service.configuration()["sources"]["videoMode"] == "environment"
+        assert not service.configuration()["editable"]["videoMode"]
+        registered = await service.runner().run("wheel", "register a simulated job")
+        assert registered["status"] == "completed" and registered["videoMode"] == "mock"
+        assert registered["modelSteps"] == 3 and registered["toolCalls"] == 2
+        assert len(service.store.snapshot()["jobs"]) == 1
+        waiting_model = WaitDemo(model.job_id)
+        pending = await service.runner(model=waiting_model, read_only=True).run("wheel", "await pending job")
+        assert pending["errorCode"] == "EXTERNAL_WAIT_UNAVAILABLE" and not pending["resumable"]
+        assert waiting_model.calls == 1 and pending["toolCalls"] == 1
+        binding = WaitBinding.model_validate(next(iter(service.store.snapshot()["waits"].values())))
+        assert binding.status == "preparing" and binding.context.run_id == pending["id"]
+        assert binding.context.operation_key not in service.store.snapshot()["operations"]
+    # B4 will manage the Worker lifecycle. This smoke test explicitly advances
+    # B1's Worker with a virtual clock, without sleeping or invoking a model.
+    async with ApplicationService.open(config, model=WaitDemo(model.job_id)) as service:
+        current = datetime.fromisoformat(binding.started_at)
+        provider = MockVideoAdapter(service.store, clock=lambda: current)
+        jobs = JobService(service.store, [provider], clock=lambda: current)
+        worker = JobWorker(jobs)
+        for expected in ("queued", "running", "succeeded"):
+            job = await worker.run_once()
+            assert job.id == model.job_id and job.status == expected
+            if job.next_poll_at:
+                current = datetime.fromisoformat(job.next_poll_at)
+        marker = service.tools.execute(
+            "await_job",
+            {"jobId": model.job_id},
+            store=service.store,
+            project_id="wheel",
+            operation_key=binding.context.operation_key,
+            context=binding.context,
+        )
+        assert marker == binding.deferred()  # Original interrupt position is preserved.
+        finished = await service.runner(read_only=True).run("wheel", "read completed simulation")
+        assert finished["status"] == "completed" and finished["modelSteps"] == 2
+        assert provider.ledger_snapshot()["submitCalls"] == 1
+        assert provider.ledger_snapshot()["queryCalls"] == 2
+        assert not service.store.snapshot()["artifacts"]
+    assert not (home / "instance.lock").exists()
 
 
 async def main():
@@ -99,8 +210,9 @@ async def main():
                     assert not rejected["artifacts"]
                     assert any(e.get("errorCode") == "CONTENT_LENGTH" for e in rejected["run"]["events"])
             assert not (Path(directory) / "state" / "instance.lock").exists()
+            await smoke_video_tools(directory)
     print(
-        "PASS: installed wheel, Web assets, local config, streaming Runner, artifacts, B0 contracts (video disabled), quality rejection, real MCP discovery, cleanup."
+        "PASS: installed wheel, Web assets, config, streaming, text/quality, MCP, mock video tools, unique Job, deferred boundary, restart/replay, manual Worker, readonly terminal result, cleanup."
     )
 
 

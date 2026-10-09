@@ -4,6 +4,7 @@ from collections.abc import Mapping
 from contextlib import suppress
 from dataclasses import dataclass, field, replace
 from pathlib import Path
+from typing import Literal
 from urllib.parse import urlsplit
 from uuid import uuid4
 
@@ -25,6 +26,11 @@ class Config:
     mcp_config: Path | None = None
     mcp_local: bool = False
     sources: dict[str, str] = field(default_factory=dict)
+    video_mode: Literal["off", "mock"] = "off"
+
+    def __post_init__(self):
+        if self.video_mode not in {"off", "mock"}:
+            raise AppError("INVALID_VIDEO_MODE", "VAGENT_VIDEO_MODE 只支持 off 或 mock，修改后需重启。")
 
 
 class LocalSettings(BaseModel):
@@ -62,6 +68,7 @@ def config_sources(config: Config) -> dict[str, str]:
     return {
         "apiKey": config.sources.get("apiKey", "provided" if config.api_key else "unset"),
         "model": config.sources.get("model", "provided"),
+        "videoMode": config.sources.get("videoMode", "default" if config.video_mode == "off" else "provided"),
     }
 
 
@@ -111,6 +118,7 @@ def update_local_settings(config: Config, update: ConfigUpdate) -> Config:
         api_key=key,
         model=model,
         sources={
+            "videoMode": sources["videoMode"],
             "apiKey": sources["apiKey"]
             if sources["apiKey"] in {"environment", "provided"}
             else "local"
@@ -161,9 +169,11 @@ def load_config(env: Mapping[str, str] | None = None) -> Config:
         skills_root=Path(env["VAGENT_SKILLS_DIR"]).absolute() if env.get("VAGENT_SKILLS_DIR") else None,
         mcp_config=Path(env["VAGENT_MCP_CONFIG"]).resolve() if env.get("VAGENT_MCP_CONFIG") else None,
         mcp_local=env.get("VAGENT_MCP_LOCAL", "0") == "1",
+        video_mode=env.get("VAGENT_VIDEO_MODE") or "off",
         sources={
             "apiKey": "environment" if environment_key else "local" if local.apiKey else "unset",
             "model": "environment" if environment_model else "local" if local.model else "default",
+            "videoMode": "environment" if env.get("VAGENT_VIDEO_MODE") else "default",
         },
     )
 

@@ -1,8 +1,8 @@
 # M1-B 契约与恢复协议
 
-日期：2026-10-09。B0 已实现数据契约和离线等待实验；B1 已实现 JobService、Mock Worker 和 schema v2 迁移。当前应用使用 schema v2、execution v1，尚未注册视频工具；生产 Run 挂起与自动恢复由 B3 接入。
+日期：2026-10-09。B0 提供契约/等待实验，B1 提供 Job/Mock Worker/schema v2，B2 已接入四工具、模式和执行边界。当前应用仍使用 execution v1；生产 Run 挂起与自动恢复由 B3 接入。
 
-范围依据：[M1-B 任务规划](./M1B_PLAN.md)。验证证据见 [B0 验收](./M1B_B0_ACCEPTANCE.md) 与 [B1 验收](./M1B_B1_ACCEPTANCE.md)。
+范围依据：[M1-B 任务规划](./M1B_PLAN.md)。验证证据见 [B0 验收](./M1B_B0_ACCEPTANCE.md)、[B1 验收](./M1B_B1_ACCEPTANCE.md) 与 [B2 验收](./M1B_B2_ACCEPTANCE.md)。
 
 ## 1. 模块与版本
 
@@ -12,6 +12,7 @@
 | `src/vagent/video/contracts.py` | VideoCapabilities、VideoRequest、产物引用、供应商协议/错误、Job/JobResult、查询策略与合法状态迁移关系 |
 | `src/vagent/waiting.py` | 通用 ToolExecutionContext、延迟结果、WaitBinding、ResumeToken、成功/失败工具结果；不导入视频模块 |
 | `src/vagent/video/jobs.py`、`worker.py`、`providers/mock.py` | B1：原子 Job 登记、两层去重、来源冻结、独立上游账本、串行 Worker、查询恢复 |
+| `src/vagent/video/tools.py`、`tools.py` | B2：四工具、服务端上下文、原样返回已记账结果/延迟标记、能力配置和规则版本 |
 | `scripts/probe_m1b_wait.py` | 使用真实 FileStore、项目工具和 SQLite 的离线图实验；不向应用注册工具或启动后台服务 |
 
 | 版本维度 | 当前值 | 后续规则 |
@@ -20,6 +21,7 @@
 | JSON `schemaVersion` | 2 | B1 在实例锁下自动迁移 v1，先保存原始快照，再增加 jobs/waits |
 | Run `executionVersion` | 1 | 保留旧图；`WAIT_EXECUTION_VERSION=2` 只是为 B3 新图保留的版本 |
 | Run `contextVersion` | 1 或 2 | 与 executionVersion 独立；两种旧布局都需要继续支持 |
+| `toolFeatures.video.toolsVersion` / `rulesVersion` | 1 / 1 | B2 保存完整能力快照并纳入签名；工具 Schema 和实际系统规则也独立参与签名 |
 
 契约使用 Pydantic 严格校验、camelCase JSON 和 `extra=forbid`。请求及嵌套规格/来源不可变；JSON 数组在内存中转成 tuple。持久写入使用 `model_dump(mode="json", by_alias=True)`，读取使用 `model_validate`。不要用跳过校验的 `model_construct` 或 `model_copy(update=...)` 形成待提交状态。
 
@@ -27,12 +29,12 @@
 
 每个适配器实例对应一个已配置的 `(provider, model)`，`capabilities()` 返回能力版本及完整合法规格组合。首版输入类型为 text；参考图、视频延长和真实媒体在后续契约版本扩展。
 
-下面只是请求结构示例，不表示应用已经注册该模型：
+启用 mock 后先读取 `video_capabilities`，按实际返回的模型和规格构造请求。当前默认请求结构示例：
 
 ```json
 {
   "provider": "mock",
-  "model": "fixture-t2v",
+  "model": "mock-t2v",
   "capabilitiesVersion": "v1",
   "prompt": "雨夜咖啡店的单镜头画面",
   "spec": {
@@ -54,7 +56,7 @@
 
 请求指纹用于同 Run 的单次生成槽位。既有 `FileStore.operation_fingerprint` 仍负责原工具调用的参数冲突检测，其编码算法不变；两种指纹不能互相替代。
 
-B1 的 `JobService.generate(request, context=...)` 接受请求和服务端上下文，返回原 `ok/data` 或 `ok/error` 格式。原调用重放复用已登记的 Operation 结果；不同调用 ID 的同一规范化请求复用原 Job，不同请求返回 `JOB_ALREADY_EXISTS`，错误消息携带已有 jobId。登记结果是该调用当时的状态，实时状态应通过 `get` 读取；生成工具注册属于 B2。
+B1 的 `JobService.generate(request, context=...)` 返回已记账的 `ok/data` 或 `ok/error`。B2 的上下文执行器直接返回它，避免二次包装；保留原始 JSON 参数用于原调用指纹。不同调用 ID 的同一规范化请求复用原 Job，不同请求返回 `JOB_ALREADY_EXISTS`，错误消息携带已有 jobId。登记结果是调用当时的状态，实时状态需用新的 `job_get` 调用读取。模型输入仅接受已公布的 camelCase JSON 字段，不能借 Python 字段名传入隐藏控制参数。
 
 ## 3. 供应商提交、查询和结果
 
@@ -104,6 +106,8 @@ pending_submit → submitting → queued → running → succeeded / failed
 
 ToolExecutionContext 由执行端构造，包含 projectId/sessionId/runId/modelStep/toolCallId，operationKey 沿用 `runId:modelStep:toolCallId`。等待只保存 `resource.kind/id`，Harness 无需导入具体视频供应商。
 
+B2 新建 WaitBinding 同时保存 `operationFingerprint`，覆盖原工具名和原 JSON 参数。最终 Operation 尚不存在时，原键也不能改为另一个本地或 MCP 操作。该字段为 B0 实验数据保留可缺省兼容；生产四工具总是填写。上下文执行器在重放前核对项目、会话、Run、调用键与 Store，领域写操作再次检查 Run 的只读状态。
+
 | WaitBinding 状态 | 必需事实 |
 |---|---|
 | preparing | 原调用、资源、开始/截止时间已经登记；暂不允许自动交付 |
@@ -130,6 +134,12 @@ ToolExecutionContext 由执行端构造，包含 projectId/sessionId/runId/model
 3. **同批重放保持中断顺序。** 已经建立等待的调用在节点重放时仍经过原 interrupt 位置，哪怕它的本地 Operation 已完成。随后复用原结果；不能因为前一个 Job 已完成而跳过其 interrupt，导致第二个等待取到前一个恢复指针。未曾建立等待且资源已经完成的调用可以直接返回结果。
 
 离线实验使用真实本地写工具和 SQLite 验证这些行为；它不是已接入生产 AgentRunner 的等待实现。
+
+### B2 的执行边界
+
+`await_job` 在同一个 Store 锁范围内选择即时结果或 preparing 记录。未建立等待且 Job 已成功时保存成功 Operation；失败、提交不确定、查询暂停分别返回 `JOB_FAILED`、`JOB_SUBMISSION_UNKNOWN`、`JOB_QUERY_PAUSED`。待完成时仅保存绑定、原调用指纹与固定 10 分钟截止时间，不保存虚假的成功 Operation。已建立绑定的原调用始终重放同一延迟标记，即使 Job 或 Operation 已结束。
+
+execution v1 在普通工具异常捕获之外识别延迟标记，以 `EXTERNAL_WAIT_UNAVAILABLE` 结束本次 Run，`resumable=false`；保留同批已完成结果，不启动后续工具或下一次模型请求。不会写 waiting_external、arm、claim 或交付完成标记。B3 启动扫描必须按 executionVersion 和 Run 状态筛选，不能把 B2 已结束 Run 的 preparing 记录当作可自动恢复的等待。超时交付、外部等待计时、停止及自动恢复仍由 B3 实施。
 
 ## 7. 提交顺序与启动补偿（供 B1/B3 实施）
 
@@ -161,6 +171,8 @@ SQLite 检查点保持在原文件中，不做盲目版本升级。备份或回�
 ## 9. execution v1 的兼容门槛
 
 新增等待图使用单独的 execution v2 路径。B3 不能直接把当前 `CHECKPOINT_VERSION` 全局改为 2 再让旧 Run 套用新系统提示/工具集合；读取旧 Run 时选择其原版本，保留模型、工具、Skills 和上下文配置校验。
+
+B2 为新 Run 保存 `videoMode` 和 `toolFeatures`。off 没有新能力签名项；缺失字段的旧 Run 解释为 off/空配置。启动为 mock 时，应用/CLI 和 Runner 恢复入口为旧 Run 移除视频工具与附加规则，两个旧签名保持原值。mock Run 必须匹配保存的完整能力、工具 Schema、规则及其版本；关闭模式、缺少适配器或改变配置均在新模型调用前拒绝。只读过滤保留能力配置和缓存绕过策略，不把视频身份混入 MCP 的 identities。
 
 `tests/test_b0_compatibility.py` 固定了在 `a03f249` 上、模型名 `b0-legacy-fixture`、原项目工具集合、无额外 Skill 的两个配置指纹，并实际保存后关闭 Store，再恢复同一个 Run：
 

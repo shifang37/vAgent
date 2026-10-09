@@ -88,7 +88,9 @@ async def run_agent(args: argparse.Namespace) -> int:
             ApplicationService.open(runtime_config, model=model, existing_store=store)
         )
         display = EventDisplay()
-        runner = service.runner(read_only=read_only, on_event=display)
+        runner = service.runner(
+            read_only=read_only, on_event=display, video_mode=saved.get("videoMode", "off") if saved else None
+        )
         session_id = saved["sessionId"] if saved else args.session
         print(f"模型：{runner.model.name}\n会话：{session_id}\n数据：{config.home}")
         if args.command == "chat":
@@ -272,6 +274,7 @@ def main() -> None:
                                         "resumable",
                                         "activeSeconds",
                                         "policy",
+                                        "videoMode",
                                     )
                                 },
                                 "usage": summarize_usage(run),

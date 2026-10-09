@@ -13,7 +13,7 @@ from typing import Annotated, Any, Literal, TypeVar
 from uuid import uuid4
 
 from langchain_core.messages import messages_from_dict
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, JsonValue
 from pydantic.alias_generators import to_camel
 
 from vagent.config import assert_id
@@ -155,6 +155,7 @@ class RunRecordV1(Record):
 class RunRecord(RunRecordV1):
     status: Literal["running", "waiting_external", "completed", "failed", "cancelled", "interrupted"]
     video_mode: Literal["off", "mock"] = "off"
+    tool_features: dict[str, dict[str, JsonValue]] = Field(default_factory=dict)
     active_wait_id: str | None = None
     external_wait_seconds: float = Field(default=0, ge=0, allow_inf_nan=False)
 
@@ -326,22 +327,31 @@ class FileStore:
 
     def operation_result(self, key: str, name: str, args: dict) -> dict | None:
         with self._mutex:
-            existing = self._state["operations"].get(key)
-            if existing is None:
-                return None
-            if existing["fingerprint"] != self.operation_fingerprint(name, args):
+            return copy.deepcopy(
+                self._operation_result(self._state, key, self.operation_fingerprint(name, args))
+            )
+
+    @staticmethod
+    def _operation_result(state: dict, key: str, fingerprint: str) -> dict | None:
+        for raw in state["waits"].values():
+            context = raw["context"]
+            wait_key = f"{context['runId']}:{context['modelStep']}:{context['toolCallId']}"
+            if wait_key == key and raw.get("operationFingerprint") not in {None, fingerprint}:
                 return failure("OPERATION_CONFLICT", "同一调用 ID 不能用于不同操作。")
-            return copy.deepcopy(existing["result"])
+        existing = state["operations"].get(key)
+        if existing is None:
+            return None
+        if existing["fingerprint"] != fingerprint:
+            return failure("OPERATION_CONFLICT", "同一调用 ID 不能用于不同操作。")
+        return existing["result"]
 
     def operation(self, key: str, name: str, args: dict, mutate: Callable[[dict], Any]) -> dict:
         fingerprint = self.operation_fingerprint(name, args)
 
         def execute(draft: dict) -> dict:
-            existing = draft["operations"].get(key)
-            if existing:
-                if existing["fingerprint"] != fingerprint:
-                    return failure("OPERATION_CONFLICT", "同一调用 ID 不能用于不同操作。")
-                return existing["result"]
+            previous = self._operation_result(draft, key, fingerprint)
+            if previous is not None:
+                return previous
             before = copy.deepcopy(draft)
             try:
                 result = {"ok": True, "data": copy.deepcopy(mutate(draft))}

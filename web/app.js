@@ -359,6 +359,7 @@ function renderSettings(config, notice = "") {
   const status = { unverified: "尚未验证", validating: "正在验证", verified: "连接已验证", failed: "验证失败" }[validation.status];
   const generation = openDialog("Agent 连接与配置", `
     <p>配置保存在本机，下次执行即可生效。环境变量和 .env 优先；由启动配置提供的字段需在原处修改。</p>
+    <p>视频模式：${config.videoMode === "mock" ? "mock（模拟，无真实媒体）" : "off（未启用）"} · ${sources[config.sources.videoMode] || "启动配置"}。视频模式在启动时生效，修改需重启。</p>
     <form id="settings-form">
       <label for="config-key">DeepSeek API Key · ${sources[config.sources.apiKey] || "启动配置"}
         <input id="config-key" type="password" autocomplete="new-password" maxlength="512" spellcheck="false" autocapitalize="off" placeholder="${config.apiKeyConfigured ? "已配置，留空保持" : "输入 API Key"}" ${!config.editable.apiKey || config.busy ? "disabled" : ""}>

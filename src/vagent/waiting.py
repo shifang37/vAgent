@@ -5,7 +5,7 @@ from typing import Annotated, Literal
 
 from pydantic import Field, JsonValue, model_validator
 
-from vagent.contracts import Contract, Identifier, Name, UtcTimestamp
+from vagent.contracts import Contract, Fingerprint, Identifier, Name, UtcTimestamp
 from vagent.errors import AppError
 
 WAIT_EXECUTION_VERSION = 2  # Reserved for the new graph; the existing graph stays at v1.
@@ -71,6 +71,9 @@ class WaitBinding(Contract):
     id: Identifier
     context: ToolExecutionContext
     resource: ExternalResourceRef
+    # Optional for B0 probe records; production registrations save the original
+    # tool name/arguments fingerprint before any final Operation exists.
+    operation_fingerprint: Fingerprint | None = None
     revision: int = Field(default=0, ge=0)
     generation: int = Field(default=1, ge=1)
     status: Literal["preparing", "armed", "ready", "claimed", "delivered", "stopped"] = "preparing"
