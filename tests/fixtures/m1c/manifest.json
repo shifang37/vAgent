@@ -1,0 +1,56 @@
+{
+  "fixtureVersion": 1,
+  "capturedFrom": "b940c82",
+  "capturedOn": "2026-10-10",
+  "kind": "synthetic-domain-migration-only",
+  "checkpointsIncluded": false,
+  "notes": "Checkpoint and context signature strings in these domain fixtures are sentinels, not resumable SQLite evidence. Preserve the existing B0/B2 golden signatures and real checkpoint tests. Do not regenerate these fixtures to make a migration pass.",
+  "snapshots": [
+    {
+      "file": "legacy-v1.json",
+      "schemaVersion": 1,
+      "rawSha256": "fc935b2f28647bf153be06bde6dfa4dac3d59b7994794e279af694bd144e89e6",
+      "expectedV3CanonicalSha256": "a26deb00ed4322b8738ef8e138503725a9d1ac6a74ece2eb034484f85a0162ab",
+      "preservedCollectionsSha256": {
+        "projects": "a7c7ce9984e39a2aff248988a5af1eda62283cf094f3b71a25d1a04e1cedf993",
+        "sessions": "f5835beba77cd89dddd427b9327c92415e2930e010c11f35cd746b614f1d7911",
+        "artifacts": "218286f375b96616ba8d7ef2358d0022169c45e2285137cb55d7f82e6259dfae",
+        "runs": "7a07b42c5ca54afdb30665a9a3d64ef856f7a7bbb2ff2d5d31649861a0653fa4",
+        "operations": "3d0f0d904fd4b5250ef1ca0c459ba766128cfcfe0c9328adbdabbe3212b12d45"
+      },
+      "jobRequestFingerprints": {},
+      "operationFingerprints": {
+        "original-save": "743c5e22780a0fe6d36b81ece0c968d60692d8820c09f88cfa209ce73e631271",
+        "original-update": "ea63348557766fe80d704e439219ebe57831943fdc838253c50cb4eb0187fda2"
+      }
+    },
+    {
+      "file": "legacy-v2-mock.json",
+      "schemaVersion": 2,
+      "rawSha256": "d7dba4e77b5d72c2f9a634c8264877d9b6bd1f52a005592aadfb5b68b137b375",
+      "expectedV3CanonicalSha256": "f893e506dd52109113dc00f36fa181952e42e8d01fa12e58f5e6df24a37f08f6",
+      "preservedCollectionsSha256": {
+        "projects": "0370bd47dfc3e7d661b5d6c718bcf2b75d58ac5db92bcae2942fd7edd5d5cf5a",
+        "sessions": "454a7f04af0591c2331415319a6ece9f8649b129843b1c387457dd893b1e6c98",
+        "artifacts": "b7410aa6c760db237c5621d0c3311f043634028a4f45dfbcf170350a5ea5ede3",
+        "runs": "0d36be8940fe8e0883e436e560165d184185fd41bcc4984f3dde7b88431acccc",
+        "operations": "9d2c58336e98543da89ac3f05d52941e5a29e8e1ae1e715fe2dcc9a651811cab",
+        "jobs": "42f694d686979a8390135a3c3b745d3ea33dcb529afa0eaf0d4734bea0bf283e",
+        "waits": "7e3f1a66409f33c2e0da3d03b8fea1a459ddd47814299d0164864d206269d453"
+      },
+      "jobRequestFingerprints": {
+        "628d7b90-9ec3-48d6-aacf-55030190e133": "c657c5e44b73eb874d27bb758b22d0e045ec28883afdcd773dbece784d36f0d7",
+        "d1ce5d80-3731-4c11-9c5b-10277bc60735": "7c861e64ef78134620d2ecf5153a9276fc1b66f397041c39aa079b2a2810fa0b"
+      },
+      "operationFingerprints": {
+        "c0-waiting-mock:source": "af61ed967c818bb26ce2e33115bed87a4345ce8d341131276e0c9709711f30d4",
+        "c0-waiting-mock:1:generate": "183545897ce5a11f45e53a43ad62144cf6337fe0313eef1a3f7e52696f92933a",
+        "c0-waiting-mock:revision": "517cacf7556b0b7eb855cd988c4fa8313e7fa9095411dc26fd1e3a397f086269",
+        "c0-completed-mock:source": "af61ed967c818bb26ce2e33115bed87a4345ce8d341131276e0c9709711f30d4",
+        "c0-completed-mock:1:generate": "562a3982e984fd54a9eba9c26b1c2290ecc622e360e72daa1e1efc28851859fe",
+        "c0-completed-mock:revision": "66c1d2fd81243cd4ef72db7da324d77f5a44604902e0e4d737dd80221cccafa9",
+        "c0-completed-mock:2:await-original": "cd8f1407fd97d66bff5a877e65d8c2fba637e1cc395147b241517660606275ea"
+      }
+    }
+  ]
+}

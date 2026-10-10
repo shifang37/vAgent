@@ -1,0 +1,160 @@
+{
+    "schemaVersion": 1,
+    "projects": {
+        "coffee": {
+            "id": "coffee",
+            "revision": 0,
+            "goal": "",
+            "audience": "",
+            "style": "",
+            "constraints": [],
+            "plan": []
+        }
+    },
+    "sessions": {
+        "coffee": {
+            "id": "coffee",
+            "messages": [
+                {
+                    "type": "human",
+                    "data": {
+                        "content": "原始需求",
+                        "additional_kwargs": {},
+                        "response_metadata": {},
+                        "type": "human",
+                        "name": null,
+                        "id": null
+                    }
+                }
+            ],
+            "latestRunId": "video-run"
+        }
+    },
+    "artifacts": {
+        "b7c2a701-655b-495d-9f85-63314942f5c9": {
+            "id": "b7c2a701-655b-495d-9f85-63314942f5c9",
+            "projectId": "coffee",
+            "kind": "brief",
+            "versions": [
+                {
+                    "version": 1,
+                    "title": "旧标题",
+                    "content": "旧正文",
+                    "createdAt": "2026-10-10T07:30:16.684516+00:00",
+                    "contentCheck": {
+                        "characters": 3,
+                        "maxCharacters": null,
+                        "method": "unicode_non_whitespace_v1"
+                    }
+                },
+                {
+                    "version": 2,
+                    "title": "旧标题",
+                    "content": "新正文",
+                    "createdAt": "2026-10-10T07:30:16.687023+00:00",
+                    "contentCheck": {
+                        "characters": 3,
+                        "maxCharacters": null,
+                        "method": "unicode_non_whitespace_v1"
+                    }
+                }
+            ]
+        }
+    },
+    "runs": {
+        "video-run": {
+            "id": "video-run",
+            "sessionId": "coffee",
+            "requestId": "video-run",
+            "prompt": "offline video fixture",
+            "model": "no-model",
+            "status": "failed",
+            "messages": [
+                {
+                    "type": "human",
+                    "data": {
+                        "content": "原始需求",
+                        "additional_kwargs": {},
+                        "response_metadata": {},
+                        "type": "human",
+                        "name": null,
+                        "id": null
+                    }
+                }
+            ],
+            "modelSteps": 1,
+            "toolCalls": 2,
+            "inputTokens": 37,
+            "outputTokens": 5,
+            "contextBytes": 0,
+            "droppedMessages": 0,
+            "answer": "",
+            "errorCode": null,
+            "createdAt": "2030-01-01T00:00:00+00:00",
+            "updatedAt": "2030-01-01T00:00:00+00:00",
+            "executionVersion": 1,
+            "contextSignature": "original-signature",
+            "contextVersion": 2,
+            "policy": null,
+            "resumable": false,
+            "activeSeconds": 12.5,
+            "inFlightSeconds": 0,
+            "toolCallKeys": [
+                "original-save",
+                "original-update"
+            ],
+            "usageStartStep": null,
+            "modelCalls": [
+                {
+                    "step": 1,
+                    "status": "responded",
+                    "startedAt": "2030-01-01T00:00:00Z",
+                    "inputTokens": 37,
+                    "outputTokens": 5,
+                    "cacheHitTokens": 20,
+                    "cacheMissTokens": 17,
+                    "cacheUsageSource": "reported"
+                }
+            ],
+            "readOnly": false,
+            "answerCache": {},
+            "events": []
+        }
+    },
+    "operations": {
+        "original-save": {
+            "fingerprint": "743c5e22780a0fe6d36b81ece0c968d60692d8820c09f88cfa209ce73e631271",
+            "result": {
+                "ok": true,
+                "data": {
+                    "artifactId": "b7c2a701-655b-495d-9f85-63314942f5c9",
+                    "version": 1,
+                    "title": "旧标题",
+                    "persisted": true,
+                    "contentCheck": {
+                        "characters": 3,
+                        "maxCharacters": null,
+                        "method": "unicode_non_whitespace_v1"
+                    }
+                }
+            }
+        },
+        "original-update": {
+            "fingerprint": "ea63348557766fe80d704e439219ebe57831943fdc838253c50cb4eb0187fda2",
+            "result": {
+                "ok": true,
+                "data": {
+                    "artifactId": "b7c2a701-655b-495d-9f85-63314942f5c9",
+                    "version": 2,
+                    "title": "旧标题",
+                    "persisted": true,
+                    "contentCheck": {
+                        "characters": 3,
+                        "maxCharacters": null,
+                        "method": "unicode_non_whitespace_v1"
+                    }
+                }
+            }
+        }
+    }
+}
