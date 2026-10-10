@@ -39,7 +39,7 @@ MP4 检查是结构、样本边界和规格校验，不包含运行时转码或�
 
 ## 3. 自动化验证
 
-最终 Windows / Python 3.12.14 全量回归：**759 passed，2 skipped，181.71 秒**。两项跳过均因当前 Windows 账号无符号链接创建权限；Windows junction 拒绝测试通过。Ruff lint/format、前端语法检查及 **11 项前端状态测试**通过。输入校验及 Web 文件线程调整后的 API/应用/CLI 定向回归为 **34 passed**，随后已纳入上述全量结果。
+最终 Windows / Python 3.12.14 全量回归：**762 passed，2 skipped，166.38 秒**。两项跳过均因当前 Windows 账号无符号链接创建权限；Windows junction 拒绝测试通过。Ruff lint/format、前端语法检查及 **11 项前端状态测试**通过。输入校验及 Web 文件线程调整后的 API/应用/CLI 定向回归为 **34 passed**，粗时钟预算修复定向回归为 **42 passed**，均已纳入上述最终全量结果。
 
 | 测试 | 核验内容 |
 |---|---|
@@ -49,9 +49,12 @@ MP4 检查是结构、样本边界和规格校验，不包含运行时转码或�
 | [test_media_recovery.py](../tests/test_media_recovery.py) | 6 个实际进程退出点、索引写失败、磁盘/权限/路径/冲突、取消关闭、同哈希修复和不可变历史 |
 | [test_media_api.py](../tests/test_media_api.py) | GET/HEAD/Range/If-Range、下载、410 与 revision、严格重试/CSRF/幂等、断开清理与同源边界 |
 | [test_media_application.py](../tests/test_media_application.py)、[test_media_cli.py](../tests/test_media_cli.py) | 原 Run 等待交付、停止/超时/重启、设置零生成、CLI 原下载恢复与客户端退出 |
+| [test_resume.py](../tests/test_resume.py) | execution v1/v2 在粗粒度时钟下恢复耗尽的原预算，不增加模型步骤或发出模型请求 |
 | [test_job_state.mjs](../tests/test_job_state.mjs) 与历史套件 | 当前可用性控制播放入口、修复与旧响应保护，M1-A/B/C1 历史指纹、迁移、等待/恢复与文本功能兼容 |
 
 6 个媒体强退点为：下载意图后、写入中、文件已校验但准备记录未保存、准备记录已保存、最终文件已发布、索引已提交。均用实际子进程退出验证；重启保持原 ID 与一次提交。已有等待领取/交付强退测试继续随全量回归运行。
+
+首轮远端 [运行 38048540125](https://github.com/shifang37/vAgent/actions/runs/38048540125) 保留：Ubuntu 两组通过；Windows/Python 3.11 的原有恢复预算测试失败（1 failed、759 passed、1 skipped），Windows/Python 3.12 被矩阵提前停止取消。固定单调时钟后已在本地复现：先加预算再减已用时间会残留极小正数，导致已耗尽的 Run 仍可登记模型步骤。改为先计算剩余预算，再加时钟起点；未改变存储、签名或原 Run 限额。恢复、Runner 和媒体应用的修复定向回归 42 项通过。首轮日志保存在被忽略的 `output/m1c-c2-ci/windows311-first-auth.log`。
 
 复现命令：
 
@@ -85,6 +88,8 @@ node --test tests/test_job_state.mjs
 `python -m build --no-isolation --outdir dist/m1c-c2` 已成功生成 `shifang37_vagent-0.2.0-py3-none-any.whl` 与 `shifang37_vagent-0.2.0.tar.gz`。核对 wheel 中的 5 个新媒体模块、Web 资源与工作区源码一致，sdist 中 MP4 夹具的 SHA-256 保持原样。
 
 新建独立虚拟环境 `tmp/m1c-c2-wheel-env/`，安装 `requirements-dev.lock` 和上述 wheel；仓库外 `scripts/wheel_smoke.py` 与 `pip check` 均通过，开发环境的 editable 安装未替换。证据保存为被忽略的 `output/m1c-c2-wheel-smoke.json`，确认导入来自独立 site-packages，覆盖文本/质量/流式、Web 资源、配置脱敏、MCP、Mock 工具、持久等待跨重启续接原 Run、CLI 查询/用量、五类 M1-B 离线套件与清理。C3 专门的安装媒体评测仍待实施。
+
+粗时钟预算修复后重新构建并安装 wheel，安装 smoke 与依赖检查再次通过；新报告为 `output/m1c-c2-wheel-smoke-budget-fix.json`，保留首次报告。
 
 仓库既有 Actions 对 Ubuntu/Windows × Python 3.11/3.12 执行 lint、前端检查、pytest、构建和仓库外 smoke；远端结果以 [C2 分支运行记录](https://github.com/shifang37/vAgent/actions?query=branch%3Acodex%2Fm1c-c2) 为准，本地通过不替代远端状态。
 

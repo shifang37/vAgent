@@ -3,6 +3,7 @@ import json
 import os
 import subprocess
 import sys
+from types import SimpleNamespace
 
 import pytest
 from conftest import ScriptedModel, tool_call
@@ -159,11 +160,24 @@ async def test_resume_keeps_original_step_limit_even_with_larger_new_policy(stor
         await resumed.resume(first["id"])
 
 
-async def test_resume_keeps_spent_time_and_does_not_call_model(store):
-    first = await runner(store, fail).run("coffee", "test")
+@pytest.mark.parametrize("frozen_tick", [None, 100.002])
+@pytest.mark.parametrize("execution_version", [1, 2])
+async def test_resume_keeps_spent_time_and_does_not_call_model(
+    store, monkeypatch, frozen_tick, execution_version
+):
+    first = await runner(store, fail, execution_version=execution_version).run("coffee", "test")
     store.transaction(lambda draft: draft["runs"][first["id"]].update(activeSeconds=180.0))
+    if frozen_tick is not None:
+        # Model the same coarse monotonic tick across resume. Do not freeze the
+        # event loop's real clock, which still schedules checkpoint I/O normally.
+        clock = SimpleNamespace(monotonic=lambda: frozen_tick)
+        monkeypatch.setattr("vagent.runner.time", clock)
+        monkeypatch.setattr("vagent.journal.time", clock)
     resumed = runner(
-        store, lambda *_: AIMessage(content="must not happen"), policy=RunPolicy(timeout_seconds=900)
+        store,
+        lambda *_: AIMessage(content="must not happen"),
+        policy=RunPolicy(timeout_seconds=900),
+        execution_version=execution_version,
     )
     result = await resumed.resume(first["id"])
     assert result["errorCode"] == "TIMEOUT" and not result["resumable"]

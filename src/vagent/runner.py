@@ -462,7 +462,9 @@ class AgentRunner:
         journal = RunJournal(store, record["id"], active=not (resume and durable_waits))
         waits = WaitService(store, clock=self.clock, on_event=self.emit)
         cancelled = cancelled if cancelled is not None else asyncio.Event()
-        deadline = time.monotonic() + policy.timeout_seconds - journal.previous_seconds
+        # Subtract spent time first: an exhausted budget must stay exactly zero
+        # even when several checks observe the same coarse monotonic clock tick.
+        deadline = time.monotonic() + (policy.timeout_seconds - journal.previous_seconds)
         initial: GraphState = {
             "messages": messages_from_dict(record["messages"]),
             "status": "running",
@@ -988,7 +990,7 @@ class AgentRunner:
                                 validate_auto_budget()
                             journal.update(status="running", errorCode=None, answer="", waitResumeError=None)
                         journal.restart()
-                        deadline = journal.started + policy.timeout_seconds - journal.previous_seconds
+                        deadline = journal.started + (policy.timeout_seconds - journal.previous_seconds)
                 self.emit({"type": "run.resumed" if resume else "run.started", "runId": record["id"]})
                 invoked = True
                 latest = await compiled.ainvoke(command, config, durability="sync")

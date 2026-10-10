@@ -405,9 +405,11 @@ node --test tests/test_job_state.mjs
 .\.venv\Scripts\python.exe -m build --no-isolation --outdir dist/python
 ```
 
-2026-10-10 C2 本地 Python 3.12.14 完整回归：**759 passed，2 skipped**，另有 **11 项前端状态测试通过**，Ruff 与前端语法检查通过。两项跳过因当前 Windows 账户无符号链接创建权限；junction 路径保护测试通过。新增媒体来源/传输/MP4/原子提交、6 个媒体强退点、持久下载/修复、Range、设置与等待验证，M1-A/B/C1 的兼容套件保持通过。Chrome 155 已验证测试视频播放、拖动、下载、刷新与同 ID 修复；范围见 [C2 验收](./docs/M1C_C2_ACCEPTANCE.md)，此前 C1 证据保留在 [C1 验收](./docs/M1C_C1_ACCEPTANCE.md)。Node 仅用于开发检查，运行 Agent 无需安装。
+2026-10-10 C2 本地 Python 3.12.14 完整回归：**762 passed，2 skipped**，另有 **11 项前端状态测试通过**，Ruff 与前端语法检查通过。两项跳过因当前 Windows 账户无符号链接创建权限；junction 路径保护测试通过。新增媒体来源/传输/MP4/原子提交、6 个媒体强退点、持久下载/修复、Range、设置与等待验证，M1-A/B/C1 的兼容套件保持通过。Chrome 155 已验证测试视频播放、拖动、下载、刷新与同 ID 修复；范围见 [C2 验收](./docs/M1C_C2_ACCEPTANCE.md)，此前 C1 证据保留在 [C1 验收](./docs/M1C_C1_ACCEPTANCE.md)。Node 仅用于开发检查，运行 Agent 无需安装。
 
-C2 的 wheel/sdist 位于 `dist/m1c-c2/`，新建独立环境安装锁定依赖与 wheel 后，仓库外 `scripts/wheel_smoke.py` 和 `pip check` 均通过。安装记录为被忽略的 `output/m1c-c2-wheel-smoke.json`，覆盖已有文本、Mock、配置、MCP、持久等待和退出；包内媒体模块/Web 资源与源码一致，sdist 保留视频夹具原 SHA-256。专项安装媒体评测与真实联调仍属于 C3。远端检查按 [C2 分支 Actions](https://github.com/shifang37/vAgent/actions?query=branch%3Acodex%2Fm1c-c2) 的实际运行结果查看。
+C2 收尾修正了粗粒度单调时钟下的恢复预算边界：先扣除已用时间，再计算截止时间，避免预算恰好耗尽时因浮点余差多登记模型步骤。固定时钟用例覆盖 execution v1/v2，恢复、Runner 和媒体应用定向回归 42 项通过；首轮远端失败及后续结果见 [C2 验收](./docs/M1C_C2_ACCEPTANCE.md)。
+
+C2 的 wheel/sdist 位于 `dist/m1c-c2/`，新建独立环境安装锁定依赖与 wheel 后，仓库外 `scripts/wheel_smoke.py` 和 `pip check` 均通过；预算修复后的新包也已重新安装并通过。记录保存在被忽略的 `output/m1c-c2-wheel-smoke.json` 和 `output/m1c-c2-wheel-smoke-budget-fix.json`，覆盖已有文本、Mock、配置、MCP、持久等待和退出；包内媒体模块/Web 资源与源码一致，sdist 保留视频夹具原 SHA-256。专项安装媒体评测与真实联调仍属于 C3。远端检查按 [C2 分支 Actions](https://github.com/shifang37/vAgent/actions?query=branch%3Acodex%2Fm1c-c2) 的实际运行结果查看。
 
 M1-B 固定评测默认离线，通过完整应用入口执行五类用例；`--live` 才调用真实 DeepSeek，视频始终使用 Mock。套件最多 40 次模型尝试，每个 Run 沿用 8/12/180 预算。首个失败即停止，显式续跑校验原数据与检查点，保留原 Run、累计预算和旧报告；不能通过续跑提高上限。
 
