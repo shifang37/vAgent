@@ -111,6 +111,26 @@ async def test_shared_service_waits_and_delivers_original_tool_result_once(tmp_p
         assert await service.wait_for_run(result["id"]) == result
 
 
+async def test_run_wait_preserves_cancellation_when_notification_is_ready(tmp_path, job_runtime):
+    model = JobModel()
+    async with ApplicationService.open(
+        Config(home=tmp_path, api_key=None, video_mode="mock"), model=model
+    ) as service:
+        model.configure(job_runtime)
+        first = await service.start("coffee", "等待取消", "cancel-notification")
+        await service.task
+        assert service.run_record(first["id"])["status"] == "waiting_external"
+        waiter = asyncio.create_task(service.wait_for_run(first["id"]))
+        await eventually(lambda: service.subscribers)
+        # Make the notification ready in the same loop turn as external cancellation.
+        service.notify("coffee")
+        waiter.cancel()
+        with pytest.raises(asyncio.CancelledError):
+            await asyncio.wait_for(waiter, 1)
+        assert not service.subscribers
+        assert service.run_record(first["id"])["status"] == "waiting_external"
+
+
 async def test_shutdown_preserves_wait_then_missing_key_keeps_job_result_for_explicit_resume(
     tmp_path, job_runtime
 ):

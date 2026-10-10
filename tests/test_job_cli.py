@@ -240,21 +240,25 @@ async def test_chat_input_yields_to_worker_then_exit_releases_background_tasks(
 
 
 @pytest.mark.parametrize(
-    "mode",
+    "mode,queries_before_run",
     [
-        "work",
-        "run",
+        pytest.param("work", 0, id="work"),
+        pytest.param("run", 0, id="run"),
+        pytest.param("run", 2, id="run-after-polls"),
         pytest.param(
-            "chat", marks=pytest.mark.skipif(sys.platform != "win32", reason="Windows console fixture")
+            "chat",
+            0,
+            id="chat",
+            marks=pytest.mark.skipif(sys.platform != "win32", reason="Windows console fixture"),
         ),
     ],
 )
-def test_cli_sigint_subprocess_saves_jobs_and_releases_lock(tmp_path, mode):
+def test_cli_sigint_subprocess_saves_jobs_and_releases_lock(tmp_path, mode, queries_before_run):
     home = tmp_path / "state"
     job_id = seed_job(home)
     script = Path(__file__).with_name("job_cli_process.py")
     result = subprocess.run(
-        [sys.executable, str(script), mode, job_id],
+        [sys.executable, str(script), mode, job_id, str(queries_before_run)],
         cwd=tmp_path,
         env=environment(home),
         capture_output=True,
@@ -271,7 +275,11 @@ def test_cli_sigint_subprocess_saves_jobs_and_releases_lock(tmp_path, mode):
         if mode == "run":
             run = next(run for run in state["runs"].values() if run["id"] != "video-run")
             assert run["status"] == "cancelled"
+            assert run["modelSteps"] == run["toolCalls"] == 1
+            assert len(run["modelCalls"]) == 1
             assert not state["waits"][run["activeWaitId"]]["autoResume"]
+            assert state["jobs"][job_id]["status"] == "queued"
+            assert state["jobs"][job_id]["queryAttempts"] >= queries_before_run
         else:
             assert len(state["runs"]) == 1 and not state["waits"]
             assert state["jobs"][job_id]["status"] == "queued"

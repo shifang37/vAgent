@@ -184,7 +184,9 @@ class ApplicationService:
                         raise AppError("BACKGROUND_STOPPED", "后台工作循环已退出，任务状态已保留。")
                 try:
                     # Re-read durable state after notification loss or a missed startup event.
-                    await asyncio.wait_for(queue.get(), timeout=0.5)
+                    # A timeout scope preserves simultaneous cancellation on Python 3.11.
+                    async with asyncio.timeout(0.5):
+                        await queue.get()
                 except TimeoutError:
                     pass
         finally:
