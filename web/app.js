@@ -1,4 +1,4 @@
-import { mergeJobs, upsertJob } from "./job-state.js";
+import { mediaContentPath, mergeJobs, upsertJob } from "./job-state.js";
 
 const $ = (selector) => document.querySelector(selector);
 const paths = {
@@ -273,12 +273,15 @@ function jobCard(job, expanded) {
   const live = job.mode === "live";
   const statusNames = live ? {
     pending_submit: "待提交", submitting: "正在提交", queued: job.lastProviderStatus ? "云端排队中" : "已受理，等待查询",
-    running: "云端生成中", downloading: "等待本地下载", download_failed: "下载失败",
+    running: "云端生成中", downloading: job.download?.phase === "writing" ? "正在下载" : "等待下载", download_failed: "下载失败",
     succeeded: "已完成", failed: "任务失败", unknown: "提交待核实",
   } : jobStatusNames;
   const paused = job.queryState === "paused", retrying = job.queryState === "retrying";
-  const state = job.runtimeBlock ? "需要处理" : paused ? "查询已暂停" : retrying ? "查询重试中" : statusNames[job.status] || job.status;
-  const tone = paused || retrying || job.status === "unknown" ? "attention" : job.status;
+  const repairing = job.download?.repair && ["pending", "writing", "prepared"].includes(job.download.phase);
+  const state = job.runtimeBlock ? "需要处理" : paused ? "查询已暂停" : retrying ? "查询重试中"
+    : repairing ? "正在修复下载" : live && job.status === "succeeded" && !job.mediaAvailable ? "媒体不可用"
+    : statusNames[job.status] || job.status;
+  const tone = paused || retrying || job.status === "unknown" || (live && job.status === "succeeded" && !job.mediaAvailable) ? "attention" : job.status;
   const sources = (request.sourceRefs || []).map((ref) => {
     const artifact = snapshot?.artifacts.find((item) => item.id === ref.artifactId);
     const title = artifact?.versions.find((item) => item.version === ref.version)?.title || ref.artifactId;
@@ -287,9 +290,11 @@ function jobCard(job, expanded) {
   const notice = paused || retrying
     ? `最近确认状态：${statusNames[job.status] || job.status}。${paused ? "恢复查询后可继续获取结果。" : "正在重试状态查询。"}`
     : job.status === "unknown" ? "提交结果尚未确认，需要核实。任务不会自动重新提交。"
-    : live && job.status === "downloading" ? "云端已生成，等待本地交付。当前版本尚未提供媒体下载，暂时无法播放。"
+    : live && job.status === "downloading" ? "云端已生成，正在保存和校验本地媒体。完成后可播放、拖动和下载。"
     : job.status === "succeeded" ? (live ? (job.mediaAvailable ? "本地媒体已交付。" : "本地媒体当前不可用。") : "模拟流程已完成，仅提供结果描述，无可播放或下载的视频。")
     : ["pending_submit", "submitting", "queued", "running"].includes(job.status) ? "服务运行期间持续推进，关闭页面不影响任务。" : "";
+  const mediaPath = mediaContentPath(job);
+  const downloadError = job.download?.error;
   return `<article class="job-card" data-job-id="${escapeHTML(job.jobId)}">
     <div class="job-heading"><strong><span data-icon="film"></span>${live ? "真实视频任务" : "模拟视频任务"}</strong><span class="job-state ${escapeHTML(tone)}">${escapeHTML(state)}</span></div>
     <p class="job-id">Job <code>${escapeHTML(job.jobId)}</code></p>
@@ -297,11 +302,14 @@ function jobCard(job, expanded) {
     ${job.cost ? `<p class="job-notice">生成估算：${escapeHTML(job.cost.estimate.amount)} ${escapeHTML(job.cost.estimate.currency)} · 实际费用：${job.cost.actual.status === "reported" ? escapeHTML(job.cost.actual.amount) + " CNY" : "未知，待账单核实"}</p>` : ""}
     <p class="job-sources">来源：${sources}</p>
     <details class="job-request" ${expanded ? "open" : ""}><summary>生成提示词</summary><p>${escapeHTML(request.prompt)}</p></details>
-    ${job.result ? `<p class="job-result">${escapeHTML(job.result.summary)}</p>` : ""}
+    ${job.result && (!live || job.mediaAvailable) ? `<p class="job-result">${escapeHTML(job.result.summary)}</p>` : ""}
+    ${mediaPath ? `<div class="job-media" data-media-id="${escapeHTML(job.mediaRefs[0].mediaId)}"><video controls preload="metadata" playsinline src="${mediaPath}" aria-label="生成的视频"></video><div class="media-controls"><small class="media-state" role="status">正在读取视频信息…</small><a class="secondary" href="${mediaPath}?download=1" download="${escapeHTML(job.mediaRefs[0].mediaId)}.mp4">下载 MP4</a></div></div>` : ""}
     ${notice ? `<p class="job-notice">${escapeHTML(notice)}</p>` : ""}
+    ${job.download ? `<p class="job-notice">累计下载 ${job.download.attempts} 次${job.download.nextAttemptAt ? ` · 下次尝试 ${escapeHTML(new Date(job.download.nextAttemptAt).toLocaleString())}` : ""}${repairing ? " · 沿用原媒体 ID，校验原文件哈希" : ""}</p>` : ""}
     ${job.error ? `<p class="job-error">${escapeHTML({ submit: "提交", query: "查询", generate: "生成", download: "下载" }[job.error.stage] || job.error.stage)} · ${escapeHTML(job.error.code)}<br>${escapeHTML(job.error.message)}</p>` : ""}
     ${job.runtimeBlock ? `<p class="job-error">${escapeHTML(job.runtimeBlock.code)} · ${escapeHTML(job.runtimeBlock.message)}</p>` : ""}
-    <div class="job-footer"><small>更新于 ${escapeHTML(new Date(job.updatedAt).toLocaleString())}</small>${job.canRetryQuery ? `<button class="secondary" data-retry-job="${escapeHTML(job.jobId)}" ${retryingJobs.has(job.jobId) ? "disabled" : ""}>${retryingJobs.has(job.jobId) ? "正在恢复…" : "恢复查询"}</button>` : ""}</div>
+    ${downloadError && downloadError.code !== job.error?.code ? `<p class="job-error">下载 · ${escapeHTML(downloadError.code)}<br>${escapeHTML(downloadError.message)}</p>` : ""}
+    <div class="job-footer"><small>更新于 ${escapeHTML(new Date(job.updatedAt).toLocaleString())}</small>${job.canRetryQuery ? `<button class="secondary" data-retry-job="${escapeHTML(job.jobId)}" ${retryingJobs.has(job.jobId) ? "disabled" : ""}>${retryingJobs.has(job.jobId) ? "正在恢复…" : "恢复查询"}</button>` : ""}${job.canRetryDownload ? `<button class="secondary" data-retry-download="${escapeHTML(job.jobId)}" ${retryingJobs.has(job.jobId) ? "disabled" : ""}>${retryingJobs.has(job.jobId) ? "正在恢复…" : "重试原下载"}</button>` : ""}</div>
   </article>`;
 }
 function renderJobs() {
@@ -311,10 +319,51 @@ function renderJobs() {
     .filter((card) => card.querySelector("details")?.open).map((card) => card.dataset.jobId));
   const conversation = $("#conversation");
   const followLatest = conversation.scrollHeight - conversation.scrollTop - conversation.clientHeight < 80;
-  list.innerHTML = (snapshot?.jobs || []).map((job) => jobCard(job, expanded.has(job.jobId))).join("");
+  const retained = new Set();
+  for (const [index, job] of (snapshot?.jobs || []).entries()) {
+    const template = document.createElement("template");
+    template.innerHTML = jobCard(job, expanded.has(job.jobId));
+    const next = template.content.firstElementChild;
+    let card = [...list.children].find((node) => node.dataset.jobId === job.jobId);
+    if (!card) card = next;
+    else {
+      const media = card.querySelector(".job-media"), incoming = next.querySelector(".job-media");
+      if (media && incoming && media.dataset.mediaId === incoming.dataset.mediaId) {
+        // Keep the playing video connected to the DOM while other Job fields change.
+        for (const node of [...card.children]) if (node !== media) node.remove();
+        while (next.firstElementChild !== incoming) media.before(next.firstElementChild);
+        incoming.remove();
+        card.append(...next.children);
+      } else card.replaceChildren(...next.children);
+    }
+    if (list.children[index] !== card) list.insertBefore(card, list.children[index] || null);
+    retained.add(card);
+    bindMedia(card, job);
+  }
+  for (const node of [...list.children]) if (!retained.has(node)) node.remove();
   list.hidden = !snapshot?.jobs?.length;
   icons(list);
   if (followLatest) conversation.scrollTop = conversation.scrollHeight;
+}
+function bindMedia(card, job) {
+  const video = card.querySelector("video");
+  if (!video || video.dataset.bound) return;
+  video.dataset.bound = "true";
+  const status = card.querySelector(".media-state");
+  video.addEventListener("loadedmetadata", () => {
+    status.textContent = `${video.videoWidth} × ${video.videoHeight} · ${video.duration.toFixed(1)} 秒`;
+  });
+  video.addEventListener("error", async () => {
+    status.textContent = "视频暂时无法播放，正在核对本地文件…";
+    try {
+      const current = await api(`/api/jobs/${encodeURIComponent(job.jobId)}`);
+      if (snapshot && current.sessionId === activeId) {
+        snapshot.jobs = upsertJob(snapshot.jobs || [], current, activeId);
+        if (!current.mediaAvailable) { renderJobs(); return; }
+      }
+      status.textContent = "浏览器无法播放此文件，可下载 MP4 检查。";
+    } catch { status.textContent = "无法读取本地视频，请检查服务连接。"; }
+  });
 }
 function draftHTML() {
   return snapshot?.draft?.text
@@ -354,15 +403,20 @@ function render() {
     : "新项目";
   const detailsOpen = $("#conversation .run-details")?.open;
   const oldJobs = $("#job-list");
-  $("#conversation").innerHTML =
+  const transcript =
     (snapshot?.messages || [])
       .map(
         (m) =>
           `<div class="message ${m.role === "user" ? "user" : ""}">${m.role === "assistant" ? '<div class="agent-name"><img src="./mark.svg" alt="" />vagent <span class="demo-label">Agent 回复</span></div>' : ""}${escapeHTML(m.text)}</div>`,
       )
       .join("") + draftHTML() + (snapshot?.artifacts || []).map(artifactCard).join("");
-  if (oldJobs) conversation.append(oldJobs);
-  else conversation.insertAdjacentHTML("beforeend", '<section id="job-list" class="job-list" aria-label="视频任务" hidden></section>');
+  if (oldJobs) {
+    // Reconnect snapshots and Run completion must not detach a playing video.
+    for (const node of [...conversation.children]) if (node !== oldJobs) node.remove();
+    oldJobs.insertAdjacentHTML("beforebegin", transcript);
+  } else {
+    conversation.innerHTML = transcript + '<section id="job-list" class="job-list" aria-label="视频任务" hidden></section>';
+  }
   renderJobs();
   const run = currentRun();
   if (run) {
@@ -448,43 +502,74 @@ async function showSettings() {
 }
 function renderSettings(config, notice = "") {
   const sources = { environment: "环境变量 / .env", provided: "启动配置", local: "本地配置", default: "默认值", unset: "未配置" };
+  const videoFields = [
+    ["videoMode", "视频模式", [["off", "off · 仅文本创作"], ["mock", "mock · 模拟任务"], ["live", "live · 真实视频"]]],
+    ["videoProvider", "供应商", [["wan", "阿里云百炼万相"]]],
+    ["videoModel", "视频模型", [["wan2.7-t2v-2026-06-12", "wan2.7-t2v-2026-06-12"]]],
+    ["videoRegion", "地域", [["cn-beijing", "北京 · cn-beijing"]]],
+    ["videoWorkspaceId", "业务空间 ID", null],
+    ["videoMaxJobCost", "单任务估算金额上限（CNY）", null],
+  ];
   const validation = config.validation;
   const status = { unverified: "尚未验证", validating: "正在验证", verified: "连接已验证", failed: "验证失败" }[validation.status];
   const generation = openDialog("Agent 连接与配置", `
     <p>DeepSeek 配置保存在本机，下次执行即可生效；视频配置需重启。环境变量和 .env 优先，由启动配置提供的字段需在原处修改。</p>
-    <p>视频模式：${config.videoMode === "live" ? "live（真实生成，本地交付尚未开放）" : config.videoMode === "mock" ? "mock（模拟，无真实媒体）" : "off（未启用）"} · ${sources[config.sources.videoMode] || "启动配置"}。视频配置在重启后生效。${config.restartRequired ? "已有保存的修改，等待重启。" : ""}</p>
-    ${config.videoMode === "live" ? `<p>视频 Key：${config.videoApiKeyConfigured ? "已配置，权限未验证" : "未配置"} · 单 Job 估算金额上限：${escapeHTML(config.videoMaxJobCost)} CNY。视频配置可通过本地配置文件或环境变量设置，保存不会生成视频。</p>` : ""}
     <form id="settings-form">
+      <fieldset><legend>DeepSeek 文本创作</legend>
       <label for="config-key">DeepSeek API Key · ${sources[config.sources.apiKey] || "启动配置"}
         <input id="config-key" type="password" autocomplete="new-password" maxlength="512" spellcheck="false" autocapitalize="off" placeholder="${config.apiKeyConfigured ? "已配置，留空保持" : "输入 API Key"}" ${!config.editable.apiKey || config.busy ? "disabled" : ""}>
       </label>
       <label for="config-model">模型 · ${sources[config.sources.model] || "启动配置"}
         <input id="config-model" value="${escapeHTML(config.model)}" maxlength="100" required spellcheck="false" ${!config.editable.model || config.busy ? "disabled" : ""}>
       </label>
+      ${config.editable.apiKey && config.apiKeyConfigured ? `<button type="button" class="secondary" data-config="clear" ${config.busy ? "disabled" : ""}>移除 DeepSeek 密钥</button>` : ""}
+      </fieldset>
+      <fieldset><legend>视频生成</legend>
+      <p>当前运行：${escapeHTML(config.activeVideoMode)} · 已保存：${escapeHTML(config.videoMode)}。${config.restartRequired ? "修改将在重启服务后生效。" : "视频配置需重启生效。"}</p>
+      <div class="video-settings-grid">${videoFields.map(([field, label, options]) => {
+        const disabled = !config.editable[field] || config.busy ? "disabled" : "";
+        return `<label for="config-${field}">${label} · ${sources[config.sources[field]] || "启动配置"}${options
+          ? `<select id="config-${field}" data-video-field="${field}" ${disabled}>${options.map(([value, text]) => `<option value="${value}" ${config[field] === value ? "selected" : ""}>${text}</option>`).join("")}</select>`
+          : `<input id="config-${field}" data-video-field="${field}" value="${escapeHTML(config[field] || "")}" ${field === "videoMaxJobCost" ? 'type="number" min="0" step="0.01" required' : 'type="text" maxlength="63" spellcheck="false" autocapitalize="off"'} ${disabled}>`}</label>`;
+      }).join("")}</div>
+      <label for="config-video-key">万相 API Key · ${sources[config.sources.videoApiKey] || "启动配置"}
+        <input id="config-video-key" type="password" autocomplete="new-password" maxlength="512" spellcheck="false" autocapitalize="off" placeholder="${config.videoApiKeyConfigured ? "已配置，留空保持" : "输入视频专用 API Key"}" ${!config.editable.videoApiKey || config.busy ? "disabled" : ""}>
+      </label>
+      <p>视频权限：${config.videoApiKeyConfigured ? "已配置，尚未验证账号权限" : "未配置视频密钥"}。保存不会生成视频。</p>
+      <p>固定规格：5 秒 · 720P · 16:9。${config.videoEstimate ? `每次生成估算 ${escapeHTML(config.videoEstimate.amount)} CNY；单价 ${escapeHTML(config.videoEstimate.unitPrice)} CNY/秒（核实于 ${escapeHTML(config.videoEstimate.checkedAt)}）。实际费用以账单为准。` : "当前没有可用报价，不能提交真实生成。"}</p>
+      ${config.editable.videoApiKey && config.videoApiKeyConfigured ? `<button type="button" class="secondary" data-config="clear-video" ${config.busy ? "disabled" : ""}>移除视频密钥</button>` : ""}
+      </fieldset>
       <p id="config-status" role="status">${escapeHTML(notice || (config.busy ? "请等待当前执行或验证结束。" : `${config.apiKeyConfigured ? "密钥已配置" : "密钥未配置"} · ${status}`))}${validation.checkedAt ? `<br>上次验证：${escapeHTML(new Date(validation.checkedAt).toLocaleString())}` : ""}</p>
-      <p>保存不调用模型。「保存并验证」会发起一次简短模型请求，可能产生少量费用。验证状态在服务重启后重置。</p>
+      <p>保存不调用模型。「保存并验证 DeepSeek」会发起一次简短文本模型请求，可能产生少量费用。验证状态在服务重启后重置。</p>
       <div class="actions config-actions">
-        ${config.editable.apiKey && config.apiKeyConfigured ? `<button type="button" class="secondary" data-config="clear" ${config.busy ? "disabled" : ""}>移除密钥</button>` : ""}
         <button type="submit" class="secondary" ${config.busy ? "disabled" : ""}>保存</button>
-        <button type="button" class="primary" data-config="validate" ${config.busy ? "disabled" : ""}>保存并验证</button>
+        <button type="button" class="primary" data-config="validate" ${config.busy ? "disabled" : ""}>保存并验证 DeepSeek</button>
       </div>
     </form>`);
   const form = $("#settings-form");
   async function submitConfiguration(action) {
     if (configSubmitting || config.busy) return;
-    if (action !== "clear" && !form.reportValidity()) return;
+    if (!["clear", "clear-video"].includes(action) && !form.reportValidity()) return;
     const update = {};
     const input = $("#config-key");
     const key = input.value.trim();
+    const videoInput = $("#config-video-key"), videoKey = videoInput.value.trim();
     input.value = "";
+    videoInput.value = "";
     if (action === "clear") update.clearApiKey = true;
+    else if (action === "clear-video") update.clearVideoApiKey = true;
     else {
       if (config.editable.apiKey && key) update.apiKey = key;
       const model = $("#config-model").value.trim();
       if (config.editable.model && model !== config.model) update.model = model;
+      if (config.editable.videoApiKey && videoKey) update.videoApiKey = videoKey;
+      for (const input of form.querySelectorAll("[data-video-field]")) {
+        const field = input.dataset.videoField, value = input.value.trim();
+        if (config.editable[field] && value !== (config[field] || "")) update[field] = value;
+      }
     }
     configSubmitting = true;
-    form.querySelectorAll("input, button").forEach((el) => { el.disabled = true; });
+    form.querySelectorAll("input, select, button").forEach((el) => { el.disabled = true; });
     $("#config-status").textContent = action === "validate" ? "正在保存并验证连接…" : "正在保存…";
     let result = config;
     let message;
@@ -493,7 +578,8 @@ function renderSettings(config, notice = "") {
         result = await api("/api/config", { method: "PATCH", body: JSON.stringify(update) });
       applyConfiguration(result);
       if (action === "validate") result = await post("/api/config/validate");
-      message = action === "validate" ? "连接已验证，可以开始创作。" : action === "clear" ? "本地密钥已移除。" : "配置已保存，下次执行生效。";
+      message = action === "validate" ? "DeepSeek 连接已验证。" : "配置已保存。";
+      if (result.restartRequired) message += "视频设置将在重启服务后生效。";
     } catch (error) {
       message = error.message;
       try { result = await api("/api/config"); } catch {}
@@ -610,8 +696,7 @@ $("#artifact-panel").addEventListener("change", (event) => {
     );
 });
 $("#dialog").addEventListener("close", () => {
-  const key = $("#config-key");
-  if (key) key.value = "";
+  $("#dialog").querySelectorAll('input[type="password"]').forEach((key) => { key.value = ""; });
 });
 document.addEventListener("click", async (event) => {
   try {
@@ -635,18 +720,27 @@ document.addEventListener("click", async (event) => {
       await showArtifact(artifact.dataset.artifact, Number(artifact.dataset.version) || undefined);
       return;
     }
-    const retry = event.target.closest("[data-retry-job]");
+    const retry = event.target.closest("[data-retry-job], [data-retry-download]");
     if (retry) {
-      const id = retry.dataset.retryJob, generation = viewGeneration;
+      const download = Boolean(retry.dataset.retryDownload);
+      const id = retry.dataset.retryDownload || retry.dataset.retryJob, generation = viewGeneration;
       if (retryingJobs.has(id)) return;
       retryingJobs.add(id);
       renderJobs();
       try {
-        const job = await post(`/api/jobs/${encodeURIComponent(id)}/retry-query`);
+        const current = snapshot?.jobs?.find((job) => job.jobId === id);
+        const request = download ? { clientRequestId: crypto.randomUUID(), expectedRevision: current.revision } : {};
+        const job = await post(`/api/jobs/${encodeURIComponent(id)}/${download ? "retry-download" : "retry-query"}`, request);
         if (generation === viewGeneration && snapshot) {
           snapshot.jobs = upsertJob(snapshot.jobs || [], job, activeId);
-          toast("已恢复原任务的状态查询。");
+          toast(download ? "已登记原媒体的下载恢复。" : "已恢复原任务的状态查询。");
         }
+      } catch (error) {
+        if (error.code === "JOB_REVISION_CONFLICT" && generation === viewGeneration && snapshot) {
+          const current = await api(`/api/jobs/${encodeURIComponent(id)}`);
+          snapshot.jobs = upsertJob(snapshot.jobs || [], current, activeId);
+        }
+        throw error;
       } finally {
         retryingJobs.delete(id);
         if (generation === viewGeneration) renderJobs();
@@ -681,7 +775,7 @@ document.addEventListener("click", async (event) => {
     if (action === "help")
       openDialog(
         "和 Agent 一起完成创作",
-        `<p>描述需求后，Agent 会按需读取 Skills、管理项目记忆、调用工具并保存方案。侧栏「编排观测」显示每次执行的上下文、工具结果和模型用量。</p><p>会话与产物保存在本机。可以停止执行并从检查点继续；旧版产物可在预览中切换。只读分析可读取和等待已有 Job，不能创建任务或修改产物。</p><p>${health?.videoMode === "live" ? "已启用真实视频生成，可能产生费用。云端生成成功后保留原任务，当前版本本地下载和播放尚未开放。停止 Agent 不会取消云端生成。" : health?.videoMode === "mock" ? "已启用模拟视频任务，只提供模拟结果描述，没有真实媒体。任务卡片会持续更新；停止 Agent 不会取消 Job，关闭页面不影响服务中的任务。查询暂停时可点击恢复查询。" : "当前视频模式为 off，不提供新的视频任务。已有 Job 仍可查看，服务会继续跟踪。"}</p><div class="actions"><button class="primary" data-action="close-dialog">开始创作</button></div>`,
+        `<p>描述需求后，Agent 会按需读取 Skills、管理项目记忆、调用工具并保存方案。侧栏「编排观测」显示每次执行的上下文、工具结果和模型用量。</p><p>会话与产物保存在本机。可以停止执行并从检查点继续；旧版产物可在预览中切换。只读分析可读取和等待已有 Job，不能创建任务或修改产物。</p><p>${health?.videoMode === "live" ? "已启用真实视频生成，可能产生费用。云端生成成功后下载并校验本地 MP4，可播放、拖动和下载；下载失败时可重试原任务。停止 Agent 不会取消云端生成。" : health?.videoMode === "mock" ? "已启用模拟视频任务，只提供模拟结果描述，没有真实媒体。任务卡片会持续更新；停止 Agent 不会取消 Job，关闭页面不影响服务中的任务。查询暂停时可点击恢复查询。" : "当前视频模式为 off，不提供新的视频任务。已有 Job 仍可查看，服务会继续跟踪。"}</p><div class="actions"><button class="primary" data-action="close-dialog">开始创作</button></div>`,
       );
     if (action === "settings") await showSettings();
     if (action === "library") {
@@ -731,10 +825,10 @@ async function initialize() {
     $("#skills-label").textContent =
       `${health.skills.length} Skills · ${health.mcp.length} MCP`;
     $("#video-mode-label").hidden = health.videoMode === "off";
-    $("#video-mode-label").textContent = health.videoMode === "live" ? "真实视频 · 本地交付待开放" : "模拟视频 · 无真实媒体";
+    $("#video-mode-label").textContent = health.videoMode === "live" ? "真实视频 · 本地 MP4" : "模拟视频 · 无真实媒体";
     $("#video-workflow").innerHTML = health.videoMode === "mock"
       ? "模拟视频任务 <small>无真实媒体</small>" : health.videoMode === "live"
-      ? "真实视频任务 <small>本地交付待开放</small>" : "视频生成 <small>未启用</small>";
+      ? "真实视频任务 <small>本地 MP4</small>" : "视频生成 <small>未启用</small>";
     $("#execution-label").textContent =
       health.modelKind === "deepseek"
         ? "真实 Agent · 按实际模型用量计费"

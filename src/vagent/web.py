@@ -14,7 +14,10 @@ from pydantic import BaseModel, ConfigDict, Field
 from vagent import __version__
 from vagent.application import ApplicationService
 from vagent.config import ConfigUpdate
+from vagent.contracts import Identifier
 from vagent.errors import AppError, public_error
+from vagent.video.media import DownloadRetry, file_io
+from vagent.video.media_response import media_response
 
 
 class MessageInput(BaseModel):
@@ -22,6 +25,12 @@ class MessageInput(BaseModel):
     prompt: str = Field(min_length=1, max_length=20000)
     clientRequestId: str = Field(pattern=r"^[a-zA-Z0-9_-]{1,64}$")
     readOnly: bool = False
+
+
+class DownloadRetryInput(BaseModel):
+    model_config = ConfigDict(extra="forbid", strict=True)
+    clientRequestId: Identifier
+    expectedRevision: int = Field(ge=0)
 
 
 def create_app(config, *, port=3210, model=None, policy=None):
@@ -68,7 +77,8 @@ def create_app(config, *, port=3210, model=None, policy=None):
         response.headers["Referrer-Policy"] = "no-referrer"
         response.headers["Content-Security-Policy"] = (
             "default-src 'self'; script-src 'self'; style-src 'self'; img-src 'self'; "
-            "connect-src 'self'; object-src 'none'; base-uri 'none'; frame-ancestors 'none'; form-action 'self'"
+            "connect-src 'self'; media-src 'self'; object-src 'none'; base-uri 'none'; "
+            "frame-ancestors 'none'; form-action 'self'"
         )
         return response
 
@@ -76,7 +86,9 @@ def create_app(config, *, port=3210, model=None, policy=None):
     async def app_error(_request, error):
         status = (
             404
-            if error.code in {"NOT_FOUND", "JOB_NOT_FOUND"}
+            if error.code in {"NOT_FOUND", "JOB_NOT_FOUND", "MEDIA_NOT_FOUND"}
+            else 410
+            if error.code == "JOB_MEDIA_UNAVAILABLE"
             else 409
             if error.code
             in {
@@ -89,10 +101,15 @@ def create_app(config, *, port=3210, model=None, policy=None):
                 "CONFIG_OVERRIDE",
                 "JOB_QUERY_NOT_PAUSED",
                 "JOB_REVISION_CONFLICT",
+                "JOB_DOWNLOAD_RETRY_UNAVAILABLE",
+                "OPERATION_CONFLICT",
             }
             else 400
         )
-        return JSONResponse({"error": {"code": error.code, "message": str(error)}}, status)
+        response = JSONResponse({"error": {"code": error.code, "message": str(error)}}, status)
+        if _request.method == "HEAD":
+            response.body = b""
+        return response
 
     @app.exception_handler(RequestValidationError)
     async def validation_error(_request, _error):
@@ -133,7 +150,7 @@ def create_app(config, *, port=3210, model=None, policy=None):
 
     @app.get("/api/sessions/{session_id}")
     async def session(session_id: str):
-        return app.state.service.session(session_id)
+        return await file_io(app.state.service.session, session_id)
 
     @app.post("/api/sessions/{session_id}/messages", status_code=202)
     async def message(session_id: str, body: MessageInput):
@@ -160,15 +177,34 @@ def create_app(config, *, port=3210, model=None, policy=None):
 
     @app.get("/api/jobs")
     async def jobs(sessionId: str | None = None):
-        return {"jobs": app.state.service.jobs(sessionId)}
+        return {"jobs": await file_io(app.state.service.jobs, sessionId)}
 
     @app.get("/api/jobs/{job_id}")
     async def job(job_id: str):
-        return app.state.service.job(job_id)
+        return await file_io(app.state.service.job, job_id)
 
     @app.post("/api/jobs/{job_id}/retry-query")
     async def retry_query(job_id: str):
         return app.state.service.retry_query(job_id)
+
+    @app.post("/api/jobs/{job_id}/retry-download", status_code=202)
+    async def retry_download(job_id: str, body: DownloadRetryInput):
+        return await file_io(
+            app.state.service.retry_download, job_id, DownloadRetry.model_validate(body.model_dump())
+        )
+
+    @app.get("/api/media/{media_id}")
+    async def media(media_id: str):
+        return await file_io(app.state.service.media.view, media_id)
+
+    @app.api_route("/api/media/{media_id}/content", methods=["GET", "HEAD"])
+    async def content(media_id: str, request: Request, download: str | None = None):
+        asset, lease = await file_io(
+            app.state.service.media.open_content, media_id, cancel_cleanup=lambda result: result[1].close()
+        )
+        return media_response(
+            asset, lease, method=request.method, request_headers=request.headers, download=download == "1"
+        )
 
     @app.get("/api/artifacts/{artifact_id}")
     async def artifact(artifact_id: str, version: int | None = None):
@@ -185,23 +221,25 @@ def create_app(config, *, port=3210, model=None, policy=None):
     @app.get("/api/events")
     async def events(sessionId: str, request: Request):
         service = app.state.service
-        service.session(sessionId)
+        await file_io(service.session, sessionId)
 
         async def stream():
             queue = service.subscribe(sessionId)
 
-            def snapshot():
-                data = json.dumps(service.session(sessionId), ensure_ascii=False, separators=(",", ":"))
+            async def snapshot():
+                data = json.dumps(
+                    await file_io(service.session, sessionId), ensure_ascii=False, separators=(",", ":")
+                )
                 return f"event: snapshot\ndata: {data}\n\n"
 
             try:
-                yield snapshot()
+                yield await snapshot()
                 while not await request.is_disconnected():
                     try:
                         async with asyncio.timeout(15):
                             event = await queue.get()
                         if event["type"] == "snapshot":
-                            yield snapshot()
+                            yield await snapshot()
                         elif event["type"] in {
                             "assistant.delta",
                             "job.updated",
@@ -213,11 +251,11 @@ def create_app(config, *, port=3210, model=None, policy=None):
                             if event["type"].startswith("run."):
                                 # Capture current state at delivery, not when queued:
                                 # a prior overflow snapshot may already be newer.
-                                event = {**event, "snapshot": service.session(sessionId)}
+                                event = {**event, "snapshot": await file_io(service.session, sessionId)}
                             data = json.dumps(event, ensure_ascii=False, separators=(",", ":"))
                             yield f"event: {event['type']}\ndata: {data}\n\n"
                         else:
-                            yield snapshot()
+                            yield await snapshot()
                     except TimeoutError:
                         yield ": heartbeat\n\n"
             finally:

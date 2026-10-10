@@ -130,3 +130,10 @@ def job_runtime(monkeypatch, video_clock):
         application, "JobWorker", lambda service: JobWorker(service, idle_interval_seconds=0.005)
     )
     return runtime
+
+
+@pytest.fixture
+def media_runtime(monkeypatch, video_clock):
+    from media_support import install_media_runtime
+
+    return install_media_runtime(monkeypatch, video_clock)

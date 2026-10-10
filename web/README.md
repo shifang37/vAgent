@@ -24,7 +24,8 @@ $env:VAGENT_HOME = Join-Path $PWD '.vagent/web'
 - 查看产物、选择历史版本、导出 Markdown、继续修改。
 - 产物显示正文非空白字符数及保存时上限；编排观测显示项目正文上限。旧版缺少记录时明确标注未记录校验。
 - 停止当前执行，显式从检查点恢复；沿用原执行的模型/工具/时间预算。
-- 视频任务卡片区分模拟与真实，显示 jobId、模型/规格、来源版本、结果与错误；live 另显示云端状态、待下载、估价/实际费用与配置阻塞。Run 结束后 Job 仍持续更新。
+- 视频任务卡片区分模拟与真实，显示 jobId、模型/规格、来源版本、结果与错误；live 另显示云端/下载状态、估价/实际费用与配置阻塞。完整媒体可用时支持播放、拖动进度和下载，Run 结束后 Job 仍持续更新。
+- 下载失败或媒体缺失时可重试原下载，沿用原 Job/mediaId；历史结果保持原样。视频设置页独立配置视频 Key、空间、模式、模型、地域与金额上限，显示来源、参考估价和重启提示。
 - 等待态可停止 Agent，Job 继续跟踪；查询暂停时可恢复原任务查询。刷新保留已保存的等待与任务状态。
 - 编排观测：上下文字节与裁剪数、项目事实与计划、Skills 版本、MCP 状态、工具目录和事件、已知/未知 Token 用量。
 - 新版 API 可提供当前轮工具参数和结果明细；旧运行实例缺少该字段时隐藏明细区，工具事件仍可见。
@@ -33,17 +34,26 @@ $env:VAGENT_HOME = Join-Path $PWD '.vagent/web'
 
 ## API
 
-实现 `/api/health`、`/api/session-token`、`GET/PATCH /api/config`、`POST /api/config/validate`、会话列表/创建/快照、消息提交、Run 状态/停止/恢复、产物列表/历史版本，以及 `/api/events?sessionId=...`。Job 入口为 `GET /api/jobs`（可选 `sessionId`）、`GET /api/jobs/:id`、`POST /api/jobs/:id/retry-query`；读取不触发供应商请求，恢复查询不重新提交。
+实现 `/api/health`、`/api/session-token`、`GET/PATCH /api/config`、`POST /api/config/validate`、会话列表/创建/快照、消息提交、Run 状态/停止/恢复、产物列表/历史版本，以及 `/api/events?sessionId=...`。Job 入口为 `GET /api/jobs`（可选 `sessionId`）、`GET /api/jobs/:id`、`POST /api/jobs/:id/retry-query`。读取会核对本地媒体并可能保存可用性 revision，不触发供应商请求；恢复查询不重新提交。
 
-C1 的 PATCH 配置支持 `videoMode`、`videoApiKey`、`clearVideoApiKey`、`videoWorkspaceId`、`videoProvider`、`videoModel`、`videoRegion`、`videoMaxJobCost`；省略保留原值。视频金额为十进制人民币字符串，模型和地域限定 C0 冻结值。读取返回 Key 是否配置、权限 `unverified`、各字段来源、待生效 `videoMode`、当前 `activeVideoMode`、`restartRequired/restartFields`。保存零生成；完整视频设置表单属于 C2，当前页面显示模式和重启提示。
+PATCH 配置与完整设置表单支持 `videoMode`、`videoApiKey`、`clearVideoApiKey`、`videoWorkspaceId`、`videoProvider`、`videoModel`、`videoRegion`、`videoMaxJobCost`；省略保留原值。视频金额为十进制人民币字符串，模型和地域限定 C0 冻结值。读取返回 Key 是否配置、权限 `unverified`、参考估价 `videoEstimate`、各字段来源、待生效 `videoMode`、当前 `activeVideoMode`、`restartRequired/restartFields`。保存配置不产生生成请求。
 
-live Job 视图包含 `lastProviderStatus`、`queryPauseReason`、冻结费用、下载阶段/次数及 `runtimeBlock`；不返回业务空间、私有供应商诊断或签名 URL。C1 云端成功返回 `downloading`、`result=null`、`mediaAvailable=false`。`/api/media`、下载重试和播放器尚未实现。
+live Job 视图包含 `lastProviderStatus`、`queryPauseReason`、冻结费用、下载阶段/次数、`runtimeBlock`、当前 `mediaAvailability` 与 `canRetryDownload`；不返回业务空间、私有供应商诊断或签名 URL。云端成功先返回 `downloading`、`result=null`、`mediaAvailable=false`，完整文件和索引提交后才 `succeeded`。历史 `result` 与当前可用性分开：文件丢失或损坏时保留结果、增加 revision 并移除播放器。
+
+| 媒体接口 | 行为 |
+|---|---|
+| `GET /api/media/{mediaId}` | 本地元数据、大小、SHA-256、来源与当前可用性；可用时返回同源 `contentUrl` |
+| `GET/HEAD /api/media/{mediaId}/content` | 完整 MP4；GET 支持单 Range 206、不可满足范围 416 与强 ETag 的 If-Range；HEAD 无正文 |
+| `GET /api/media/{mediaId}/content?download=1` | 以服务端 mediaId 命名的附件下载；文件缺失或损坏返回 410 |
+| `POST /api/jobs/{jobId}/retry-download` | CSRF + JSON `{clientRequestId, expectedRevision}`，202 登记恢复窗口；同 ID 同参数重放，旧 revision/参数冲突返回 409，非法字段返回 422 |
+
+同一重试请求或正在执行的下载不会登记第二个执行；冲突文件保留，需备份移走后重试。媒体修复必须匹配原 SHA-256，过期链接不会通过新生成替换。CLI 的对应入口为 `vagent jobs retry-download JOB_ID`，随后由 `jobs work` 或 Web 推进。
 
 发送消息使用 `clientRequestId`。响应丢失时前端复用该 ID，后端返回原 Run，避免重复付费执行。同一 ID 对应不同需求或只读模式会冲突。
 
 SSE 首先发送 `snapshot`，包含持久状态和可选的内存 `draft`；正文通过 `assistant.delta` 推送，携带 Run ID、模型步、序号和文字。客户端拒绝旧步和重复序号，发现缺口时重新连接获取快照。每个订阅队列最多 64 项，慢客户端溢出时回退到当前快照；15 秒心跳，不承诺永久事件重放。
 
-快照还包含当前项目的 `jobs` 和原 Run 的 `wait` 摘要。独立 `job.updated` 携带 Job 自己的 sessionId/runId 与有界视图；客户端按 jobId + revision 丢弃重复或旧版本，即使另一条 Run 已开始也不会把旧 Job 事件写入新 Run。`run.waiting`、`run.resumed`、`run.resume_blocked`、`run.completed` 在 SSE 交付时附带当前会话快照；未知事件退回快照，不混入文本增量。HTTP 恢复查询响应晚于新 SSE 时也不能回退 Job 状态。
+快照还包含当前项目的 `jobs` 和原 Run 的 `wait` 摘要。独立 `job.updated` 携带 Job 自己的 sessionId/runId 与有界视图；客户端按 jobId + revision 丢弃重复或旧版本，即使另一条 Run 已开始也不会把旧 Job 事件写入新 Run。`run.waiting`、`run.resumed`、`run.resume_blocked`、`run.completed` 在 SSE 交付时附带当前会话快照；未知事件退回快照，不混入文本增量。HTTP 恢复查询/下载响应晚于新 SSE 时也不能回退 Job 状态；更新快照或任务卡时复用同一视频节点，保留播放进度。
 
 Token 草稿不写入状态文件或事件日志。模型响应通过完成标记、完整 JSON 和质量检查后，`model.completed` 触发正式消息快照；中断、取消或截断丢弃草稿。工具参数只在整步响应完成后执行，不执行半截 JSON。流式 usage 和缓存字段按完整调用统计，不逐块累加累计值；缺失保持未知。
 
@@ -55,6 +65,6 @@ DeepSeek 与视频 Key 分开配置，来自数据目录 `config.yml`、服务�
 
 验证使用固定 DeepSeek 端点、最多 8 个输出 Token、15 秒超时、不重试；错误内容不回显供应商原文。验证状态在服务重启后重置，保存相同配置不清除已验证状态。环境配置变化后需重启服务。
 
-C1 支持 `VAGENT_VIDEO_MODE=off|mock|live`，默认 off。启动模式控制新 Run 的工具，旧 off/mock Run 使用原工具/规则及签名，旧 Job 按原供应商恢复；live 缺少原 Key/业务空间时保存配置阻塞并停止 HTTP 尝试。Mock 不需要视频 Key。关闭浏览器不停止 Worker，退出服务才停止本地推进并保存等待意图。当前 `await_job` 在真实 `downloading` 时继续等待，不把云端成功当成本地交付；尚无真实媒体或播放/下载入口。完整范围见 [C1 验收](../docs/M1C_C1_ACCEPTANCE.md)，原 Mock 证据见 [B4 验收](../docs/M1B_B4_ACCEPTANCE.md)。
+支持 `VAGENT_VIDEO_MODE=off|mock|live`，默认 off。启动模式控制新 Run 的工具，旧 off/mock Run 使用原工具/规则及签名，旧 Job 按原供应商恢复；live 缺少原 Key/业务空间时保存配置阻塞并停止上游任务 HTTP 尝试。已保存的媒体地址由独立无鉴权客户端下载。Mock 不需要视频 Key，也不提供占位 MP4。关闭浏览器不停止 Worker，退出服务才停止本地推进并保存等待意图。`await_job` 在 `downloading` 时继续等待，本地提交后才交付；后续修复不复活已结束 Run。C2 已通过受控视频与浏览器验证，真实账号、实际媒体和账单仍待 C3，见 [C2 验收](../docs/M1C_C2_ACCEPTANCE.md)；原 Mock 证据见 [B4 验收](../docs/M1B_B4_ACCEPTANCE.md)。
 
 质量规则见 [质量校验验收](../docs/QUALITY_ACCEPTANCE.md)。例如发送“brief 正文300字以内”会设置持久上限；只有用户明确修改/取消才能放宽。后端超限或记忆冲突会返回工具错误，模型未纠正就结束时 Run 失败。源码更新后需正常重启已有服务再刷新页面，以加载新的校验逻辑。

@@ -17,6 +17,7 @@ from vagent.video.contracts import (
     WAN_PROMPT_PREFIX,
     CostEstimate,
     CostRecord,
+    DownloadPolicy,
     Job,
     JobError,
     JobErrorV2,
@@ -131,6 +132,15 @@ def recover_interrupted_jobs(state: dict, timestamp: str) -> None:
                 timestamp,
                 failure_at=job.next_poll_at,
             )
+        elif isinstance(job, JobV2) and job.download and job.download.phase == "writing":
+            from vagent.video.media import MediaError, failed_download
+
+            recovered = failed_download(
+                job,
+                MediaError("DOWNLOAD_NETWORK", retryable=True),
+                timestamp,
+                failure_at=job.download.deadline_at,
+            )
         else:
             continue
         state["jobs"][job_id] = recovered.model_dump(mode="json", by_alias=True)
@@ -237,6 +247,26 @@ def validate_job_changes(previous: dict[str, dict], state: dict) -> None:
                 or job.download.generation < old.download.generation
             ):
                 raise AppError("JOB_IMMUTABLE", "媒体身份和累计下载次数不可替换或回退。")
+            if old.download is not None:
+                before, after = old.download, job.download
+                new_window = after.generation == before.generation + 1
+                if new_window:
+                    allowed = before.phase == "failed" or (
+                        old.status == "succeeded"
+                        and before.phase == "committed"
+                        and old.media_availability.status == "unavailable"
+                    )
+                    if not allowed or after.window_attempts or after.attempts != before.attempts:
+                        raise AppError("JOB_CONFLICT", "仅停止的下载可登记新的恢复窗口。")
+                elif (
+                    after.generation != before.generation
+                    or after.source_policy_version != before.source_policy_version
+                    or not 0 <= after.window_attempts - before.window_attempts <= 1
+                    or after.attempts - before.attempts != after.window_attempts - before.window_attempts
+                ):
+                    raise AppError("JOB_CONFLICT", "下载窗口和累计尝试次数不能重置或跳过。")
+                if before.repair and not after.repair:
+                    raise AppError("JOB_IMMUTABLE", "已交付媒体的修复记录不能变回初次交付。")
     if any(key != value["id"] for key, value in state["waits"].items()):
         raise AppError("WAIT_CONFLICT", "等待记录 ID 不匹配。")
     validate_media_changes(state.get("media", {}), state)
@@ -286,11 +316,16 @@ class JobService:
         on_change: Callable[[Job], None] | None = None,
         config: "Config | None" = None,
         price: VideoPrice | None = wan_price(),
+        download_policy: DownloadPolicy | None = None,
     ):
         self.store, self.clock = store, clock
         self.policy = policy or PollingPolicy()
         self.config, self.price = config, price
+        self.download_policy = download_policy or DownloadPolicy()
         self.on_change = on_change
+        from vagent.video.media import MediaService
+
+        self.media = MediaService(self)
         self._adapters = {}
         self._capabilities = {}
         for adapter in adapters:
@@ -506,6 +541,7 @@ class JobService:
                 )
                 extra = {
                     "intent_fingerprint": frozen.intent_fingerprint(),
+                    "download_policy": self.download_policy,
                     "cost": CostRecord(
                         estimate=CostEstimate(
                             **self.price.model_dump(), max_job_cost=self.config.video_max_job_cost

@@ -80,13 +80,16 @@ def completed_job_data(job: Job) -> dict:
     raise AppError("JOB_NOT_READY", "视频任务尚未结束。")
 
 
-def resolve_job_wait(store: FileStore, binding: WaitBinding) -> dict | None:
+def resolve_job_wait(store: FileStore, binding: WaitBinding, *, service=None) -> dict | None:
     """Resolve local facts even when the original adapter/model is unavailable."""
     raw = store.snapshot()["jobs"].get(binding.resource.id)
     if raw is None or raw["context"]["projectId"] != binding.context.project_id:
         return failure("JOB_NOT_FOUND", "没有这个视频任务。")
     try:
-        return {"ok": True, "data": completed_job_data(parse_job(raw))}
+        job = parse_job(raw)
+        if isinstance(job, JobV2) and job.status == "succeeded":
+            job = (service or JobService(store, [])).media.refresh(job)
+        return {"ok": True, "data": completed_job_data(job)}
     except AppError as error:
         if error.code == "JOB_NOT_READY":
             return None
@@ -130,7 +133,7 @@ def register_video_tools(registry: ToolRegistry, service: JobService, *, mode="m
             descriptions={"await_job": LEGACY_AWAIT_DESCRIPTION},
         )
     registry.register_wait_resolver(
-        "job", lambda binding: resolve_job_wait(service.store, binding), feature="video"
+        "job", lambda binding: resolve_job_wait(service.store, binding, service=service), feature="video"
     )
 
     def check_store(store: FileStore):
@@ -158,11 +161,24 @@ def register_video_tools(registry: ToolRegistry, service: JobService, *, mode="m
 
     def get_job(args, store, context):
         check_store(store)
+        previous = store.operation_result(context.operation_key, "job_get", args)
+        if previous is not None:
+            return previous
+        # File verification can update availability, so it precedes the Operation
+        # transaction. A nested Store transaction would overwrite the new revision.
+        try:
+            job = service.media.refresh(service.get(args["jobId"], project_id=context.project_id))
+        except AppError as error:
+
+            def reject(_, error=error):
+                raise error
+
+            return store.operation(context.operation_key, "job_get", args, reject)
         return store.operation(
             context.operation_key,
             "job_get",
             args,
-            lambda _: job_snapshot(service.get(args["jobId"], project_id=context.project_id)),
+            lambda _: job_snapshot(job),
         )
 
     def await_job(args: dict, store: FileStore, context: ToolExecutionContext):
@@ -188,14 +204,21 @@ def register_video_tools(registry: ToolRegistry, service: JobService, *, mode="m
         if previous is not None:
             return previous
         try:
-            job = service.get(args["jobId"], project_id=context.project_id)
+            job = service.media.refresh(service.get(args["jobId"], project_id=context.project_id))
         except AppError as error:
 
             def reject(_, error=error):
                 raise error
 
             return store.operation(key, "await_job", args, reject)
-        if (
+        repairing = (
+            isinstance(job, JobV2)
+            and job.status == "succeeded"
+            and job.media_availability.status != "available"
+            and job.download.repair
+            and job.download.phase in {"pending", "writing", "prepared"}
+        )
+        if not repairing and (
             job.status in {"succeeded", "failed", "unknown", "download_failed"}
             or job.query_state == "paused"
             or (isinstance(job, JobV2) and job.runtime_block is not None)

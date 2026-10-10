@@ -1,9 +1,9 @@
 # vagent M1 实施计划：先实现 Agent，再接入视频生成
 
 > 更新日期：2026-10-10
-> 状态：M1-A、M1-B 已验收，M1-C 的 C0、C1 已完成；当前已完成内容、验证与限制以 [README](./README.md) 为准。
+> 状态：M1-A、M1-B 已验收，M1-C 的 C0–C2 已完成；当前已完成内容、验证与限制以 [README](./README.md) 为准。
 > 设计依据：[产品设计](./DESIGN.md)、[Agent 选型与 Harness 设计](./AGENT_HARNESS_DESIGN.md)。  
-> 当前优先级：C1.1–C1.3 的 schema v3 兼容、万相协议和应用接入已完成，下一步为 C2.1 下载与恢复；见 [C1 验收](./docs/M1C_C1_ACCEPTANCE.md)、[M1-C 任务规划](./docs/M1C_PLAN.md)及[冻结契约](./docs/M1C_CONTRACTS.md)。云端成功目前停在 downloading。M1-B 的五类真实 DeepSeek + Mock 套件和独立安装已通过，见 [M1-B 验收](./docs/M1B_ACCEPTANCE.md)。Mock 阶段不要求真实视频 Key。
+> 当前优先级：C2.1/C2.2 的本地媒体交付、恢复和 CLI/Web 已完成，下一步为 C3.1 专项离线评测与安装验证，再进行 C3.2 真实联调；见 [C2 验收](./docs/M1C_C2_ACCEPTANCE.md)、[M1-C 任务规划](./docs/M1C_PLAN.md)及[冻结契约](./docs/M1C_CONTRACTS.md)。媒体链路已用受控响应和测试视频验证，账号权限与实际账单未验证。M1-B 历史证据见 [M1-B 验收](./docs/M1B_ACCEPTANCE.md)。
 
 当前已补齐 SQLite 图检查点和 `vagent resume RUN_ID`，包含部分工具提交后的重放保护与累计预算验证，记录见 [持久恢复验收](./docs/RECOVERY_ACCEPTANCE.md)。2026-10-08 新增共享应用服务、本地 Web API/SSE 与只读 MCP；首组真实 DeepSeek 多轮编排已验证，发现记忆冗余与文本长度约束问题，详见 [编排验收](./docs/AGENT_ORCHESTRATION_ACCEPTANCE.md)。
 
@@ -207,13 +207,13 @@ M1-A 已于 2026-10-09 验收。M1-B 于 2026-10-10 完成 B5 验收，验证视
 
 ## 10. M1-C：接入首个真实视频模型
 
-2026-10-10：**C0、C1 已完成，C2/C3 待实施**，见 [M1-C 任务规划](./docs/M1C_PLAN.md)和 [C1 验收](./docs/M1C_C1_ACCEPTANCE.md)。C1 从 C0 提交 `e879976` 继续，保留 B5 `2cc764d` 的历史行为。首个供应商固定为阿里云百炼万相；官方接口、能力与价格见 [C0 核实记录](./docs/VIDEO_API_NOTES.md)，数据/媒体协议与固定迁移夹具见 [C0 契约](./docs/M1C_CONTRACTS.md)。C1 使用受控 HTTP 验证；账户权限、真实媒体与账单仍未验证。
+2026-10-10：**C0–C2 已完成，C3 待实施**，见 [M1-C 任务规划](./docs/M1C_PLAN.md)和 [C2 验收](./docs/M1C_C2_ACCEPTANCE.md)。C2 从 C1 提交 `30ca949` 继续，保留 B5 `2cc764d` 的历史行为。首个供应商固定为阿里云百炼万相；官方接口、能力与价格见 [C0 核实记录](./docs/VIDEO_API_NOTES.md)，数据/媒体协议与固定迁移夹具见 [C0 契约](./docs/M1C_CONTRACTS.md)。C1/C2 使用受控 HTTP 与本地测试媒体验证；账户权限、实际上游媒体与账单仍未验证。
 
 | 工作包 | 内容 | 完成门槛 |
 |---|---|---|
 | C0 接口核实与契约冻结（已完成） | 模型/地域/规格、异步协议、查询/链接时效、价格、提交歧义；媒体与迁移协议 | `docs/VIDEO_API_NOTES.md`、`docs/M1C_CONTRACTS.md` 与固定迁移夹具；资料来源与账户验证状态分开记录 |
 | C1 真实适配器与应用接入（已完成） | schema v3/Job 契约兼容、WanAdapter、双 Key 配置、live 模式及四工具 | 真实协议离线验证、一次提交、旧 Run 恢复通过；云端成功停在待下载状态，见 [C1 验收](./docs/M1C_C1_ACCEPTANCE.md) |
-| C2 媒体持久交付与界面 | 独立媒体 Worker、`.part`/原子提交/强退恢复、下载重试、Range API、CLI/Web 播放下载 | succeeded 表示完整媒体与索引已提交；重试下载不触发再次生成 |
+| C2 媒体持久交付与界面（已完成） | 独立媒体 Worker、`.part`/原子提交/强退恢复、下载重试、Range API、CLI/Web 播放下载 | 完整文件与索引提交后才 succeeded；重试复用原任务；受控浏览器播放、拖动、下载与修复通过，见 [C2 验收](./docs/M1C_C2_ACCEPTANCE.md) |
 | C3 端到端验收与打包 | 离线故障矩阵、真实单视频联调、费用/媒体证据、独立 wheel 与四组 CI | 已安装应用完成自然语言到本地 MP4 的流程，原任务恢复不增加 submit，形成 `docs/M1C_ACCEPTANCE.md` |
 
 C0 于 2026-10-10 复核并固定 `wan2.7-t2v-2026-06-12`、北京、720P、5 秒、16:9。该规格官方参考价为 0.60 元/秒，预计生成费 3.00 元，免费额度不参与估算扣减。使用与北京视频 Key 匹配的业务空间专属域名；实际扣费未知。C0 未发起真实生成，后续联调依然单独验收。
@@ -281,6 +281,7 @@ M1-B 增加 `GET /api/jobs/:id` 和 Job 事件；M1-C 增加媒体接口和下�
 
 - [x] C0 官方接口、规格、价格和数据/媒体契约已冻结，账号权限状态明确，迁移夹具已保存。
 - [x] C1.1–C1.3：schema v3 兼容、真实协议、双 Key 与 live 工具通过离线验证；云端输出和稳定下载意图已持久保存。
+- [x] C2.1/C2.2：完整本地媒体提交、下载恢复、Range、视频设置与播放器通过离线故障和浏览器验证。
 - [ ] 真实 DeepSeek 经工具调用创建一次真实视频任务，获得本地可播放 MP4。
 - [ ] 页面刷新、服务重启均不重复提交已经登记的云端任务。
 - [ ] 提交结果不确定、限流、无权限、生成失败、下载失败均有可操作处理。
@@ -292,7 +293,7 @@ M1-B 增加 `GET /api/jobs/:id` 和 Job 事件；M1-C 增加媒体接口和下�
 
 ## 13. 交付物与后续边界
 
-M1-A 的 Agent 技术基线、Harness、DeepSeek 工具循环、最小 CLI/Web 和验收记录已交付。M1-B 的 B0–B5 已完成，完整应用、真实 DeepSeek + Mock 套件与独立安装均已验收；M1-C 的 C0、C1 已完成，媒体交付与真实验收继续按 C2/C3 推进。
+M1-A 的 Agent 技术基线、Harness、DeepSeek 工具循环、最小 CLI/Web 和验收记录已交付。M1-B 的 B0–B5 已完成，完整应用、真实 DeepSeek + Mock 套件与独立安装均已验收；M1-C 的 C0–C2 已完成，专项安装评测与真实验收继续按 C3 推进。
 
 公共 PyPI 发布独立于本地 wheel 验收；发布前确认包名与发布权限。多镜头生成、拼接、素材库、更多供应商、插件和 skills 留到后续产品阶段。
 

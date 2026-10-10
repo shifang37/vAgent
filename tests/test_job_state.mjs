@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { mergeJobs, upsertJob } from "../web/job-state.js";
+import { mediaContentPath, mergeJobs, upsertJob } from "../web/job-state.js";
 
 const job = (revision, status = "running", extra = {}) => ({
   jobId: "job-1", sessionId: "coffee", projectId: "coffee", runId: "original-run", revision, status, ...extra,
@@ -40,4 +40,36 @@ test("switching sessions cannot retain the old project's jobs", () => {
 test("invalid revisions do not replace known state", () => {
   const current = [job(2)];
   for (const revision of [-1, "3", 1.5, undefined]) assert.equal(upsertJob(current, job(revision), "coffee"), current);
+});
+
+const mediaId = "00000000-0000-0000-0000-000000000001";
+const available = () => job(8, "succeeded", {
+  mode: "live", mediaAvailable: true, mediaAvailability: { status: "available" }, mediaRefs: [{ mediaId }],
+});
+test("only current, complete live media has a same-origin player path", () => {
+  assert.equal(mediaContentPath(available()), `/api/media/${mediaId}/content`);
+  for (const extra of [{ mode: "mock" }, { status: "downloading" }, { mediaAvailable: false },
+    { mediaAvailability: { status: "unavailable" } }, { mediaRefs: [] }]) {
+    assert.equal(mediaContentPath({ ...available(), ...extra }), null);
+  }
+});
+test("media paths cannot be supplied through an untrusted media ID", () => {
+  for (const id of ["../state.json", "https://evil.test/video", "x%2Fy", "<script>", undefined]) {
+    assert.equal(mediaContentPath({ ...available(), mediaRefs: [{ mediaId: id }] }), null);
+  }
+});
+test("newer availability loss removes the player despite historical delivery", () => {
+  const original = available();
+  const lost = { ...original, revision: 9, mediaAvailable: false, mediaAvailability: { status: "unavailable" },
+    result: { mediaAvailable: true } };
+  const merged = mergeJobs([lost], [original], "coffee");
+  assert.equal(merged[0].revision, 9);
+  assert.equal(mediaContentPath(merged[0]), null);
+});
+test("repair restores the same player identity and stale retry responses cannot rewind it", () => {
+  const repaired = { ...available(), revision: 12 };
+  const pending = { ...repaired, revision: 10, mediaAvailable: false };
+  const merged = upsertJob([repaired], pending, "coffee");
+  assert.equal(mediaContentPath(merged[0]), `/api/media/${mediaId}/content`);
+  assert.equal(merged[0].revision, 12);
 });

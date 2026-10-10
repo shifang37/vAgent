@@ -2,7 +2,7 @@
 
 面向视频创作的 Agent 实习项目，使用 **Python + DeepSeek + LangGraph**，自主设计上下文、项目记忆、Skills、工具执行与护栏，再接入视频生成模型。
 
-当前已实现 **Python CLI + 本地 Web Agent**，前端通过同源 API/SSE 调用共享 LangGraph Runner。2026-10-08 完成真实 DeepSeek、持久记忆、Skills、8 种工具（含 2 个本地 MCP 工具）的编排验收，随后补齐记忆冲突与正文长度的后端校验。当前交付文本创作材料；万相视频 API 的提交与查询已完成离线验证，本地媒体交付尚待 C2。首轮发现见 [编排测试报告](./docs/AGENT_ORCHESTRATION_ACCEPTANCE.md)，修复与验证范围见 [质量校验验收](./docs/QUALITY_ACCEPTANCE.md)。
+当前已实现 **Python CLI + 本地 Web Agent**，前端通过同源 API/SSE 调用共享 LangGraph Runner。2026-10-08 完成真实 DeepSeek、持久记忆、Skills、8 种工具（含 2 个本地 MCP 工具）的编排验收，随后补齐记忆冲突与正文长度的后端校验。应用支持文本创作材料和本地 MP4 交付；万相任务协议、下载恢复与浏览器播放已通过受控响应和测试媒体验证，真实账号联调待 C3。首轮发现见 [编排测试报告](./docs/AGENT_ORCHESTRATION_ACCEPTANCE.md)，修复与验证范围见 [质量校验验收](./docs/QUALITY_ACCEPTANCE.md)。
 
 任务 2 已补齐本地配置向导、CLI/Web 流式回复和 9 类固定评测。**2026-10-09 完成 A5：完整真实套件 9/9 通过，M1-A 已验收。** 最终套件包含 3 次显式恢复，累计 27 次模型调用、25 次工具调用；此前失败记录完整保留，详见 [M1-A 验收记录](./docs/M1A_ACCEPTANCE.md)。**2026-10-10 完成 B5，M1-B 的 B0–B5 已验收**：真实 DeepSeek + Mock 套件 5/5 通过，累计 15 次模型调用、14 次工具调用，3 个 Job 各提交一次。应用自动推进模拟任务，持久等待、停止、重启恢复及 CLI/Web 已通过回归和仓库外 wheel 验证。详见 [M1-B 验收](./docs/M1B_ACCEPTANCE.md)；真实视频接入属于后续 M1-C。
 
@@ -17,13 +17,13 @@
 | 03 用量观测 | 已实现 | 单次模型调用记录、缓存命中/未命中 Token、加权命中率、未知用量标记 |
 | 03 Redis 回答缓存 | 已实现 | 显式只读模式、最终文本精确匹配、TTL、故障回退、独立命中统计 |
 | 03 任务评测 | A5 完整真实验收通过 | 9 类用例、独立状态评分、上下文版本/预算对比、用量覆盖率、显式检查点续跑 |
-| 04 本地 Web | 已接入真实 Agent | 单 Key 配置向导、模型切换与验证、逐段文本流、断线补齐、停止/恢复、产物与编排观测 |
+| 04 本地 Web | 已接入真实 Agent | 独立文本/视频 Key 设置、模型切换与验证、逐段文本流、断线补齐、停止/恢复、产物与视频播放下载 |
 | MCP | 已实现并验证 stdio | 显式只读白名单、工具发现、Schema 校验、取消/超时、结果大小限制 |
 | 内容质量校验 | 已通过回归与真实纠错验收 | 记忆字段职责、旧事实残留检查、持久字数上限、保存前计数、未纠正错误禁止报告完成 |
 | M1-B 模拟视频 | B0–B5 已验收 | 自动 Worker、四工具、持久等待/停止/恢复、CLI/Web；离线与真实 DeepSeek + Mock 均 5/5 通过，详见 [M1-B 验收](./docs/M1B_ACCEPTANCE.md) |
-| M1-C 真实视频 | C0、C1 已完成；C2/C3 待实施 | schema v3 兼容、Wan HTTP、双 Key 配置、live 工具及待下载状态；详见 [C1 验收](./docs/M1C_C1_ACCEPTANCE.md)，下一步为 C2.1 下载与恢复 |
+| M1-C 真实视频 | C0–C2 已完成；C3 待实施 | schema v3 兼容、Wan HTTP、双 Key 配置、本地媒体校验/恢复、Range 与播放器；详见 [C2 验收](./docs/M1C_C2_ACCEPTANCE.md)，下一步为 C3 专项安装与真实联调 |
 
-2026-10-10 完成 C0/C1：固定北京 `wan2.7-t2v-2026-06-12`、5 秒 720P 16:9，官方参考生成费为 3.00 元，采用业务空间专属域名。应用支持 off/mock/live，真实任务只提交一次，按原 ID 持久查询，云端成功保存上游输出与稳定下载意图并停在 `downloading`。当前尚无下载 Worker、MP4 或播放器；账号视频权限和实际账单未验证，本次未调用收费模型。接口依据及完整阶段范围见 [官方核实](./docs/VIDEO_API_NOTES.md)、[冻结契约](./docs/M1C_CONTRACTS.md)和[任务规划](./docs/M1C_PLAN.md)。
+2026-10-10 完成 C0–C2：固定北京 `wan2.7-t2v-2026-06-12`、5 秒 720P 16:9，官方参考生成费为 3.00 元，采用业务空间专属域名。应用支持 off/mock/live，任务只提交一次，按原 ID 持久查询；云端成功后由独立媒体 Worker 下载，完整文件与索引提交后才进入 `succeeded`。下载重试、重启和媒体修复沿用原 Job/mediaId；Web 可播放、拖动进度和下载。账号视频权限、实际上游媒体与账单未验证，本次未调用收费模型。接口依据及完整阶段范围见 [官方核实](./docs/VIDEO_API_NOTES.md)、[冻结契约](./docs/M1C_CONTRACTS.md)和[任务规划](./docs/M1C_PLAN.md)。
 
 每个独立完成的代码部分都同步更新本 README、提交并推送 GitHub。阶段目标见 [M1 计划](./M1_PLAN.md) 和 [Harness 设计](./AGENT_HARNESS_DESIGN.md)。
 
@@ -155,7 +155,7 @@ $env:VAGENT_VIDEO_MODE = 'mock'
 
 用户停止会先持久关闭自动继续，并补齐可见的终止工具结果；Job 继续独立跟踪。正常退出保留等待意图，重启只自动继续有效等待。结果之后已经开始过模型尝试的中断要求显式 `resume`；缺少原配置、检查点或预算时保留结果，原因记录在 `waitResumeError`。
 
-`ApplicationService` 统一管理 JobWorker 和等待协调器。`run/chat/resume` 等待原 Run 完成，图挂起期间 Worker 仍独立推进；`chat` 输入不会阻塞 Worker，也不留下阻止 Windows 退出的输入线程。缺少恢复配置时显示原因并保存结果。旧 B2 execution v1 仍按 `EXTERNAL_WAIT_UNAVAILABLE` 结束未完成等待，其 preparing 记录不会被后台唤醒。
+`ApplicationService` 统一管理 JobWorker、媒体 Worker 和等待协调器。`run/chat/resume` 等待原 Run 完成，图挂起期间 Worker 仍独立推进；`chat` 输入不会阻塞 Worker，也不留下阻止 Windows 退出的输入线程。缺少恢复配置时显示原因并保存结果。旧 B2 execution v1 仍按 `EXTERNAL_WAIT_UNAVAILABLE` 结束未完成等待，其 preparing 记录不会被后台唤醒。
 
 以下 Job 命令不需要 DeepSeek Key：
 
@@ -164,20 +164,21 @@ vagent jobs list
 vagent jobs list --session coffee
 vagent jobs get JOB_ID
 vagent jobs retry-query JOB_ID
+vagent jobs retry-download JOB_ID
 vagent jobs work
 ```
 
-`list/get` 只读本地状态，`retry-query` 只为已暂停且有上游 ID 的任务恢复查询窗口，不重新 submit；三者不启动 Worker、模型或 MCP。`jobs work` 持续推进持久队列及有效等待；缺少原模型配置时继续推进 Job，保留等待结果。启动模式控制新 Run 的工具，已登记 mock Job 即使在 off 模式启动也继续跟踪。
+`list/get` 读取本地状态并核对媒体可用性，发现文件缺失或损坏时保存新的可用性 revision；不发起上游 HTTP。`retry-query` 只恢复原任务查询窗口，`retry-download` 只登记原媒体的恢复窗口；这四个命令均不启动 Worker、模型或 MCP。`jobs work` 或 Web 持续推进查询、下载与有效等待；缺少原模型配置时继续推进 Job，保留等待结果。启动模式控制新 Run 的工具，已登记 mock Job 即使在 off 模式启动也继续跟踪。
 
 CLI 退出后没有后台守护进程；重新运行 Web 或 `jobs work` 才继续推进队列。`run/chat/resume` 的 Ctrl+C 停止当前 Agent，`jobs work` 的 Ctrl+C 只关闭本地循环并保留等待意图。同一数据目录被 Web 占用时，CLI 提示 `STORE_LOCKED`。
 
-Web 提供 `GET /api/jobs`（可选 `sessionId`）、`GET /api/jobs/:id` 和 `POST /api/jobs/:id/retry-query`。会话快照含当前项目 Job；`job.updated` 绑定创建 Job 的会话/Run，客户端按 jobId 与 revision 去重，溢出和重连通过快照补齐。任务卡片显示模拟标记、模型/参数、来源版本、生成与查询状态；Run 结束后仍更新，等待时可停止 Agent，查询暂停时可恢复查询。
+Web 提供 `GET /api/jobs`（可选 `sessionId`）、`GET /api/jobs/:id`、`POST /api/jobs/:id/retry-query` 和 `POST /api/jobs/:id/retry-download`。会话快照含当前项目 Job；`job.updated` 绑定创建 Job 的会话/Run，客户端按 jobId 与 revision 去重，溢出和重连通过快照补齐。任务卡片显示模拟标记、模型/参数、来源版本、生成/查询/下载状态；Run 结束后仍更新，等待时可停止 Agent，查询暂停或下载失败时可恢复原任务。
 
 只读任务隐藏并拒绝 `video_generate`，允许读取已有 Job 和保存等待记账。视频工具可见时，整次 Run 跳过 Redis 回答缓存，包括第一次模型调用之前；供应商前缀缓存 Token 统计保持。新 Run 保存模式与工具/能力配置，恢复时核对；旧 off Run 即使在 mock 启动配置下恢复，也使用原系统规则与工具集合。
 
-## 万相真实协议接入（M1-C C1）
+## 万相真实协议与本地媒体（M1-C C1/C2）
 
-C1 已实现真实服务的任务登记、一次提交与原任务查询，普通回归使用受控 HTTP 响应。运行 live 会发出收费生成请求；当前云端成功后只保存为 `downloading`，`result=null`、`mediaAvailable=false`，不能播放或下载。完整媒体交付在 C2，真实账号与付费验收在 C3。
+C1/C2 已实现任务登记、一次提交、原任务查询和本地媒体交付，普通回归使用受控 HTTP 响应与本地生成的测试视频。运行 live 会发出收费生成请求；云端成功先进入 `downloading`，文件校验与媒体索引提交完成后才返回本地结果。真实账号与付费验收在 C3。
 
 视频 Key 独立于 DeepSeek Key。在本机 `.env` 或 `VAGENT_HOME/config.yml` 中配置，环境变量优先。以下为视频字段及默认值：
 
@@ -193,11 +194,15 @@ C1 已实现真实服务的任务登记、一次提交与原任务查询，普�
 
 固定规格为 5 秒、720p、16:9，公开提示词最多 4991 字符。后端加上单镜头前缀，显式发送 `prompt_extend=false`、`watermark=true`、`seed=0`。每个 Run 最多一个新 Job；重复调用先复用原任务，再检查新配置。估价以 Decimal 字符串冻结，提交前复核原报价、当前价格和金额上限；实际费用缺少账单时保持未知。
 
-保存或启动配置均不发送测试生成，现有验证按钮只验证 DeepSeek。配置 API 返回 `videoApiKeyConfigured`、`videoPermissionStatus=unverified`、待生效 `videoMode`、当前 `activeVideoMode` 和 `restartRequired/restartFields`，不返回 Key。视频客户端、能力视图及队列上限在进程内保持启动快照；完整视频设置表单由 C2 提供，当前页面显示模式和重启提示。
+保存或启动配置均不发送测试生成，现有验证按钮只验证 DeepSeek。配置 API 返回 `videoApiKeyConfigured`、`videoPermissionStatus=unverified`、参考估价 `videoEstimate`、待生效 `videoMode`、当前 `activeVideoMode` 和 `restartRequired/restartFields`，不返回 Key。视频客户端、能力视图及队列上限在进程内保持启动快照；Web 设置页支持上述完整视频字段，显示来源、估价、金额上限和重启提示。
 
 提交歧义进入 `unknown`，不重提；查询按原 ID 每 15 秒推进，失败后按 15/30/60 秒有限退避，并保留更晚的 `Retry-After`。从提交意图起满 24 小时暂停查询。缺配置或空间不匹配时保存阻塞原因，不增加 HTTP 次数；`jobs retry-query` 先校验原配置和期限，仅恢复查询窗口。查询/下载阶段不因后来调低金额上限而丢弃已受理结果。
 
-旧 off/mock Run 按原工具、规则与检查点签名恢复；live 使用 tools/rules v3。原 live 配置不可用时返回 `RESUME_CONFIG_CHANGED`，保留等待与累计预算。公开 Job、SSE、模型消息和 CLI 查询不包含业务空间、签名 URL 或私有供应商诊断。C1 的 `await_job` 在 `downloading` 继续等待，直到本次等待到期或用户停止；不会把云端 URL 当成本地成功交付。
+媒体下载限定服务端批准的 HTTPS 主机；每次跳转校验来源，解析到公网地址后固定连接地址并验证原 TLS 主机名。使用独立无鉴权客户端，最多 256 MiB，连接/读取/总超时为 10/30/180 秒，一个自动窗口最多 3 次尝试，重启不刷新额度。文件先写入 `.part`，校验自包含 MP4、H.264、1280×720 和 5 秒规格，计算 SHA-256，再原子发布文件并提交结果；不依赖运行时 FFmpeg。
+
+媒体位于数据目录的 `media/<projectId>/<mediaId>.mp4`，CLI 返回相对位置。`GET /api/media/{mediaId}` 返回元数据与当前可用性；`GET/HEAD /api/media/{mediaId}/content` 支持单 Range，`?download=1` 提供附件下载。播放器只在当前媒体可用时出现，SSE 与快照更新保留同一播放器节点。缺失或损坏的文件返回 410，历史结果保持原样；修复复用原 ID 且必须匹配原 SHA-256。冲突文件需备份移走后再重试；过期 URL 不刷新，也不触发重新生成。
+
+旧 off/mock Run 按原工具、规则与检查点签名恢复；live 使用 tools/rules v3。原 live 配置不可用时返回 `RESUME_CONFIG_CHANGED`，保留等待与累计预算。公开 Job、SSE、模型消息和 CLI 查询不包含业务空间、签名 URL 或私有供应商诊断。`await_job` 在 `downloading` 继续等待，本地提交后才交付；下载失败、等待到期或停止后，后续修复只更新 Job，不复活已结束 Run 或改写历史工具结果。
 
 Mock 始终标记 `simulated: true`、`mediaAvailable: false`，不产生 MP4 或播放/下载链接。调用真实 Agent 仍需要 DeepSeek Key 并消耗文本 Token；B0–B4 的工程验证全部使用离线模型，没有调用真实模型或视频 API。
 
@@ -315,6 +320,11 @@ src/vagent/
   video/jobs.py B1：原子登记、请求冻结、去重、版本检查和启动恢复
   video/tools.py off/mock/live 独立视图、四工具、等待解析与历史兼容
   video/worker.py 串行提交/查询、超时、持久重试、配置阻塞与停止
+  video/media.py C2：安全文件访问、完整性、原子提交、可用性与幂等修复
+  video/media_worker.py C2：独立串行下载、持久额度/期限与强退恢复
+  video/media_http.py C2：HTTPS 来源策略、公网 DNS 固定连接与流量上限
+  video/media_response.py C2：已核验文件的 GET/HEAD、Range 与下载响应
+  video/mp4.py C2：有界 MP4 结构/样本校验与实测元数据
   video/providers/mock.py B1：独立持久上游账本与服务端模拟轨迹
   video/providers/wan.py C1：固定北京协议、独立 HTTP 客户端与提交歧义处理
 skills/        内置 SKILL.md，随 wheel 分发
@@ -395,9 +405,9 @@ node --test tests/test_job_state.mjs
 .\.venv\Scripts\python.exe -m build --no-isolation --outdir dist/python
 ```
 
-2026-10-10 C1 本地 Python 3.12 完整回归：**647 passed，1 skipped**，另有 **7 项前端状态测试通过**。跳过的是当前 Windows 账户无符号链接创建权限的测试。C1 覆盖 v1/v2→v3 原字节迁移、混合 Job 契约、Wan HTTP/错误映射、一次提交、持久查询、双 Key/重启、原 Run 视图、等待与脱敏。M1-A/B 的历史指纹、提交/等待强退、API/SSE、CLI 输入、Windows SIGINT、文本、质量、MCP、流式和缓存回归保持通过，详见 [C1 验收](./docs/M1C_C1_ACCEPTANCE.md)。Node 仅用于开发时检查前端语法与状态逻辑，运行 Agent 无需安装。
+2026-10-10 C2 本地 Python 3.12.14 完整回归：**759 passed，2 skipped**，另有 **11 项前端状态测试通过**，Ruff 与前端语法检查通过。两项跳过因当前 Windows 账户无符号链接创建权限；junction 路径保护测试通过。新增媒体来源/传输/MP4/原子提交、6 个媒体强退点、持久下载/修复、Range、设置与等待验证，M1-A/B/C1 的兼容套件保持通过。Chrome 155 已验证测试视频播放、拖动、下载、刷新与同 ID 修复；范围见 [C2 验收](./docs/M1C_C2_ACCEPTANCE.md)，此前 C1 证据保留在 [C1 验收](./docs/M1C_C1_ACCEPTANCE.md)。Node 仅用于开发检查，运行 Agent 无需安装。
 
-C1 的 wheel/sdist 位于 `dist/m1c-c1/`，已在独立环境通过仓库外 `scripts/wheel_smoke.py` 与 `pip check`。安装记录为被忽略的 `output/m1c-c1-wheel-smoke.json`，覆盖现有文本、Mock、配置、MCP、持久等待和退出；真实媒体安装验收仍属于 C3。远端检查按 [C1 分支 Actions](https://github.com/shifang37/vAgent/actions?query=branch%3Acodex%2Fm1c-c1) 的实际运行结果查看。
+C2 的 wheel/sdist 位于 `dist/m1c-c2/`，新建独立环境安装锁定依赖与 wheel 后，仓库外 `scripts/wheel_smoke.py` 和 `pip check` 均通过。安装记录为被忽略的 `output/m1c-c2-wheel-smoke.json`，覆盖已有文本、Mock、配置、MCP、持久等待和退出；包内媒体模块/Web 资源与源码一致，sdist 保留视频夹具原 SHA-256。专项安装媒体评测与真实联调仍属于 C3。远端检查按 [C2 分支 Actions](https://github.com/shifang37/vAgent/actions?query=branch%3Acodex%2Fm1c-c2) 的实际运行结果查看。
 
 M1-B 固定评测默认离线，通过完整应用入口执行五类用例；`--live` 才调用真实 DeepSeek，视频始终使用 Mock。套件最多 40 次模型尝试，每个 Run 沿用 8/12/180 预算。首个失败即停止，显式续跑校验原数据与检查点，保留原 Run、累计预算和旧报告；不能通过续跑提高上限。
 

@@ -1,3 +1,4 @@
+import asyncio
 import json
 import os
 import subprocess
@@ -16,6 +17,7 @@ from vagent.application import ApplicationService
 from vagent.config import VIDEO_SETTINGS, ConfigUpdate, load_config, update_local_settings
 from vagent.errors import AppError
 from vagent.video.jobs import JobService
+from vagent.video.media_http import MediaHttpClient
 from vagent.video.providers.wan import WanAdapter
 from vagent.video.worker import JobWorker
 from vagent.web import create_app
@@ -46,6 +48,19 @@ def live_runtime(monkeypatch, video_clock):
         return instance
 
     monkeypatch.setattr(application, "WanAdapter", provider)
+
+    async def hold_media(_request):
+        # C1 scenarios intentionally stop before local delivery. Never let the C2
+        # Worker access public hosts while those cloud-only assertions execute.
+        await asyncio.Event().wait()
+
+    monkeypatch.setattr(
+        application,
+        "MediaHttpClient",
+        lambda: MediaHttpClient(
+            transport=httpx.MockTransport(hold_media),
+        ),
+    )
     monkeypatch.setattr(
         application, "JobService", lambda *args, **kwargs: JobService(*args, **kwargs, clock=video_clock)
     )
@@ -379,7 +394,13 @@ async def test_live_wait_survives_restart_until_local_delivery_and_stop_never_re
         restored = service.run_record(run["id"])
         assert restored["status"] == "waiting_external" and restored["modelSteps"] == 2
         assert restored["policy"] == record["policy"] and restored["activeSeconds"] == record["activeSeconds"]
-        assert service.video_jobs.get(original_job.id) == original_job
+        recovered_job = service.video_jobs.get(original_job.id)
+        assert recovered_job.request == original_job.request
+        assert recovered_job.provider_task_id == original_job.provider_task_id
+        assert recovered_job.provider_output == original_job.provider_output
+        assert recovered_job.download.media_id == original_job.download.media_id
+        assert recovered_job.download.attempts >= original_job.download.attempts
+        assert recovered_job.submit_attempts == 1 and recovered_job.status == "downloading"
         assert service.store.snapshot()["waits"][original_wait["id"]]["context"] == original_wait["context"]
         assert len(live_runtime.calls) == 1 and model.calls == 2
         service.stop(run["id"])

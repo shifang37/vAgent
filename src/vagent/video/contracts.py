@@ -853,6 +853,8 @@ class JobV2(Job):
                 raise ValueError("Download location must be derived from server IDs")
             if self.download.window_attempts > self.download_policy.max_attempts_per_window:
                 raise ValueError("Download retries cannot exceed the saved window")
+            if self.download.prepared and self.download.prepared.size_bytes > self.download_policy.max_bytes:
+                raise ValueError("Prepared media cannot exceed the frozen resource limit")
             if self.cost.provider_usage != self.provider_output.usage:
                 raise ValueError("Provider usage comes only from the original task output")
         if self.result is not None and (

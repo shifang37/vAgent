@@ -16,3 +16,11 @@ export function mergeJobs(previous, incoming, sessionId) {
   for (const job of previous) merged = upsertJob(merged, job, sessionId);
   return merged;
 }
+
+export function mediaContentPath(job) {
+  if (job.mode !== "live" || job.status !== "succeeded" || job.mediaAvailable !== true ||
+      job.mediaAvailability?.status !== "available" || job.mediaRefs?.length !== 1) return null;
+  const id = job.mediaRefs[0].mediaId;
+  if (typeof id !== "string" || !/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/.test(id)) return null;
+  return `/api/media/${id}/content`;
+}

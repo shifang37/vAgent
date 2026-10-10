@@ -88,4 +88,23 @@ def job_view(job: Job) -> dict:
         "runId": job.context.run_id,
         "providerTaskId": job.provider_task_id,
         "canRetryQuery": job.query_state == "paused" and job.provider_task_id is not None,
+        **(
+            {
+                "canRetryDownload": job.status == "download_failed"
+                or (
+                    job.status == "succeeded"
+                    and job.media_availability.status == "unavailable"
+                    and job.download.phase in {"failed", "committed"}
+                )
+            }
+            if isinstance(job, JobV2)
+            else {}
+        ),
     }
+
+
+def cli_job_view(job: Job) -> dict:
+    view = job_view(job)
+    if isinstance(job, JobV2) and job.download:
+        view["localMediaPath"] = job.download.relative_path
+    return view

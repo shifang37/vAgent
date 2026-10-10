@@ -26,8 +26,10 @@ from vagent.skills import SkillCatalog, register_skill_tool
 from vagent.storage import FileStore, now
 from vagent.tools import create_project_tools
 from vagent.usage import summarize_usage
-from vagent.video.contracts import parse_job
 from vagent.video.jobs import JobService
+from vagent.video.media import file_io
+from vagent.video.media_http import MediaHttpClient
+from vagent.video.media_worker import MediaWorker
 from vagent.video.providers.mock import MockVideoAdapter
 from vagent.video.providers.wan import WanAdapter
 from vagent.video.tools import register_video_tools, resolve_job_wait
@@ -65,6 +67,9 @@ class ApplicationService:
         self.config_busy = False
         self.video_jobs = None
         self.job_worker = None
+        self.media = None
+        self.media_worker = None
+        self._event_loop = None
         self._job_revisions = {key: job["revision"] for key, job in store.snapshot()["jobs"].items()}
         self.on_event = on_event
         self.wait_coordinator = None
@@ -88,6 +93,7 @@ class ApplicationService:
                 )
             )
             video_jobs = JobService(store, [MockVideoAdapter(store), wan], config=config)
+            media_client = await stack.enter_async_context(MediaHttpClient())
             tool_views = {mode: tools.copy() for mode in ("off", "mock", "live")}
             for mode in ("mock", "live"):
                 register_video_tools(tool_views[mode], video_jobs, mode=mode)
@@ -115,17 +121,22 @@ class ApplicationService:
             service.mcp_status = mcp_status
             service.tool_views = tool_views
             service.video_jobs = video_jobs
+            service.media = video_jobs.media
+            service._event_loop = asyncio.get_running_loop()
             video_jobs.on_change = service._job_event
             service.job_worker = JobWorker(video_jobs)
+            service.media_worker = MediaWorker(service.media, media_client)
             service.wait_coordinator = WaitCoordinator(
                 store,
                 service._waiting_runner,
-                resolvers={"job": lambda binding: resolve_job_wait(store, binding)},
+                resolvers={"job": lambda binding: resolve_job_wait(store, binding, service=video_jobs)},
                 on_event=service._wait_event,
             )
             stack.push_async_callback(service.aclose)
+            await file_io(service.media.refresh_all)
             service.wait_coordinator.start()
             service.job_worker.start()
+            service.media_worker.start()
             yield service
 
     async def aclose(self):
@@ -140,6 +151,8 @@ class ApplicationService:
                 closing.push_async_callback(self.wait_coordinator.stop)
             if self.job_worker:
                 closing.push_async_callback(self.job_worker.stop)
+            if self.media_worker:
+                closing.push_async_callback(self.media_worker.stop)
 
     async def _close_execution(self):
         if self.task and not self.task.done():
@@ -153,6 +166,13 @@ class ApplicationService:
                 self.on_event(event)
 
     def _job_event(self, job):
+        try:
+            current_loop = asyncio.get_running_loop()
+        except RuntimeError:
+            current_loop = None
+        if self._event_loop is not None and current_loop is not self._event_loop:
+            self._event_loop.call_soon_threadsafe(self._job_event, job)
+            return
         if job.revision <= self._job_revisions.get(job.id, -1):
             return
         self._job_revisions[job.id] = job.revision
@@ -170,11 +190,18 @@ class ApplicationService:
     def jobs(self, session_id=None):
         if session_id is not None:
             assert_id(session_id)
-        return [job_view(job) for job in reversed(self.video_jobs.list(session_id=session_id))]
+        return [
+            job_view(self.media.refresh(job)) for job in reversed(self.video_jobs.list(session_id=session_id))
+        ]
 
     def job(self, job_id):
         assert_id(job_id)
-        return job_view(self.video_jobs.get(job_id))
+        return job_view(self.media.refresh(self.video_jobs.get(job_id)))
+
+    def retry_download(self, job_id, request):
+        assert_id(job_id)
+        job = self.video_jobs.get(job_id)
+        return self.media.retry_download(job_id, request, project_id=job.context.project_id)
 
     def retry_query(self, job_id):
         assert_id(job_id)
@@ -184,7 +211,8 @@ class ApplicationService:
     async def work(self):
         """Keep the shared background services alive without creating a new Run."""
         done, _ = await asyncio.wait(
-            [self.job_worker.start(), self.wait_coordinator.start()], return_when=asyncio.FIRST_COMPLETED
+            [self.job_worker.start(), self.media_worker.start(), self.wait_coordinator.start()],
+            return_when=asyncio.FIRST_COMPLETED,
         )
         for task in done:
             task.result()
@@ -203,7 +231,11 @@ class ApplicationService:
                     record["status"] not in {"running", "waiting_external"} or record.get("waitResumeError")
                 ):
                     return record
-                for background in (self.job_worker._task, self.wait_coordinator._task):
+                for background in (
+                    self.job_worker._task,
+                    self.media_worker._task,
+                    self.wait_coordinator._task,
+                ):
                     if background.done():
                         background.result()
                         raise AppError("BACKGROUND_STOPPED", "后台工作循环已退出，任务状态已保留。")
@@ -274,9 +306,15 @@ class ApplicationService:
             "videoGeneration": self.config.video_mode in {"mock", "live"},
             "videoMode": self.config.video_mode,
             "videoSimulated": self.config.video_mode == "mock",
-            "videoMediaAvailable": False,
+            "videoMediaAvailable": any(
+                raw.get("mediaAvailability", {}).get("status") == "available"
+                for raw in self.store.snapshot()["jobs"].values()
+            ),
             "jobWorkerRunning": bool(
                 self.job_worker and self.job_worker._task and not self.job_worker._task.done()
+            ),
+            "mediaWorkerRunning": bool(
+                self.media_worker and self.media_worker._task and not self.media_worker._task.done()
             ),
             "configuration": self.configuration(),
         }
@@ -299,6 +337,9 @@ class ApplicationService:
             "activeVideoMode": self.config.video_mode,
             "videoApiKeyConfigured": bool(saved.video_api_key),
             "videoPermissionStatus": "unverified",
+            "videoEstimate": self.video_jobs.price.model_dump(mode="json", by_alias=True)
+            if self.video_jobs and self.video_jobs.price
+            else None,
             "restartRequired": bool(restart_fields),
             "restartFields": restart_fields,
             "apiKeyConfigured": bool(self.config.api_key and self.config.api_key.strip()),
@@ -432,11 +473,7 @@ class ApplicationService:
             "messages": visible,
             "run": self.run_view(run) if run else None,
             "artifacts": [a for a in state["artifacts"].values() if a["projectId"] == session_id],
-            "jobs": [
-                job_view(parse_job(job))
-                for job in reversed(list(state["jobs"].values()))
-                if job["context"]["projectId"] == session_id
-            ],
+            "jobs": self.jobs(session_id),
             "wait": self._wait_view(state["waits"].get((run or {}).get("activeWaitId"))),
             "draft": copy.deepcopy(self.drafts.get(session_id)),
         }

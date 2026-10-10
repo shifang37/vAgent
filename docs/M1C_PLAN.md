@@ -1,6 +1,6 @@
 # M1-C 任务规划：真实单镜头视频与本地媒体交付
 
-更新日期：2026-10-10。状态：**C0、C1 已完成，C2/C3 尚未实施**。C0 交付 [官方接口核实](./VIDEO_API_NOTES.md)、[冻结契约与迁移夹具](./M1C_CONTRACTS.md)；C1 的版本兼容、万相协议、配置与工具见 [C1 验收](./M1C_C1_ACCEPTANCE.md)。依据：[M1 总计划](../M1_PLAN.md)、[当前能力](../README.md)、[M1-B 验收](./M1B_ACCEPTANCE.md) 和现有视频模块。沿用总计划的 C0–C3 编号，包内按依赖拆分实施。
+更新日期：2026-10-10。状态：**C0–C2 已完成，C3 尚未实施**。C0 交付 [官方接口核实](./VIDEO_API_NOTES.md)、[冻结契约与迁移夹具](./M1C_CONTRACTS.md)；C1 的版本兼容、万相协议、配置与工具见 [C1 验收](./M1C_C1_ACCEPTANCE.md)，媒体交付、恢复与浏览器验证见 [C2 验收](./M1C_C2_ACCEPTANCE.md)。依据：[M1 总计划](../M1_PLAN.md)、[当前能力](../README.md)、[M1-B 验收](./M1B_ACCEPTANCE.md) 和现有视频模块。沿用总计划的 C0–C3 编号，包内按依赖拆分实施。
 
 阶段目标：用户通过 CLI 或 Web 提出单镜头文生视频需求，真实 DeepSeek 调用视频工具，后台只提交一次生成任务；应用取得完整 MP4 并保存到本地，用户可以播放、拖动进度和下载。刷新页面、重启服务、重试查询或下载均复用原 Job 与已确认的上游任务。
 
@@ -16,17 +16,18 @@
 
 ## 2. 现有实现与具体改动位置
 
-| 位置 | C1 完成后的实现 | C2/C3 后续工作 |
+| 位置 | C2 完成后的实现 | C3 后续工作 |
 |---|---|---|
-| `src/vagent/video/contracts.py` | 独立 v1/v2 Job、费用、私有输出、下载记录和媒体契约 | 用实际文件验证下载与媒体约束 |
-| `src/vagent/storage.py` | schema v1/v2→v3、原始字节备份、独立媒体索引及提交不变量 | 文件系统与索引的恢复补偿 |
-| `src/vagent/video/jobs.py`、`worker.py` | 一次提交、原 ID 查询、持久退避/期限/配置阻塞；成功登记下载意图 | 独立 `media.py` / `media_worker.py`，完成本地文件交付 |
+| `src/vagent/video/contracts.py`、`storage.py` | 独立 v1/v2 Job、schema 迁移、媒体索引、结果与历史不变量 | 在专项评测/安装环境继续核验 |
+| `src/vagent/video/jobs.py`、`worker.py` | 一次提交、原 ID 查询、持久退避/期限/配置阻塞；成功登记下载意图 | 核对真实任务、恢复与费用证据 |
+| `src/vagent/video/media.py`、`media_worker.py` | 文件完整性、原子发布、独立下载、持久窗口与强退恢复、同 ID 修复 | 用真实媒体与安装应用验证 |
+| `src/vagent/video/media_http.py`、`mp4.py` | HTTPS 来源策略、公网 DNS 固定连接、有界传输、MP4 样本/规格校验 | 核对实际 CDN、编码与浏览器支持 |
 | `src/vagent/video/providers/` | Mock 与固定北京 `wan.py`；独立 HTTP 客户端和错误映射 | C3 核对真实账号与响应证据 |
-| `src/vagent/video/tools.py`、`views.py` | live tools/rules v3、真实/模拟公开投影、下载期间继续等待 | 下载失败/修复与媒体可用性的端到端验证 |
-| `src/vagent/config.py`、`application.py` | 双 Key、模式/地域/预算、保存后重启、独立工具视图与客户端关闭 | 媒体 Worker 的装配和退出清理 |
-| `src/vagent/wait_runtime.py`、`runner.py` | 复用既有挂起/继续与预算；旧 off/mock Run 按原签名恢复 | 本地媒体交付时的等待竞争验证 |
-| `src/vagent/web.py`、`cli.py`、`web/app.js`、`web/job-state.js` | 真实 Job 查询/API/SSE、重启提示、待下载/费用/阻塞展示 | 媒体接口、下载重试、播放器、完整视频设置表单 |
-| `scripts/`、`tests/`、`.github/workflows/ci.yml` | C1 受控 HTTP/迁移/恢复回归，既有 wheel smoke 与四组平台检查 | 媒体故障矩阵、单视频真实验收及安装版媒体流程 |
+| `src/vagent/video/tools.py`、`views.py` | live tools/rules v3、当前媒体可用性、不可变历史、下载/修复等待 | 原 Run 在真实交付中的结果与预算证据 |
+| `src/vagent/config.py`、`application.py` | 双 Key、保存后重启、媒体 Worker 装配/关闭与启动核验 | 独立安装中的配置与退出流程 |
+| `src/vagent/wait_runtime.py`、`runner.py` | 复用既有挂起/继续与预算；旧签名兼容，本地交付/超时/停止竞争已回归 | 已安装应用的真实工具链路 |
+| `src/vagent/web.py`、`cli.py`、`video/media_response.py`、`web/` | Range/下载重试、完整视频设置、同源播放器、revision 合并且保留播放节点 | 用同一个真实 Job 验收 CLI/Web |
+| `scripts/`、`tests/`、`.github/workflows/ci.yml` | 受控 HTTP/媒体故障矩阵、进程强退、既有 wheel smoke 与四组平台检查 | `evaluate_m1c.py`、专项安装媒体流程和真实单视频报告 |
 
 现有 Agent 核心不引入供应商参数或 HTTP 协议；供应商适配、文件下载、费用估算和重试策略留在视频模块。通用执行接口确需变更时，先验证旧 Run 的恢复兼容性。
 
@@ -36,10 +37,10 @@
 |---|---|---|---|
 | **C0 接口核实与契约冻结（已完成）** | B5 基线已提交；先查官方资料，再确定数据协议 | `docs/VIDEO_API_NOTES.md`、`docs/M1C_CONTRACTS.md`；单模型能力表、价格来源、固定迁移夹具 | 模型/地域/规格、请求/响应、错误边界、链接时效已有可追溯资料；账户状态独立标明；迁移和媒体提交协议已冻结 |
 | **C1 真实适配器与应用接入（已完成）** | C0；依次完成 C1.1 数据迁移、C1.2 HTTP 适配、C1.3 配置/工具装配 | 新 `wan.py`；schema/Job 契约升级；双 Key 配置；live 工具和服务 | 离线走通真实协议的登记与查询；重复调用仅一次 submit；缺 Key、错误响应和旧检查点均有明确行为。此时云端成功只进入待下载状态 |
-| **C2 媒体持久交付与界面** | C1；先 C2.1 下载与恢复，再 C2.2 API/CLI/Web | 新 `video/media.py`、`media_worker.py`；媒体索引、下载重试、Range 接口、播放器 | 完整文件与索引提交后才成功；下载故障或进程强退不重新生成；浏览器可播放、拖动和下载，旧 Mock 卡片继续正常显示 |
+| **C2 媒体持久交付与界面（已完成）** | C1；先 C2.1 下载与恢复，再 C2.2 API/CLI/Web | 新媒体模块、下载重试、Range 接口、播放器与 [C2 验收](./M1C_C2_ACCEPTANCE.md) | 完整文件与索引提交后才成功；下载故障或进程强退不重新生成；受控浏览器播放、拖动、下载与修复通过，旧 Mock 行为兼容 |
 | **C3 端到端验收与打包** | C2；先 C3.1 离线与安装验证，再 C3.2 真实联调 | `scripts/evaluate_m1c.py`、扩展 wheel smoke、`docs/M1C_ACCEPTANCE.md`、wheel/sdist | 已安装应用完成真实 DeepSeek → 单个真实 Job → 本地 MP4；记录恢复、媒体、用量及费用证据；四组 CI 通过，失败记录保留 |
 
-执行顺序：**已提交的 B5 基线 → 已完成 C0 → 已完成 C1.1/C1.2/C1.3 → C2.1 → C2.2 → C3.1 → C3.2**。下一项为 C2.1 的独立媒体 Worker、下载校验与恢复。C1 不将缺少媒体交付的链路标为 M1-C 阶段完成；C3 真实调用之前，离线故障和安装检查先通过。
+执行顺序：**已提交的 B5 基线 → 已完成 C0 → 已完成 C1.1/C1.2/C1.3 → 已完成 C2.1/C2.2 → C3.1 → C3.2**。下一项为 C3.1 的专项离线评测和安装版媒体流程。C2 完成不代表真实账号联调通过；C3 真实调用之前，离线故障和专项安装检查先通过。
 
 ### C0：核实什么
 
@@ -74,7 +75,7 @@ C0 不通过生成视频来验证保存配置。没有可用的非生成验证�
 
 ## 5. C2 状态、下载和恢复
 
-真实任务的计划状态如下；Mock 保持原路径：
+真实任务已实现以下状态；Mock 保持原路径：
 
 ```text
 pending_submit → submitting → queued/running → downloading → succeeded
@@ -99,7 +100,7 @@ pending_submit → submitting → queued/running → downloading → succeeded
 
 1. 持久登记下载意图、稳定 mediaId 和尝试次数。
 2. 流式写入 `.part`，核对大小、MP4 结构及可取得的完整性信息，计算 SHA-256，刷盘并关闭文件。
-3. 保存待提交文件的大小/哈希等恢复元数据，再在同一目录原子重命名为最终文件。
+3. 保存待提交文件的大小/哈希等恢复元数据，再在同一目录原子发布最终文件，保留已有冲突文件。
 4. 在一次 Store 事务中提交 MediaAsset、真实 JobResult 和 Job succeeded，随后才允许等待结果交付。
 5. 启动时核对 `.part`、最终文件及提交阶段；依据记录校验并完成原 mediaId 的提交，或重新下载。强退点不得产生重复媒体引用、未写完的成功文件或第二次生成。
 
@@ -107,19 +108,19 @@ pending_submit → submitting → queued/running → downloading → succeeded
 
 ### CLI/Web 交付
 
-以下为计划接口，尚未实现：
+以下接口已在 C2 实现，证据见 [C2 验收](./M1C_C2_ACCEPTANCE.md)：
 
 | 接口或入口 | 行为 |
 |---|---|
 | `GET /api/media/{mediaId}` | 返回当前媒体可用性、规格、大小和来源；不返回磁盘绝对路径或签名 URL |
 | `GET/HEAD /api/media/{mediaId}/content` | 按 ID 读取本地 MP4；正确处理完整响应、单 Range 的 206、不可满足的 416 与相关长度头 |
-| `POST /api/jobs/{jobId}/retry-download` | 用户修复问题后重试原 Job 的下载；重复请求/正在下载时不创建第二个下载执行，沿用 CSRF 和状态校验 |
+| `POST /api/jobs/{jobId}/retry-download` | 请求体为 `{clientRequestId, expectedRevision}`，返回 202；重复请求/正在下载时不创建第二个执行，沿用 CSRF，参数冲突或旧 revision 返回 409 |
 | `vagent jobs retry-download JOB_ID` | 与 Web 共用服务；Job 查询输出媒体 ID、受控本地位置、下载状态和费用记录 |
 | 设置页 | 视频 Key、供应商/模型/地域、估价与金额上限；展示配置来源和需要重启的修改，保存配置不产生视频任务 |
 | Job 卡片 | 区分模拟、云端排队/生成、下载中、已完成、查询暂停和下载失败；显示原来源版本、实际采用参数、估价/实际费用状态 |
 | 本地播放器 | 仅完整媒体可用时显示；支持播放、拖动和下载，CSP 允许同源 media；刷新后恢复同一 Job/mediaId |
 
-继续使用 Job revision 合并快照和 SSE，Run 结束后媒体状态仍可更新。下载流和页面渲染应保证取消信号能够及时处理，保留 Python 3.11 的 CLI 退出回归。播放接口沿用本地 Host/Origin 边界，处理不存在 ID、路径越界、文件缺失和非法 Range；前端不展示虚构的生成进度百分比。
+继续使用 Job revision 合并快照和 SSE，Run 结束后媒体状态仍可更新；快照更新保留同一播放器节点。读取会核验本地可用性并可能保存新 revision，不发起上游请求。下载流与页面渲染处理取消，保留 Python 3.11 的 CLI 退出回归。播放接口沿用本地 Host/Origin 边界，处理不存在 ID、路径越界、文件缺失和非法 Range；前端不展示虚构的生成进度百分比。
 
 ## 6. C3 验收矩阵
 
@@ -154,7 +155,7 @@ pending_submit → submitting → queued/running → downloading → succeeded
 - [x] B5 已独立提交为 `2cc764d`，C 阶段实现基线与相关本地验证记录明确。
 - [x] C0：官方接口、能力、价格、错误边界、媒体/迁移契约及固定夹具已记录；账户权限明确标为未验证，视频 submit=0。
 - [x] C1：真实适配器、双 Key 配置、live 工具及旧数据/检查点兼容通过离线验证，详见 [C1 验收](./M1C_C1_ACCEPTANCE.md)。
-- [ ] C2：真实成功以本地媒体提交为条件；下载重试与强退恢复保持一次生成，CLI/Web 可播放下载。
+- [x] C2：live 成功以本地媒体提交为条件；下载重试与强退恢复保持一次生成，CLI/Web 媒体入口已通过受控视频与浏览器验证。
 - [ ] C3：已安装应用完成至少一次真实单镜头交付，报告保留原任务、媒体和费用证据；离线/真实结果分开记录。
 - [ ] 完整回归、四组 CI、wheel/sdist 与仓库外 smoke 通过，README/总计划/验收文档同步更新。
 

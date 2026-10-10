@@ -18,8 +18,9 @@ from vagent.skills import SkillCatalog
 from vagent.storage import FileStore
 from vagent.usage import summarize_usage
 from vagent.video.jobs import JobService
+from vagent.video.media import DownloadRetry
 from vagent.video.providers.wan import WanAdapter
-from vagent.video.views import job_view
+from vagent.video.views import cli_job_view
 
 
 def print_json(value: object) -> None:
@@ -191,10 +192,12 @@ async def execute_cli(service, session_id, *, prompt=None, request_id=None, read
 
 
 def show_job_exit_hint(service):
-    if any(job["status"] in {"pending_submit", "submitting", "queued", "running"} for job in service.jobs()):
+    if any(
+        job["status"] in {"pending_submit", "submitting", "queued", "running", "downloading"}
+        or (job.get("download") or {}).get("phase") in {"pending", "writing", "prepared"}
+        for job in service.jobs()
+    ):
         print("[Job] 未结束的任务已保存。CLI 退出后停止推进；使用 vagent web 或 vagent jobs work 继续。")
-    if any(job["status"] == "downloading" for job in service.jobs()):
-        print("[Job] 云端结果已保存，等待本地下载；当前版本尚未提供媒体交付。")
 
 
 async def work_jobs(config):
@@ -219,17 +222,34 @@ def local_jobs(config, args):
         if args.action == "list":
             if args.session is not None:
                 assert_id(args.session)
-            print_json({"jobs": [job_view(job) for job in reversed(service.list(session_id=args.session))]})
+            print_json(
+                {
+                    "jobs": [
+                        cli_job_view(service.media.refresh(job))
+                        for job in reversed(service.list(session_id=args.session))
+                    ]
+                }
+            )
         else:
             assert_id(args.job_id)
-            job = service.get(args.job_id)
+            job = service.media.refresh(service.get(args.job_id))
             if args.action == "retry-query":
                 job = (
                     asyncio.run(retry_live_query(config, store, job))
                     if job.mode == "live"
                     else service.retry_query(job.id, project_id=job.context.project_id)
                 )
-            print_json(job_view(job))
+            if args.action == "retry-download":
+                service.media.retry_download(
+                    job.id,
+                    DownloadRetry(
+                        client_request_id=str(uuid4()),
+                        expected_revision=job.revision,
+                    ),
+                    project_id=job.context.project_id,
+                )
+                job = service.get(job.id)
+            print_json(cli_job_view(job))
 
 
 async def retry_live_query(config, store, job):
@@ -303,6 +323,7 @@ def parser() -> argparse.ArgumentParser:
     listing.add_argument("-s", "--session")
     actions.add_parser("get", help="查看一个本地任务").add_argument("job_id")
     actions.add_parser("retry-query", help="恢复已暂停的原任务查询，不重新提交").add_argument("job_id")
+    actions.add_parser("retry-download", help="恢复原媒体下载，复用任务和媒体 ID").add_argument("job_id")
     actions.add_parser("work", help="持续推进任务和有效等待；Ctrl+C 退出并保留状态")
     web = commands.add_parser("web", help="启动本地 Web 与真实 Agent 编排")
     web.add_argument("--port", type=int, default=3210)
