@@ -3,10 +3,19 @@
 import asyncio
 import copy
 from contextlib import AsyncExitStack, asynccontextmanager, suppress
+from dataclasses import replace
 from uuid import uuid4
 
 from vagent.cache import AnswerCache
-from vagent.config import Config, ConfigUpdate, assert_id, config_sources, require_key, update_local_settings
+from vagent.config import (
+    VIDEO_SETTINGS,
+    Config,
+    ConfigUpdate,
+    assert_id,
+    config_sources,
+    require_key,
+    update_local_settings,
+)
 from vagent.context import ContextBuilder
 from vagent.errors import AppError, public_error
 from vagent.http import ModelHttpClient
@@ -17,9 +26,10 @@ from vagent.skills import SkillCatalog, register_skill_tool
 from vagent.storage import FileStore, now
 from vagent.tools import create_project_tools
 from vagent.usage import summarize_usage
-from vagent.video.contracts import Job
+from vagent.video.contracts import parse_job
 from vagent.video.jobs import JobService
 from vagent.video.providers.mock import MockVideoAdapter
+from vagent.video.providers.wan import WanAdapter
 from vagent.video.tools import register_video_tools, resolve_job_wait
 from vagent.video.views import job_view
 from vagent.video.worker import JobWorker
@@ -41,6 +51,8 @@ class ApplicationService:
         on_event=None,
     ):
         self.config, self.store, self.catalog, self.tools = config, store, catalog, tools
+        self._settings_config = config
+        self.tool_views = {config.video_mode: tools}
         self.http_client, self.model, self.cache = http_client, model, cache
         self.policy = policy or RunPolicy()
         self.mcp_status = []
@@ -66,14 +78,26 @@ class ApplicationService:
             client = await stack.enter_async_context(ModelHttpClient(timeout=60))
             catalog = SkillCatalog.discover(config.skills_root)
             tools = register_skill_tool(create_project_tools(), catalog)
-            # Startup mode controls new tools. Previously registered mock Jobs keep
-            # their saved adapter even when new Runs start with video mode off.
-            video_jobs = JobService(store, [MockVideoAdapter(store)])
-            if config.video_mode == "mock":
-                register_video_tools(tools, video_jobs)
+            # A separate HTTP pool is closed after Workers release all in-flight calls.
+            wan = await stack.enter_async_context(
+                WanAdapter(
+                    api_key=config.video_api_key,
+                    workspace_id=config.video_workspace_id,
+                    model=config.video_model,
+                    region=config.video_region,
+                )
+            )
+            video_jobs = JobService(store, [MockVideoAdapter(store), wan], config=config)
+            tool_views = {mode: tools.copy() for mode in ("off", "mock", "live")}
+            for mode in ("mock", "live"):
+                register_video_tools(tool_views[mode], video_jobs, mode=mode)
+            tools = tool_views[config.video_mode]
             mcp_status = await stack.enter_async_context(
                 connect_mcp(tools, server_configs(config.mcp_config, config.mcp_local))
             )
+            for view in tool_views.values():
+                if view is not tools:
+                    view.include_external_tools(tools)
             cache = AnswerCache.connect(config.redis_url, ttl=config.cache_ttl) if config.redis_url else None
             if cache:
                 stack.push_async_callback(cache.aclose)
@@ -89,6 +113,7 @@ class ApplicationService:
                 on_event=on_event,
             )
             service.mcp_status = mcp_status
+            service.tool_views = tool_views
             service.video_jobs = video_jobs
             video_jobs.on_change = service._job_event
             service.job_worker = JobWorker(video_jobs)
@@ -195,6 +220,7 @@ class ApplicationService:
     def _waiting_runner(self, record):
         if self.config_busy:
             raise AppError("CONFIG_BUSY", "配置验证正在进行，外部结果已保留，稍后继续原 Run。")
+        self._check_resume_video(record)
         return self.runner(
             read_only=record.get("readOnly", False),
             video_mode=record.get("videoMode", "off"),
@@ -207,9 +233,9 @@ class ApplicationService:
 
     def runner(self, *, read_only=False, on_event=None, model=None, video_mode=None):
         mode = self.config.video_mode if video_mode is None else video_mode
-        if mode not in {"off", self.config.video_mode}:
-            raise AppError("RESUME_CONFIG_CHANGED", "原 Run 的视频模式未启用，请恢复原启动配置。")
-        tools = self.tools.without_feature("video") if mode == "off" else self.tools
+        if mode not in self.tool_views:
+            raise AppError("RESUME_CONFIG_CHANGED", "缺少原 Run 模式的工具视图。")
+        tools = self.tool_views[mode]
         chosen = (
             model
             or self.model
@@ -245,7 +271,7 @@ class ApplicationService:
                 "toolCalls": self.policy.max_tool_calls,
                 "seconds": self.policy.timeout_seconds,
             },
-            "videoGeneration": self.config.video_mode == "mock",
+            "videoGeneration": self.config.video_mode in {"mock", "live"},
             "videoMode": self.config.video_mode,
             "videoSimulated": self.config.video_mode == "mock",
             "videoMediaAvailable": False,
@@ -256,16 +282,28 @@ class ApplicationService:
         }
 
     def configuration(self):
-        sources = config_sources(self.config)
+        saved = self._settings_config
+        sources = config_sources(saved)
+        restart_fields = [
+            name
+            for name, (attr, _, _) in VIDEO_SETTINGS.items()
+            if getattr(saved, attr) != getattr(self.config, attr)
+        ]
         return {
             "model": self.config.model,
-            "videoMode": self.config.video_mode,
+            **{
+                name: getattr(saved, attr)
+                for name, (attr, _, _) in VIDEO_SETTINGS.items()
+                if name != "videoApiKey"
+            },
+            "activeVideoMode": self.config.video_mode,
+            "videoApiKeyConfigured": bool(saved.video_api_key),
+            "videoPermissionStatus": "unverified",
+            "restartRequired": bool(restart_fields),
+            "restartFields": restart_fields,
             "apiKeyConfigured": bool(self.config.api_key and self.config.api_key.strip()),
             "sources": sources,
-            "editable": {
-                key: key != "videoMode" and source not in {"environment", "provided"}
-                for key, source in sources.items()
-            },
+            "editable": {key: source not in {"environment", "provided"} for key, source in sources.items()},
             "validation": copy.deepcopy(self.validation),
             "busy": self.config_busy
             or bool(self.task and not self.task.done())
@@ -283,7 +321,13 @@ class ApplicationService:
     def save_configuration(self, update: ConfigUpdate):
         self._check_config_idle()
         previous = (self.config.api_key, self.config.model)
-        self.config = update_local_settings(self.config, update)
+        updated = update_local_settings(self._settings_config, update)
+        self._settings_config = updated
+        # Text settings retain their established immediate behavior. Video clients,
+        # capability views and queue budgets all keep their startup snapshot.
+        self.config = replace(
+            updated, **{attr: getattr(self.config, attr) for attr, _, _ in VIDEO_SETTINGS.values()}
+        )
         if previous != (self.config.api_key, self.config.model):
             self.validation = {"status": "unverified"}
         return self.configuration()
@@ -389,7 +433,7 @@ class ApplicationService:
             "run": self.run_view(run) if run else None,
             "artifacts": [a for a in state["artifacts"].values() if a["projectId"] == session_id],
             "jobs": [
-                job_view(Job.model_validate(job))
+                job_view(parse_job(job))
                 for job in reversed(list(state["jobs"].values()))
                 if job["context"]["projectId"] == session_id
             ],
@@ -513,10 +557,25 @@ class ApplicationService:
             raise AppError("CONFIG_BUSY", "配置验证正在进行，请稍后继续任务。")
         if self.task and not self.task.done():
             raise AppError("RUN_BUSY", "已有任务正在运行，请等待完成或停止后重试。")
+        self._check_resume_video(record)
         runner = self.runner(
             read_only=record.get("readOnly", False), video_mode=record.get("videoMode", "off")
         )
         return await self._launch(runner, record["sessionId"], resume_id=run_id)
+
+    def _check_resume_video(self, record):
+        if record.get("videoMode", "off") != "live":
+            return
+        try:
+            self.video_jobs.check_live_configuration()
+            for job in self.video_jobs.list(session_id=record["sessionId"]):
+                if job.context.run_id == record["id"]:
+                    self.video_jobs.check_runtime(job)
+        except AppError:
+            raise AppError(
+                "RESUME_CONFIG_CHANGED",
+                "原 live Run 的视频配置不可用，任务与等待结果已保留；请补齐原业务空间配置。",
+            ) from None
 
     def _event_sink(self, session_id, *, run_id=None, ready=None):
         def event_sink(event):

@@ -7,13 +7,15 @@ from vagent.contracts import Identifier
 from vagent.errors import AppError, failure
 from vagent.storage import FileStore
 from vagent.tools import Arguments, ToolDefinition, ToolFeature, ToolRegistry
-from vagent.video.contracts import Job, VideoRequest
+from vagent.video.contracts import Job, JobV2, VideoIntentV2, VideoRequest, parse_job
 from vagent.video.jobs import JobService
 from vagent.video.views import job_snapshot
 from vagent.waiting import ExternalResourceRef, ToolExecutionContext, ToolResultError, WaitBinding
 
 VIDEO_TOOLS_VERSION = 2
 VIDEO_RULES_VERSION = 2
+LIVE_VIDEO_TOOLS_VERSION = 3
+LIVE_VIDEO_RULES_VERSION = 3
 WAIT_TIMEOUT_SECONDS = 600
 
 LEGACY_VIDEO_RULES = """当前启用 mock 视频模式，只能登记模拟任务；所有结果均为 simulated=true、mediaAvailable=false。
@@ -32,6 +34,16 @@ VIDEO_RULES = LEGACY_VIDEO_RULES.replace(
     "job_get 读取本地状态；不要循环查询。等待到期、提交不确定或查询暂停时明确报告原因。",
 )
 
+LIVE_VIDEO_RULES = """当前启用 live 视频模式，可登记真实万相单镜头文生视频任务。
+生成前调用 video_capabilities，按返回的精确模型、能力版本和完整规格组合构造 video_generate；不猜测或替换模型、地域、时长及画幅。
+sourceRefs 可省略；引用文本产物须使用工具确认的 artifactId 和确切 version，保持原来源版本。
+video_generate 只登记本地 Job，后台最多提交一次；每个 Run 最多新建一个 Job，不拆分、降低规格或新建替代任务。
+需要等待时调用 await_job，Run 持久挂起并在结果就绪后续接原调用；等待不请求模型，不占活动时间。job_get 只读本地事实，不循环查询。
+云端成功进入 downloading，只表示已有上游结果；完整本地媒体交付后才是 succeeded。只有 mediaAvailable=true 且有 mediaRefs 时才能报告媒体可用，不能编造下载地址。
+费用 estimate 是后端报价，actual 未取得账单时始终未知；不能把估算或供应商 usage 当作实际扣费。
+缺配置、提交不确定、查询暂停、下载失败或等待超时，应报告原 jobId 和具体原因；修复沿用原任务，不能再次生成。停止 Agent 不代表云端取消。
+不要索取、读取或展示视频 Key、签名 URL 或供应商私有配置。"""
+
 LEGACY_AWAIT_DESCRIPTION = (
     "读取当前项目 Job 的终态；未结束时保存持久等待并返回通用延迟标记。"
     "当前执行器尚不支持挂起，遇到未完成任务会结束本次 Run；不要用它轮询。"
@@ -45,13 +57,26 @@ class JobLookup(Arguments):
 def completed_job_data(job: Job) -> dict:
     """Raw success data or a bounded error, for immediate waits and the B3 resolver."""
     if job.status == "succeeded":
+        if isinstance(job, JobV2) and job.media_availability.status != "available":
+            if job.download.repair and job.download.phase in {"pending", "writing", "prepared"}:
+                raise AppError("JOB_NOT_READY", "原媒体正在修复。")
+            raise AppError("JOB_MEDIA_UNAVAILABLE", f"任务 {job.id} 的本地媒体当前不可用。")
         return job_snapshot(job)
+    if job.status == "download_failed":
+        raise AppError(
+            "JOB_DOWNLOAD_FAILED", f"任务 {job.id} 已生成，但本地下载失败（{job.error.code}）；保留原任务。"
+        )
     if job.status == "failed":
         raise AppError("JOB_FAILED", f"任务 {job.id} 已失败（{job.error.stage}/{job.error.code}）。")
     if job.status == "unknown":
         raise AppError("JOB_SUBMISSION_UNKNOWN", f"任务 {job.id} 的提交结果不确定，不会自动重新提交。")
     if job.query_state == "paused":
         raise AppError("JOB_QUERY_PAUSED", f"任务 {job.id} 的查询已暂停；生成状态未变，需要恢复原任务查询。")
+    if isinstance(job, JobV2) and job.runtime_block is not None:
+        raise AppError(
+            "VIDEO_PROVIDER_UNAVAILABLE",
+            f"任务 {job.id} 的执行条件未满足（{job.runtime_block.code}），请补齐原任务配置。",
+        )
     raise AppError("JOB_NOT_READY", "视频任务尚未结束。")
 
 
@@ -61,47 +86,49 @@ def resolve_job_wait(store: FileStore, binding: WaitBinding) -> dict | None:
     if raw is None or raw["context"]["projectId"] != binding.context.project_id:
         return failure("JOB_NOT_FOUND", "没有这个视频任务。")
     try:
-        return {"ok": True, "data": completed_job_data(Job.model_validate(raw))}
+        return {"ok": True, "data": completed_job_data(parse_job(raw))}
     except AppError as error:
         if error.code == "JOB_NOT_READY":
             return None
         return failure(error.code, str(error))
 
 
-def register_video_tools(registry: ToolRegistry, service: JobService) -> ToolRegistry:
-    capabilities = [item.model_dump(mode="json", by_alias=True) for item in service.capabilities()]
-    if not capabilities or any(item["mode"] != "mock" for item in capabilities):
-        raise AppError("VIDEO_PROVIDER_UNAVAILABLE", "mock 模式需要已配置的模拟视频适配器。")
+def register_video_tools(registry: ToolRegistry, service: JobService, *, mode="mock") -> ToolRegistry:
+    capabilities = [item.model_dump(mode="json", by_alias=True) for item in service.capabilities(mode)]
+    if mode not in {"mock", "live"} or not capabilities:
+        raise AppError("VIDEO_PROVIDER_UNAVAILABLE", "缺少原模式的视频适配器和能力表。")
+    live = mode == "live"
     registry.register_feature(
         ToolFeature(
             name="video",
             configuration={
-                "mode": "mock",
-                "toolsVersion": VIDEO_TOOLS_VERSION,
-                "rulesVersion": VIDEO_RULES_VERSION,
+                "mode": mode,
+                "toolsVersion": LIVE_VIDEO_TOOLS_VERSION if live else VIDEO_TOOLS_VERSION,
+                "rulesVersion": LIVE_VIDEO_RULES_VERSION if live else VIDEO_RULES_VERSION,
                 "capabilities": capabilities,
             },
-            instructions=VIDEO_RULES,
+            instructions=LIVE_VIDEO_RULES if live else VIDEO_RULES,
             bypass_answer_cache=True,
         )
     )
-    registry.register_execution_variant(
-        1,
-        features=[
-            ToolFeature(
-                name="video",
-                configuration={
-                    "mode": "mock",
-                    "toolsVersion": 1,
-                    "rulesVersion": 1,
-                    "capabilities": capabilities,
-                },
-                instructions=LEGACY_VIDEO_RULES,
-                bypass_answer_cache=True,
-            )
-        ],
-        descriptions={"await_job": LEGACY_AWAIT_DESCRIPTION},
-    )
+    if not live:
+        registry.register_execution_variant(
+            1,
+            features=[
+                ToolFeature(
+                    name="video",
+                    configuration={
+                        "mode": "mock",
+                        "toolsVersion": 1,
+                        "rulesVersion": 1,
+                        "capabilities": capabilities,
+                    },
+                    instructions=LEGACY_VIDEO_RULES,
+                    bypass_answer_cache=True,
+                )
+            ],
+            descriptions={"await_job": LEGACY_AWAIT_DESCRIPTION},
+        )
     registry.register_wait_resolver(
         "job", lambda binding: resolve_job_wait(service.store, binding), feature="video"
     )
@@ -116,7 +143,13 @@ def register_video_tools(registry: ToolRegistry, service: JobService) -> ToolReg
             context.operation_key,
             "video_capabilities",
             args,
-            lambda _: {"mode": "mock", "simulated": True, "mediaAvailable": False, "models": capabilities},
+            lambda _: {
+                "mode": mode,
+                "simulated": not live,
+                "mediaAvailable": False,
+                "models": capabilities,
+                **({"configuration": service.configuration_status()} if live else {}),
+            },
         )
 
     def generate(args, store, context):
@@ -162,7 +195,11 @@ def register_video_tools(registry: ToolRegistry, service: JobService) -> ToolReg
                 raise error
 
             return store.operation(key, "await_job", args, reject)
-        if job.status in {"succeeded", "failed", "unknown"} or job.query_state == "paused":
+        if (
+            job.status in {"succeeded", "failed", "unknown", "download_failed"}
+            or job.query_state == "paused"
+            or (isinstance(job, JobV2) and job.runtime_block is not None)
+        ):
             return store.operation(key, "await_job", args, lambda _: completed_job_data(job))
         timestamp = service.timestamp()
         binding = WaitBinding(
@@ -188,7 +225,9 @@ def register_video_tools(registry: ToolRegistry, service: JobService) -> ToolReg
     for definition in (
         ToolDefinition(
             "video_capabilities",
-            "读取当前模拟视频模型、能力版本和完整合法规格组合；生成前先查询，不自行猜测规格。",
+            "读取当前真实视频模型、完整规格、固定参数、估价及配置状态；生成前先查询，不自行猜测。"
+            if live
+            else "读取当前模拟视频模型、能力版本和完整合法规格组合；生成前先查询，不自行猜测规格。",
             Arguments,
             "read",
             context_execute=read_capabilities,
@@ -196,9 +235,16 @@ def register_video_tools(registry: ToolRegistry, service: JobService) -> ToolReg
         ),
         ToolDefinition(
             "video_generate",
-            "登记一个模拟视频 Job，返回 jobId 与登记状态；不提交上游、不交付真实媒体。"
-            "按能力表选择完整规格；来源须属于当前项目并指定 version。每个 Run 最多新建一个 Job。",
-            VideoRequest,
+            (
+                "登记一个真实视频 Job，返回 jobId 与登记状态；后台仅提交一次，云端成功后还需本地媒体交付。"
+                "按能力表选择完整规格；来源须属于当前项目并指定 version。每个 Run 最多新建一个 Job。"
+            )
+            if live
+            else (
+                "登记一个模拟视频 Job，返回 jobId 与登记状态；不提交上游、不交付真实媒体。"
+                "按能力表选择完整规格；来源须属于当前项目并指定 version。每个 Run 最多新建一个 Job。"
+            ),
+            VideoIntentV2 if live else VideoRequest,
             "write",
             context_execute=generate,
             feature="video",

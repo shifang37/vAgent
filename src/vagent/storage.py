@@ -18,7 +18,7 @@ from pydantic.alias_generators import to_camel
 
 from vagent.config import assert_id
 from vagent.errors import AppError, failure
-from vagent.video.contracts import Job
+from vagent.video.contracts import Job, MediaAsset, StoredJob
 from vagent.waiting import WAIT_EXECUTION_VERSION, WaitBinding
 
 T = TypeVar("T")
@@ -152,7 +152,7 @@ class RunRecordV1(Record):
     events: list[dict[str, Any]] = Field(default_factory=list)
 
 
-class RunRecord(RunRecordV1):
+class RunRecordV2(RunRecordV1):
     status: Literal["running", "waiting_external", "completed", "failed", "cancelled", "interrupted"]
     video_mode: Literal["off", "mock"] = "off"
     tool_features: dict[str, dict[str, JsonValue]] = Field(default_factory=dict)
@@ -160,6 +160,10 @@ class RunRecord(RunRecordV1):
     external_wait_seconds: float = Field(default=0, ge=0, allow_inf_nan=False)
     external_wait_started_at: str | None = None
     wait_resume_error: dict[str, str] | None = None
+
+
+class RunRecord(RunRecordV2):
+    video_mode: Literal["off", "mock", "live"] = "off"
 
 
 class Success(Record):
@@ -191,11 +195,32 @@ class DatabaseV1(Record):
     operations: dict[str, Operation]
 
 
-class Database(DatabaseV1):
+class DatabaseV2(DatabaseV1):
     schema_version: Literal[2]
-    runs: dict[str, RunRecord]
+    runs: dict[str, RunRecordV2]
     jobs: dict[str, Job]
     waits: dict[str, WaitBinding]
+
+
+class Database(DatabaseV2):
+    schema_version: Literal[3]
+    runs: dict[str, RunRecord]
+    jobs: dict[str, StoredJob]
+    media: dict[str, MediaAsset]
+
+
+def migrated_state(state: dict) -> dict:
+    """Mechanical envelope upgrade; never re-encode historical domain objects."""
+    version = state["schemaVersion"]
+    if type(version) is not int or version not in {1, 2, 3}:
+        raise ValueError("Unsupported schema version")
+    upgraded = copy.deepcopy(state)
+    if version == 3:
+        return upgraded
+    if version == 1:
+        upgraded.update(jobs={}, waits={})
+    upgraded.update(schemaVersion=3, media={})
+    return upgraded
 
 
 class FileStore:
@@ -223,7 +248,7 @@ class FileStore:
                 raw = (home / "state.json").read_bytes()
             except FileNotFoundError:
                 state = {
-                    "schemaVersion": 2,
+                    "schemaVersion": 3,
                     "projects": {},
                     "sessions": {},
                     "artifacts": {},
@@ -231,35 +256,40 @@ class FileStore:
                     "operations": {},
                     "jobs": {},
                     "waits": {},
+                    "media": {},
                 }
             else:
                 try:
                     state = json.loads(raw)
                     version = state["schemaVersion"]
-                    if type(version) is not int or version not in {1, 2}:
+                    if type(version) is not int or version not in {1, 2, 3}:
                         raise ValueError("Unsupported schema version")
-                    (DatabaseV1 if version == 1 else Database).model_validate(state)
+                    {1: DatabaseV1, 2: DatabaseV2, 3: Database}[version].model_validate(state)
                     for collection in (state["sessions"], state["runs"]):
                         for item in collection.values():
                             messages_from_dict(item["messages"])
-                except (ValueError, TypeError, KeyError):
+                    from vagent.video.jobs import validate_job_changes
+
+                    checked = migrated_state(state) if version < 3 else state
+                    validate_job_changes(checked["jobs"], checked)
+                except (ValueError, TypeError, KeyError, AppError):
                     raise AppError(
                         "INVALID_STORE", "本地状态损坏或版本不支持，已保留原文件，未重置数据。"
                     ) from None
-                if version == 1:
+                if version < 3:
                     # Keep the exact pre-migration bytes, including legacy message encoding.
-                    # The final transaction below is the only replacement of state.json.
-                    atomic_write_bytes(home / f"state-v1-{uuid4()}.json", raw)
-                    state = {**copy.deepcopy(state), "schemaVersion": 2, "jobs": {}, "waits": {}}
+                    atomic_write_bytes(home / f"state-v{version}-{uuid4()}.json", raw)
+                    state = migrated_state(state)
                     Database.model_validate(state)
+                    # Migration and runtime recovery are distinct commits. In particular,
+                    # no fingerprints/default fields or SQLite checkpoints are rewritten.
+                    atomic_write_json(home / "state.json", state)
             store = cls(home, state)
 
             def recover(draft: dict) -> None:
                 from vagent.video.jobs import recover_interrupted_jobs
 
                 for run in draft["runs"].values():
-                    run.setdefault("contextBytes", 0)
-                    run.setdefault("droppedMessages", 0)
                     if run["status"] == "running":
                         run.update(status="interrupted", updatedAt=now())
                         # An abruptly lost model request has unknown elapsed time. Charge
@@ -322,13 +352,14 @@ class FileStore:
             yield
 
     def transaction(self, mutate: Callable[[dict], T]) -> T:
-        from vagent.video.jobs import validate_job_changes
+        from vagent.video.jobs import validate_job_changes, validate_media_changes
 
         with self.locked():
             draft = copy.deepcopy(self._state)
             value = mutate(draft)
             Database.model_validate(draft)
             validate_job_changes(self._state["jobs"], draft)
+            validate_media_changes(self._state["media"], draft)
             atomic_write_json(self.home / "state.json", draft)
             self._state = draft
             return copy.deepcopy(value)

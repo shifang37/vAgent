@@ -206,6 +206,16 @@ class ToolRegistry:
     def without_feature(self, name: str) -> "ToolRegistry":
         return self._filtered(lambda definition: definition.feature != name)
 
+    def copy(self) -> "ToolRegistry":
+        return self._filtered(lambda _: True)
+
+    def include_external_tools(self, source: "ToolRegistry") -> "ToolRegistry":
+        """Share already connected MCP handlers across independent capability views."""
+        for definition in source._definitions.values():
+            if definition.async_execute:
+                self.register(definition)
+        return self
+
     def _filtered(self, include: Callable[[ToolDefinition], bool]) -> "ToolRegistry":
         registry = ToolRegistry()
         registry._features = copy.deepcopy(self._features)

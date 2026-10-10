@@ -84,7 +84,7 @@ async def test_application_model_discovers_capability_and_creates_one_job(tmp_pa
         assert record["videoMode"] == "mock" and record["executionVersion"] == 2
         assert record["toolFeatures"]["video"]["toolsVersion"] == 2
         assert record["toolFeatures"]["video"]["capabilities"] == [
-            item.model_dump(mode="json", by_alias=True) for item in service.video_jobs.capabilities()
+            item.model_dump(mode="json", by_alias=True) for item in service.video_jobs.capabilities("mock")
         ]
         assert record["modelSteps"] == 5 and record["toolCalls"] == 5
         state = service.store.snapshot()
@@ -123,7 +123,7 @@ async def test_configuration_exposes_startup_mode_and_rejects_hot_switch(tmp_pat
             rejected = await client.patch(
                 "/api/config", json={"videoMode": "mock" if mode == "off" else "off"}
             )
-            assert rejected.status_code == 422
+            assert rejected.status_code == 409 and rejected.json()["error"]["code"] == "CONFIG_OVERRIDE"
             saved = await client.patch("/api/config", json={"model": "offline-model"})
             assert saved.status_code == 200 and saved.json()["videoMode"] == mode
             assert "videoMode" not in (tmp_path / "config.yml").read_text(encoding="utf-8")

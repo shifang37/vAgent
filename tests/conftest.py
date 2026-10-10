@@ -122,7 +122,9 @@ def job_runtime(monkeypatch, video_clock):
 
     monkeypatch.setattr(application, "MockVideoAdapter", adapter)
     monkeypatch.setattr(
-        application, "JobService", lambda store, adapters: JobService(store, adapters, clock=video_clock)
+        application,
+        "JobService",
+        lambda store, adapters, **kwargs: JobService(store, adapters, clock=video_clock, **kwargs),
     )
     monkeypatch.setattr(
         application, "JobWorker", lambda service: JobWorker(service, idle_interval_seconds=0.005)

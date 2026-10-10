@@ -7,7 +7,7 @@ import pytest
 from conftest import ScriptedModel
 from langchain_core.messages import AIMessage
 
-from vagent.config import ConfigUpdate, load_config, update_local_settings
+from vagent.config import VIDEO_SETTINGS, ConfigUpdate, load_config, update_local_settings
 from vagent.errors import AppError
 from vagent.web import create_app
 
@@ -41,12 +41,15 @@ def validation_response(request):
 def test_local_config_persists_and_environment_has_precedence(tmp_path):
     env = {"VAGENT_HOME": str(tmp_path / "new-home")}
     config = load_config(env)
-    assert config.sources == {"apiKey": "unset", "model": "default", "videoMode": "default"}
+    video_sources = {
+        name: "unset" if default is None else "default" for name, (_, _, default) in VIDEO_SETTINGS.items()
+    }
+    assert config.sources == {"apiKey": "unset", "model": "default", **video_sources}
     updated = update_local_settings(config, ConfigUpdate(apiKey="local-test-secret", model="deepseek-test"))
     reloaded = load_config(env)
     assert reloaded == updated
     assert reloaded.api_key == "local-test-secret"
-    assert reloaded.sources == {"apiKey": "local", "model": "local", "videoMode": "default"}
+    assert reloaded.sources == {"apiKey": "local", "model": "local", **video_sources}
     assert "local-test-secret" not in repr(reloaded)
     overridden = load_config({**env, "DEEPSEEK_API_KEY": "env-key", "VAGENT_DEEPSEEK_MODEL": "env-model"})
     path = config.home / "config.yml"
@@ -104,7 +107,7 @@ async def test_wizard_save_validate_change_clear_and_restart(tmp_path):
 
     async with configured_app(tmp_path, handler=handler) as (client, service):
         before = (await client.get("/api/config")).json()
-        assert before["editable"] == {"apiKey": True, "model": True, "videoMode": False}
+        assert before["editable"] == {"apiKey": True, "model": True, **dict.fromkeys(VIDEO_SETTINGS, True)}
         secret = "wizard-test-secret"
         saved = await client.patch("/api/config", json={"apiKey": secret, "model": "deepseek-test"})
         assert saved.status_code == 200 and secret not in saved.text

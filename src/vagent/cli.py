@@ -18,6 +18,7 @@ from vagent.skills import SkillCatalog
 from vagent.storage import FileStore
 from vagent.usage import summarize_usage
 from vagent.video.jobs import JobService
+from vagent.video.providers.wan import WanAdapter
 from vagent.video.views import job_view
 
 
@@ -47,7 +48,20 @@ def show_event(event: dict) -> None:
         print(f"[等待恢复受阻] {event['error']['code']} · {event['error']['message']}", flush=True)
     elif event["type"] == "job.updated":
         job = event["job"]
-        print(f"[模拟 Job] {job['jobId']} · {job['status']} / {job['queryState']} · 无真实媒体", flush=True)
+        if job["mode"] == "live":
+            availability = "本地媒体可用" if job["mediaAvailable"] else "尚无本地媒体"
+            print(
+                f"[真实 Job] {job['jobId']} · {job['status']} / {job['queryState']} · {availability}",
+                flush=True,
+            )
+            if job.get("runtimeBlock"):
+                print(
+                    f"[任务受阻] {job['runtimeBlock']['code']} · {job['runtimeBlock']['message']}", flush=True
+                )
+        else:
+            print(
+                f"[模拟 Job] {job['jobId']} · {job['status']} / {job['queryState']} · 无真实媒体", flush=True
+            )
 
 
 class EventDisplay:
@@ -179,6 +193,8 @@ async def execute_cli(service, session_id, *, prompt=None, request_id=None, read
 def show_job_exit_hint(service):
     if any(job["status"] in {"pending_submit", "submitting", "queued", "running"} for job in service.jobs()):
         print("[Job] 未结束的任务已保存。CLI 退出后停止推进；使用 vagent web 或 vagent jobs work 继续。")
+    if any(job["status"] == "downloading" for job in service.jobs()):
+        print("[Job] 云端结果已保存，等待本地下载；当前版本尚未提供媒体交付。")
 
 
 async def work_jobs(config):
@@ -196,8 +212,8 @@ async def work_jobs(config):
 
 
 def local_jobs(config, args):
-    # Status/retry commands are local only: no adapters, MCP processes, model
-    # connections or background workers start merely to read a Job.
+    # Status/retry commands never make HTTP calls or start background workers.
+    # Live retry validates the original adapter/configuration without querying it.
     with FileStore.open(config.home) as store:
         service = JobService(store, [])
         if args.action == "list":
@@ -208,8 +224,23 @@ def local_jobs(config, args):
             assert_id(args.job_id)
             job = service.get(args.job_id)
             if args.action == "retry-query":
-                job = service.retry_query(job.id, project_id=job.context.project_id)
+                job = (
+                    asyncio.run(retry_live_query(config, store, job))
+                    if job.mode == "live"
+                    else service.retry_query(job.id, project_id=job.context.project_id)
+                )
             print_json(job_view(job))
+
+
+async def retry_live_query(config, store, job):
+    async with WanAdapter(
+        api_key=config.video_api_key,
+        workspace_id=config.video_workspace_id,
+        model=config.video_model,
+        region=config.video_region,
+    ) as adapter:
+        service = JobService(store, [adapter], config=config)
+        return service.retry_query(job.id, project_id=job.context.project_id)
 
 
 def show_resume_hint(result: dict) -> None:
@@ -266,7 +297,7 @@ def parser() -> argparse.ArgumentParser:
     demo.add_argument("-s", "--session", default="demo")
     commands.add_parser("config").add_subparsers(dest="action", required=True).add_parser("show")
     commands.add_parser("skills").add_subparsers(dest="action", required=True).add_parser("list")
-    jobs = commands.add_parser("jobs", help="查看本地模拟任务、恢复查询或运行持久队列")
+    jobs = commands.add_parser("jobs", help="查看本地视频任务、恢复查询或运行持久队列")
     actions = jobs.add_subparsers(dest="action", required=True)
     listing = actions.add_parser("list", help="列出本地任务，不调用模型或供应商")
     listing.add_argument("-s", "--session")
@@ -313,6 +344,9 @@ def main() -> None:
         elif args.command == "config":
             safe = asdict(config)
             key = safe.pop("api_key")
+            video_key = safe.pop("video_api_key")
+            safe["video_api_key_configured"] = bool(video_key)
+            safe["video_permission_status"] = "unverified"
             safe["redis_configured"] = bool(safe.pop("redis_url"))
             print_json({**safe, "api_key_configured": bool(key and key.strip()), "thinking": "disabled"})
         elif args.command == "skills":

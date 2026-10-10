@@ -5,7 +5,7 @@ import pytest
 from langchain_core.messages import HumanMessage, messages_from_dict
 
 from vagent.errors import AppError
-from vagent.storage import FileStore
+from vagent.storage import FileStore, RunRecord
 from vagent.tools import create_project_tools
 
 
@@ -98,7 +98,7 @@ def test_exclusive_writer_and_reopen(store):
     home = store.home
     store.close()
     with FileStore.open(home) as reopened:
-        assert reopened.snapshot()["schemaVersion"] == 2
+        assert reopened.snapshot()["schemaVersion"] == 3
 
 
 def test_corrupt_state_is_preserved(tmp_path):
@@ -202,7 +202,8 @@ def test_legacy_schema_one_messages_and_interrupted_runs(tmp_path):
     with FileStore.open(tmp_path) as reopened:
         snapshot = reopened.snapshot()
         assert snapshot["runs"]["old"]["status"] == "interrupted"
-        assert snapshot["runs"]["old"]["contextBytes"] == 0
+        assert "contextBytes" not in snapshot["runs"]["old"]
+        assert RunRecord.model_validate(snapshot["runs"]["old"]).context_bytes == 0
         restored = messages_from_dict(snapshot["sessions"]["coffee"]["messages"])
         assert isinstance(restored[0], HumanMessage) and restored[0].content == "旧需求"
         assert len(restored) == 4

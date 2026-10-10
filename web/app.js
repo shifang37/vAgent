@@ -270,8 +270,14 @@ function artifactCard(artifact) {
 }
 function jobCard(job, expanded) {
   const request = job.request, spec = request.spec;
+  const live = job.mode === "live";
+  const statusNames = live ? {
+    pending_submit: "待提交", submitting: "正在提交", queued: job.lastProviderStatus ? "云端排队中" : "已受理，等待查询",
+    running: "云端生成中", downloading: "等待本地下载", download_failed: "下载失败",
+    succeeded: "已完成", failed: "任务失败", unknown: "提交待核实",
+  } : jobStatusNames;
   const paused = job.queryState === "paused", retrying = job.queryState === "retrying";
-  const state = paused ? "查询已暂停" : retrying ? "查询重试中" : jobStatusNames[job.status] || job.status;
+  const state = job.runtimeBlock ? "需要处理" : paused ? "查询已暂停" : retrying ? "查询重试中" : statusNames[job.status] || job.status;
   const tone = paused || retrying || job.status === "unknown" ? "attention" : job.status;
   const sources = (request.sourceRefs || []).map((ref) => {
     const artifact = snapshot?.artifacts.find((item) => item.id === ref.artifactId);
@@ -279,19 +285,22 @@ function jobCard(job, expanded) {
     return `<button data-artifact="${escapeHTML(ref.artifactId)}" data-version="${ref.version}">${escapeHTML(title)} · v${ref.version}</button>`;
   }).join("、") || "直接使用提示词";
   const notice = paused || retrying
-    ? `最近确认状态：${jobStatusNames[job.status] || job.status}。${paused ? "恢复查询后可继续获取结果。" : "正在重试状态查询。"}`
+    ? `最近确认状态：${statusNames[job.status] || job.status}。${paused ? "恢复查询后可继续获取结果。" : "正在重试状态查询。"}`
     : job.status === "unknown" ? "提交结果尚未确认，需要核实。任务不会自动重新提交。"
-    : job.status === "succeeded" ? "模拟流程已完成，仅提供结果描述，无可播放或下载的视频。"
+    : live && job.status === "downloading" ? "云端已生成，等待本地交付。当前版本尚未提供媒体下载，暂时无法播放。"
+    : job.status === "succeeded" ? (live ? (job.mediaAvailable ? "本地媒体已交付。" : "本地媒体当前不可用。") : "模拟流程已完成，仅提供结果描述，无可播放或下载的视频。")
     : ["pending_submit", "submitting", "queued", "running"].includes(job.status) ? "服务运行期间持续推进，关闭页面不影响任务。" : "";
   return `<article class="job-card" data-job-id="${escapeHTML(job.jobId)}">
-    <div class="job-heading"><strong><span data-icon="film"></span>模拟视频任务</strong><span class="job-state ${escapeHTML(tone)}">${escapeHTML(state)}</span></div>
+    <div class="job-heading"><strong><span data-icon="film"></span>${live ? "真实视频任务" : "模拟视频任务"}</strong><span class="job-state ${escapeHTML(tone)}">${escapeHTML(state)}</span></div>
     <p class="job-id">Job <code>${escapeHTML(job.jobId)}</code></p>
-    <div class="job-spec"><span class="simulation-label">模拟 · 无真实媒体</span><span>${escapeHTML(request.model)} · ${spec.durationSeconds} 秒 · ${escapeHTML(spec.resolution)} · ${escapeHTML(spec.aspectRatio)}</span></div>
+    <div class="job-spec"><span class="simulation-label">${live ? "真实生成" : "模拟 · 无真实媒体"}</span><span>${escapeHTML(request.model)} · ${spec.durationSeconds} 秒 · ${escapeHTML(spec.resolution)} · ${escapeHTML(spec.aspectRatio)}</span></div>
+    ${job.cost ? `<p class="job-notice">生成估算：${escapeHTML(job.cost.estimate.amount)} ${escapeHTML(job.cost.estimate.currency)} · 实际费用：${job.cost.actual.status === "reported" ? escapeHTML(job.cost.actual.amount) + " CNY" : "未知，待账单核实"}</p>` : ""}
     <p class="job-sources">来源：${sources}</p>
     <details class="job-request" ${expanded ? "open" : ""}><summary>生成提示词</summary><p>${escapeHTML(request.prompt)}</p></details>
     ${job.result ? `<p class="job-result">${escapeHTML(job.result.summary)}</p>` : ""}
     ${notice ? `<p class="job-notice">${escapeHTML(notice)}</p>` : ""}
-    ${job.error ? `<p class="job-error">${escapeHTML({ submit: "提交", query: "查询", generate: "生成" }[job.error.stage] || job.error.stage)} · ${escapeHTML(job.error.code)}<br>${escapeHTML(job.error.message)}</p>` : ""}
+    ${job.error ? `<p class="job-error">${escapeHTML({ submit: "提交", query: "查询", generate: "生成", download: "下载" }[job.error.stage] || job.error.stage)} · ${escapeHTML(job.error.code)}<br>${escapeHTML(job.error.message)}</p>` : ""}
+    ${job.runtimeBlock ? `<p class="job-error">${escapeHTML(job.runtimeBlock.code)} · ${escapeHTML(job.runtimeBlock.message)}</p>` : ""}
     <div class="job-footer"><small>更新于 ${escapeHTML(new Date(job.updatedAt).toLocaleString())}</small>${job.canRetryQuery ? `<button class="secondary" data-retry-job="${escapeHTML(job.jobId)}" ${retryingJobs.has(job.jobId) ? "disabled" : ""}>${retryingJobs.has(job.jobId) ? "正在恢复…" : "恢复查询"}</button>` : ""}</div>
   </article>`;
 }
@@ -353,7 +362,7 @@ function render() {
       )
       .join("") + draftHTML() + (snapshot?.artifacts || []).map(artifactCard).join("");
   if (oldJobs) conversation.append(oldJobs);
-  else conversation.insertAdjacentHTML("beforeend", '<section id="job-list" class="job-list" aria-label="模拟视频任务" hidden></section>');
+  else conversation.insertAdjacentHTML("beforeend", '<section id="job-list" class="job-list" aria-label="视频任务" hidden></section>');
   renderJobs();
   const run = currentRun();
   if (run) {
@@ -442,8 +451,9 @@ function renderSettings(config, notice = "") {
   const validation = config.validation;
   const status = { unverified: "尚未验证", validating: "正在验证", verified: "连接已验证", failed: "验证失败" }[validation.status];
   const generation = openDialog("Agent 连接与配置", `
-    <p>配置保存在本机，下次执行即可生效。环境变量和 .env 优先；由启动配置提供的字段需在原处修改。</p>
-    <p>视频模式：${config.videoMode === "mock" ? "mock（模拟，无真实媒体）" : "off（未启用）"} · ${sources[config.sources.videoMode] || "启动配置"}。视频模式在启动时生效，修改需重启。</p>
+    <p>DeepSeek 配置保存在本机，下次执行即可生效；视频配置需重启。环境变量和 .env 优先，由启动配置提供的字段需在原处修改。</p>
+    <p>视频模式：${config.videoMode === "live" ? "live（真实生成，本地交付尚未开放）" : config.videoMode === "mock" ? "mock（模拟，无真实媒体）" : "off（未启用）"} · ${sources[config.sources.videoMode] || "启动配置"}。视频配置在重启后生效。${config.restartRequired ? "已有保存的修改，等待重启。" : ""}</p>
+    ${config.videoMode === "live" ? `<p>视频 Key：${config.videoApiKeyConfigured ? "已配置，权限未验证" : "未配置"} · 单 Job 估算金额上限：${escapeHTML(config.videoMaxJobCost)} CNY。视频配置可通过本地配置文件或环境变量设置，保存不会生成视频。</p>` : ""}
     <form id="settings-form">
       <label for="config-key">DeepSeek API Key · ${sources[config.sources.apiKey] || "启动配置"}
         <input id="config-key" type="password" autocomplete="new-password" maxlength="512" spellcheck="false" autocapitalize="off" placeholder="${config.apiKeyConfigured ? "已配置，留空保持" : "输入 API Key"}" ${!config.editable.apiKey || config.busy ? "disabled" : ""}>
@@ -671,7 +681,7 @@ document.addEventListener("click", async (event) => {
     if (action === "help")
       openDialog(
         "和 Agent 一起完成创作",
-        `<p>描述需求后，Agent 会按需读取 Skills、管理项目记忆、调用工具并保存方案。侧栏「编排观测」显示每次执行的上下文、工具结果和模型用量。</p><p>会话与产物保存在本机。可以停止执行并从检查点继续；旧版产物可在预览中切换。只读分析可读取和等待已有 Job，不能创建任务或修改产物。</p><p>${health?.videoMode === "mock" ? "已启用模拟视频任务，只提供模拟结果描述，没有真实媒体。任务卡片会持续更新；停止 Agent 不会取消 Job，关闭页面不影响服务中的任务。查询暂停时可点击恢复查询。" : "当前视频模式为 off，不提供新的视频任务。已有 Job 仍可查看，服务会继续跟踪。"}</p><div class="actions"><button class="primary" data-action="close-dialog">开始创作</button></div>`,
+        `<p>描述需求后，Agent 会按需读取 Skills、管理项目记忆、调用工具并保存方案。侧栏「编排观测」显示每次执行的上下文、工具结果和模型用量。</p><p>会话与产物保存在本机。可以停止执行并从检查点继续；旧版产物可在预览中切换。只读分析可读取和等待已有 Job，不能创建任务或修改产物。</p><p>${health?.videoMode === "live" ? "已启用真实视频生成，可能产生费用。云端生成成功后保留原任务，当前版本本地下载和播放尚未开放。停止 Agent 不会取消云端生成。" : health?.videoMode === "mock" ? "已启用模拟视频任务，只提供模拟结果描述，没有真实媒体。任务卡片会持续更新；停止 Agent 不会取消 Job，关闭页面不影响服务中的任务。查询暂停时可点击恢复查询。" : "当前视频模式为 off，不提供新的视频任务。已有 Job 仍可查看，服务会继续跟踪。"}</p><div class="actions"><button class="primary" data-action="close-dialog">开始创作</button></div>`,
       );
     if (action === "settings") await showSettings();
     if (action === "library") {
@@ -720,9 +730,11 @@ async function initialize() {
     renderConnection();
     $("#skills-label").textContent =
       `${health.skills.length} Skills · ${health.mcp.length} MCP`;
-    $("#video-mode-label").hidden = health.videoMode !== "mock";
+    $("#video-mode-label").hidden = health.videoMode === "off";
+    $("#video-mode-label").textContent = health.videoMode === "live" ? "真实视频 · 本地交付待开放" : "模拟视频 · 无真实媒体";
     $("#video-workflow").innerHTML = health.videoMode === "mock"
-      ? "模拟视频任务 <small>无真实媒体</small>" : "视频生成 <small>未启用</small>";
+      ? "模拟视频任务 <small>无真实媒体</small>" : health.videoMode === "live"
+      ? "真实视频任务 <small>本地交付待开放</small>" : "视频生成 <small>未启用</small>";
     $("#execution-label").textContent =
       health.modelKind === "deepseek"
         ? "真实 Agent · 按实际模型用量计费"

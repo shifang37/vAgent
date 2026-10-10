@@ -12,6 +12,19 @@ import yaml
 from pydantic import BaseModel, ConfigDict, Field, ValidationError, model_validator
 
 from vagent.errors import AppError
+from vagent.video.contracts import WAN_MODEL, WAN_REGION, Money, WorkspaceId
+
+# Public configuration name -> (runtime attribute, environment name, default).
+VIDEO_SETTINGS = {
+    "videoMode": ("video_mode", "VAGENT_VIDEO_MODE", "off"),
+    "videoApiKey": ("video_api_key", "VAGENT_DASHSCOPE_KEY", None),
+    "videoWorkspaceId": ("video_workspace_id", "VAGENT_DASHSCOPE_WORKSPACE_ID", None),
+    "videoProvider": ("video_provider", "VAGENT_VIDEO_PROVIDER", "wan"),
+    "videoModel": ("video_model", "VAGENT_VIDEO_MODEL", WAN_MODEL),
+    "videoRegion": ("video_region", "VAGENT_VIDEO_REGION", WAN_REGION),
+    "videoMaxJobCost": ("video_max_job_cost", "VAGENT_VIDEO_MAX_JOB_COST", "3.00"),
+}
+_SETTINGS = {"apiKey": ("api_key", None, None), "model": ("model", None, "deepseek-flash"), **VIDEO_SETTINGS}
 
 
 @dataclass(frozen=True)
@@ -26,28 +39,61 @@ class Config:
     mcp_config: Path | None = None
     mcp_local: bool = False
     sources: dict[str, str] = field(default_factory=dict)
-    video_mode: Literal["off", "mock"] = "off"
+    video_mode: Literal["off", "mock", "live"] = "off"
+    video_api_key: str | None = field(default=None, repr=False)
+    video_workspace_id: str | None = None
+    video_provider: str = "wan"
+    video_model: str = WAN_MODEL
+    video_region: str = WAN_REGION
+    video_max_job_cost: str = "3.00"
 
     def __post_init__(self):
-        if self.video_mode not in {"off", "mock"}:
-            raise AppError("INVALID_VIDEO_MODE", "VAGENT_VIDEO_MODE 只支持 off 或 mock，修改后需重启。")
+        if self.video_mode not in {"off", "mock", "live"}:
+            raise AppError("INVALID_VIDEO_MODE", "VAGENT_VIDEO_MODE 只支持 off、mock 或 live，修改后需重启。")
+        try:
+            for attr, _, default in VIDEO_SETTINGS.values():
+                if default is not None and getattr(self, attr) is None:
+                    raise ValueError("Missing required setting")
+            values = LocalSettings.model_validate(
+                {name: getattr(self, attr) for name, (attr, _, _) in VIDEO_SETTINGS.items()}
+            )
+            for name, (attr, _, _) in VIDEO_SETTINGS.items():
+                object.__setattr__(self, attr, getattr(values, name))
+        except ValueError:
+            raise AppError(
+                "VIDEO_CONFIG_INVALID", "视频配置无效，请检查模型、地域、业务空间和十进制金额上限。"
+            ) from None
 
 
 class LocalSettings(BaseModel):
     model_config = ConfigDict(extra="forbid", strict=True, str_strip_whitespace=True)
     apiKey: str | None = Field(default=None, pattern=r"^[\x21-\x7e]{1,512}$", repr=False)
     model: str | None = Field(default=None, pattern=r"^[a-zA-Z0-9][a-zA-Z0-9._:/-]{0,99}$")
+    videoMode: Literal["off", "mock", "live"] | None = None
+    videoApiKey: str | None = Field(default=None, pattern=r"^[\x21-\x7e]{1,512}$", repr=False)
+    videoWorkspaceId: WorkspaceId | None = None
+    videoProvider: Literal["wan"] | None = None
+    videoModel: Literal["wan2.7-t2v-2026-06-12"] | None = None
+    videoRegion: Literal["cn-beijing"] | None = None
+    videoMaxJobCost: Money | None = None
 
 
 class ConfigUpdate(LocalSettings):
     clearApiKey: bool = False
+    clearVideoApiKey: bool = False
 
     @model_validator(mode="after")
     def check_update(self):
-        if any(getattr(self, key) is None for key in self.model_fields_set if key != "clearApiKey"):
-            raise ValueError("省略保持原值；移除密钥使用 clearApiKey")
+        if any(
+            getattr(self, key) is None
+            for key in self.model_fields_set
+            if key not in {"clearApiKey", "clearVideoApiKey"}
+        ):
+            raise ValueError("省略保持原值；移除密钥使用对应的 clear 字段")
         if self.clearApiKey and self.apiKey is not None:
             raise ValueError("不能同时设置和移除密钥")
+        if self.clearVideoApiKey and self.videoApiKey is not None:
+            raise ValueError("不能同时设置和移除视频密钥")
         return self
 
 
@@ -68,27 +114,37 @@ def config_sources(config: Config) -> dict[str, str]:
     return {
         "apiKey": config.sources.get("apiKey", "provided" if config.api_key else "unset"),
         "model": config.sources.get("model", "provided"),
-        "videoMode": config.sources.get("videoMode", "default" if config.video_mode == "off" else "provided"),
+        **{
+            name: config.sources.get(
+                name,
+                "unset"
+                if getattr(config, attr) is None
+                else "default"
+                if getattr(config, attr) == default
+                else "provided",
+            )
+            for name, (attr, _, default) in VIDEO_SETTINGS.items()
+        },
     }
 
 
 def update_local_settings(config: Config, update: ConfigUpdate) -> Config:
     sources = config_sources(config)
-    if (update.apiKey is not None or update.clearApiKey) and sources["apiKey"] in {"environment", "provided"}:
-        raise AppError("CONFIG_OVERRIDE", "密钥由启动配置或环境变量提供，请先移除该配置再在页面修改。")
-    if (
-        update.model is not None
-        and sources["model"] in {"environment", "provided"}
-        and update.model != config.model
-    ):
-        raise AppError("CONFIG_OVERRIDE", "模型由启动配置或环境变量提供，请先移除该配置再在页面修改。")
     values = read_local_settings(config.home).model_dump(exclude_none=True)
-    if update.apiKey is not None:
-        values["apiKey"] = update.apiKey
-    if update.clearApiKey:
-        values.pop("apiKey", None)
-    if update.model is not None and sources["model"] not in {"environment", "provided"}:
-        values["model"] = update.model
+    clears = {"apiKey": update.clearApiKey, "videoApiKey": update.clearVideoApiKey}
+    for name, (attr, _, _) in _SETTINGS.items():
+        supplied = name in update.model_fields_set
+        clear = clears.get(name, False)
+        if not supplied and not clear:
+            continue
+        if sources[name] in {"environment", "provided"}:
+            if name in clears or getattr(update, name) != getattr(config, attr):
+                raise AppError("CONFIG_OVERRIDE", "该字段由启动配置或环境变量提供，请先移除该配置再修改。")
+            continue
+        if clear:
+            values.pop(name, None)
+        elif supplied:
+            values[name] = getattr(update, name)
     try:
         validated = LocalSettings.model_validate(values)
     except ValidationError:
@@ -107,30 +163,17 @@ def update_local_settings(config: Config, update: ConfigUpdate) -> Config:
     finally:
         with suppress(OSError):
             temporary.unlink(missing_ok=True)
-    key = config.api_key if sources["apiKey"] in {"environment", "provided"} else validated.apiKey
-    model = (
-        config.model
-        if sources["model"] in {"environment", "provided"}
-        else validated.model or "deepseek-flash"
-    )
-    return replace(
-        config,
-        api_key=key,
-        model=model,
-        sources={
-            "videoMode": sources["videoMode"],
-            "apiKey": sources["apiKey"]
-            if sources["apiKey"] in {"environment", "provided"}
-            else "local"
-            if key
-            else "unset",
-            "model": sources["model"]
-            if sources["model"] in {"environment", "provided"}
-            else "local"
-            if validated.model
-            else "default",
-        },
-    )
+    effective, following_sources = {}, {}
+    for name, (attr, _, default) in _SETTINGS.items():
+        if sources[name] in {"environment", "provided"}:
+            effective[attr], following_sources[name] = getattr(config, attr), sources[name]
+        else:
+            local_value = getattr(validated, name)
+            effective[attr] = local_value if local_value is not None else default
+            following_sources[name] = (
+                "local" if local_value is not None else "unset" if default is None else "default"
+            )
+    return replace(config, **effective, sources=following_sources)
 
 
 def load_config(env: Mapping[str, str] | None = None) -> Config:
@@ -169,11 +212,23 @@ def load_config(env: Mapping[str, str] | None = None) -> Config:
         skills_root=Path(env["VAGENT_SKILLS_DIR"]).absolute() if env.get("VAGENT_SKILLS_DIR") else None,
         mcp_config=Path(env["VAGENT_MCP_CONFIG"]).resolve() if env.get("VAGENT_MCP_CONFIG") else None,
         mcp_local=env.get("VAGENT_MCP_LOCAL", "0") == "1",
-        video_mode=env.get("VAGENT_VIDEO_MODE") or "off",
+        **{
+            attr: env.get(variable) or (getattr(local, name) if getattr(local, name) is not None else default)
+            for name, (attr, variable, default) in VIDEO_SETTINGS.items()
+        },
         sources={
             "apiKey": "environment" if environment_key else "local" if local.apiKey else "unset",
             "model": "environment" if environment_model else "local" if local.model else "default",
-            "videoMode": "environment" if env.get("VAGENT_VIDEO_MODE") else "default",
+            **{
+                name: "environment"
+                if env.get(variable)
+                else "local"
+                if getattr(local, name) is not None
+                else "unset"
+                if default is None
+                else "default"
+                for name, (_, variable, default) in VIDEO_SETTINGS.items()
+            },
         },
     )
 
