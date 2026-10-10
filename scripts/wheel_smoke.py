@@ -1,8 +1,12 @@
 """Run with the independently installed wheel's Python, without provider requests."""
 
+import argparse
 import asyncio
 import json
+import os
+import subprocess
 import sys
+import sysconfig
 import tempfile
 from contextlib import chdir
 from datetime import datetime
@@ -162,10 +166,81 @@ async def smoke_video_tools(directory):
             assert snapshot["jobs"][0]["status"] == "succeeded" and snapshot["run"]["status"] == "completed"
             assert (await client.get("/job-state.js")).status_code == 200
     assert not (home / "instance.lock").exists()
+    cli = Path(sysconfig.get_path("scripts")) / ("vagent.exe" if os.name == "nt" else "vagent")
+    env = isolated_environment(home)
+    listing = json.loads(run_command([str(cli), "jobs", "list", "--session", "wheel"], env=env))
+    detail = json.loads(run_command([str(cli), "jobs", "get", model.job_id], env=env))
+    assert listing["jobs"] == [detail] and detail["status"] == "succeeded"
+    usage = json.loads(run_command([str(cli), "usage", "--run", pending["id"]], env=env))
+    assert usage["runs"][0]["usage"]["recordedCallCount"] == 2
+    assert not usage["runs"][0]["usage"]["tokenUsageComplete"]
+    assert not (home / "instance.lock").exists()
+    return {
+        "jobId": model.job_id,
+        "providerTaskId": original_handle,
+        "runId": pending["id"],
+        "toolCallId": binding.context.tool_call_id,
+        "submitCalls": 1,
+        "queryCalls": 2,
+        "modelCallsBeforeRestart": 1,
+        "modelCallsAfterRestart": finished["modelSteps"],
+        "toolCalls": finished["toolCalls"],
+        "policyPreserved": finished["policy"] == pending["policy"],
+        "jobApiAndSnapshot": True,
+        "cliListGetAndUsage": True,
+        "lockReleased": True,
+    }
 
 
-async def main():
-    assert Path(vagent.__file__).is_relative_to(Path(sys.prefix)), "Use an installed-wheel environment"
+def isolated_environment(home):
+    env = {
+        key: value
+        for key, value in os.environ.items()
+        if not key.startswith("VAGENT_") and key not in {"DEEPSEEK_API_KEY", "PYTHONPATH", "PYTHONHOME"}
+    }
+    env.update(VAGENT_HOME=str(home), VAGENT_VIDEO_MODE="off", PYTHONIOENCODING="utf-8")
+    return env
+
+
+def run_command(command, *, env):
+    completed = subprocess.run(command, env=env, capture_output=True, text=True, encoding="utf-8", timeout=60)
+    if completed.returncode:
+        raise AssertionError(
+            f"Installed command failed ({completed.returncode}):\n{completed.stdout}\n{completed.stderr}"
+        )
+    return completed.stdout
+
+
+def smoke_evaluation(directory):
+    output = Path(directory) / "m1b-evaluation.json"
+    run_command(
+        [
+            sys.executable,
+            "-I",
+            str(Path(__file__).with_name("evaluate_m1b.py").resolve()),
+            "--home",
+            str(Path(directory) / "m1b-state"),
+            "--output",
+            str(output),
+        ],
+        env=isolated_environment(Path(directory) / "unused-config"),
+    )
+    report = json.loads(output.read_text(encoding="utf-8"))
+    assert report["status"] == "passed" and report["mode"] == "offline-fixture"
+    assert report["totals"]["passedCases"] == report["totals"]["plannedCases"] == 5
+    assert report["totals"]["submitCalls"] == 3 and report["totals"]["queryCalls"] == 6
+    assert not (Path(report["dataDirectory"]) / "instance.lock").exists()
+    return report
+
+
+async def main(output=None):
+    assert Path(vagent.__file__).resolve().is_relative_to(Path(sys.prefix).resolve()), (
+        "Use an installed-wheel environment"
+    )
+    if output:
+        output = output.resolve()
+        if output.exists():
+            raise FileExistsError("Use a new output path to preserve earlier wheel evidence")
     with tempfile.TemporaryDirectory(prefix="vagent-wheel-web-") as directory:
         assert Path(directory).resolve().parent == Path(tempfile.gettempdir()).resolve()
         with chdir(directory):
@@ -236,11 +311,37 @@ async def main():
                     assert not rejected["artifacts"]
                     assert any(e.get("errorCode") == "CONTENT_LENGTH" for e in rejected["run"]["events"])
             assert not (Path(directory) / "state" / "instance.lock").exists()
-            await smoke_video_tools(directory)
+            video_report = await smoke_video_tools(directory)
+            evaluation_report = smoke_evaluation(directory)
+            report = {
+                "status": "passed",
+                "packagePath": str(Path(vagent.__file__).resolve()),
+                "pythonPrefix": sys.prefix,
+                "workingDirectory": str(Path.cwd()),
+                "checks": {
+                    "installedPackage": True,
+                    "webAssets": True,
+                    "configRedaction": True,
+                    "streaming": model.deltas > 0,
+                    "textAndQuality": True,
+                    "localMcp": True,
+                    "videoRestartAndCli": True,
+                    "fiveCaseM1bSuite": True,
+                },
+                "videoRestart": video_report,
+                "m1bEvaluation": evaluation_report,
+            }
+    report["temporaryDataCleaned"] = not Path(directory).exists()
+    if output:
+        output.parent.mkdir(parents=True, exist_ok=True)
+        output.write_text(json.dumps(report, ensure_ascii=False, indent=2), encoding="utf-8")
     print(
-        "PASS: installed wheel, Web assets, config, streaming, text/quality, MCP, mock video tools, unique Job, durable wait, original Run restart/automatic continuation, manual Worker, readonly delivery, unchanged budgets, cleanup."
+        "PASS: installed wheel, Web assets, config, streaming, text/quality, MCP, mock video tools, durable wait, original Run restart/automatic continuation, readonly delivery, unchanged budgets, CLI list/get/usage, five M1-B cases, cleanup."
     )
+    return report
 
 
 if __name__ == "__main__":
-    asyncio.run(main())
+    cli = argparse.ArgumentParser(description=__doc__)
+    cli.add_argument("--output", type=Path, help="Save installed-wheel evidence without overwriting a report")
+    asyncio.run(main(cli.parse_args().output))

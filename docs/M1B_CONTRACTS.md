@@ -146,7 +146,7 @@ execution v1 仍在普通工具异常捕获之外识别延迟标记，以 `EXTER
 
 ### B3 的生产边界
 
-`WaitCoordinator.run_once()` 扫描持久记录，`start()/stop()` 管理本地循环，通知只加速扫描。ApplicationService 已管理协调器并将事件归属原 Run；JobWorker 仍需显式运行。配置、Key、原工具/能力、最新会话、检查点和剩余预算均在自动执行前检查；失败原因保存在 `waitResumeError`，已经准备好的领域结果不丢失。
+`WaitCoordinator.run_once()` 扫描持久记录，`start()/stop()` 管理本地循环，通知只加速扫描。B4 起 ApplicationService 同时管理协调器和 JobWorker，并将事件归属原 Run/Job；库级单步接口仍保留。配置、Key、原工具/能力、最新会话、检查点和剩余预算均在自动执行前检查；失败原因保存在 `waitResumeError`，已经准备好的领域结果不丢失。
 
 领取后发生过新的模型尝试时，自动恢复返回 `EXPLICIT_RESUME_REQUIRED`，不重发请求；普通 failed/cancelled Run 不被后台继续。已完整落盘的图终态可直接补齐会话。活动时间在图挂起时停止；外部等待用 `externalWaitStartedAt` 和累计 `externalWaitSeconds` 结算。无变化的扫描不更新 Run，也不消费模型、工具或活动时间预算。
 

@@ -222,7 +222,7 @@ created → running → completed
 
 ## 8. 与视频生成结合
 
-2026-10-09 已完成 M1-B 的 B0 契约、B1 持久 Job/Mock Worker、B2 视频工具和 B3 生产等待/恢复。Runner 只处理通用延迟结果与原调用交付，领域解析器提供具体结果；SQLite 中断、JSON 等待与模型尝试边界均有重启补偿，见 [契约协议](./docs/M1B_CONTRACTS.md) 和 [B3 验收](./docs/M1B_B3_ACCEPTANCE.md)。[M1-B 任务规划](./docs/M1B_PLAN.md) 中的 B4–B5 继续交付 Worker 生命周期、CLI/Web 与完整验收；当前状态以 README 为准。
+2026-10-10 已完成 M1-B 的 B0–B5：契约、持久 Job/Mock Worker、视频工具、生产等待/恢复、CLI/Web 与阶段验收。Runner 只处理通用延迟结果与原调用交付，领域解析器提供具体结果；SQLite 中断、JSON 等待与模型尝试边界均有重启补偿，见 [契约协议](./docs/M1B_CONTRACTS.md) 和 [B3 验收](./docs/M1B_B3_ACCEPTANCE.md)。应用生命周期、完整离线矩阵、5/5 真实 DeepSeek + Mock 套件及独立 wheel 已通过 [M1-B 验收](./docs/M1B_ACCEPTANCE.md)；当前状态以 README 为准。
 
 ### 8.1 先设计并模拟的接口
 

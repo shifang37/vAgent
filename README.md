@@ -4,7 +4,7 @@
 
 当前已实现 **Python CLI + 本地 Web Agent**，前端通过同源 API/SSE 调用共享 LangGraph Runner。2026-10-08 完成真实 DeepSeek、持久记忆、Skills、8 种工具（含 2 个本地 MCP 工具）的编排验收，随后补齐记忆冲突与正文长度的后端校验。当前交付文本创作材料，尚未接入视频生成 API；首轮发现见 [编排测试报告](./docs/AGENT_ORCHESTRATION_ACCEPTANCE.md)，修复与验证范围见 [质量校验验收](./docs/QUALITY_ACCEPTANCE.md)。
 
-任务 2 已补齐本地配置向导、CLI/Web 流式回复和 9 类固定评测。**2026-10-09 完成 A5：完整真实套件 9/9 通过，M1-A 已验收。** 最终套件包含 3 次显式恢复，累计 27 次模型调用、25 次工具调用；此前失败记录完整保留，详见 [M1-A 验收记录](./docs/M1A_ACCEPTANCE.md)。同日完成 M1-B 的 **B0–B4**：契约、持久 Job/Mock Worker、四工具、持久等待与恢复，以及 CLI/Web 入口。应用自动推进 Job，CLI 持续等待，页面显示模拟任务、来源版本和恢复查询；停止 Agent 与正常退出保持不同语义。详见 [B4 验收](./docs/M1B_B4_ACCEPTANCE.md)，下一步按 [M1-B 任务规划](./docs/M1B_PLAN.md) 执行 B5 的完整验收与真实 DeepSeek + Mock 联调。
+任务 2 已补齐本地配置向导、CLI/Web 流式回复和 9 类固定评测。**2026-10-09 完成 A5：完整真实套件 9/9 通过，M1-A 已验收。** 最终套件包含 3 次显式恢复，累计 27 次模型调用、25 次工具调用；此前失败记录完整保留，详见 [M1-A 验收记录](./docs/M1A_ACCEPTANCE.md)。**2026-10-10 完成 B5，M1-B 的 B0–B5 已验收**：真实 DeepSeek + Mock 套件 5/5 通过，累计 15 次模型调用、14 次工具调用，3 个 Job 各提交一次。应用自动推进模拟任务，持久等待、停止、重启恢复及 CLI/Web 已通过回归和仓库外 wheel 验证。详见 [M1-B 验收](./docs/M1B_ACCEPTANCE.md)；真实视频接入属于后续 M1-C。
 
 ## 当前进度
 
@@ -20,7 +20,7 @@
 | 04 本地 Web | 已接入真实 Agent | 单 Key 配置向导、模型切换与验证、逐段文本流、断线补齐、停止/恢复、产物与编排观测 |
 | MCP | 已实现并验证 stdio | 显式只读白名单、工具发现、Schema 校验、取消/超时、结果大小限制 |
 | 内容质量校验 | 已通过回归与真实纠错验收 | 记忆字段职责、旧事实残留检查、持久字数上限、保存前计数、未纠正错误禁止报告完成 |
-| M1-B 模拟视频 | B0–B4 已完成，B5 待实施 | 自动 Worker、四工具、持久等待/停止/恢复、CLI Job 命令与非阻塞输入、Job API/SSE/任务卡片；详见 [B4 验收](./docs/M1B_B4_ACCEPTANCE.md) |
+| M1-B 模拟视频 | B0–B5 已验收 | 自动 Worker、四工具、持久等待/停止/恢复、CLI/Web；离线与真实 DeepSeek + Mock 均 5/5 通过，详见 [M1-B 验收](./docs/M1B_ACCEPTANCE.md) |
 | M1-C 真实视频 | 待实施 | 真实供应商接入、媒体下载/播放与真实视频验收 |
 
 每个独立完成的代码部分都同步更新本 README、提交并推送 GitHub。阶段目标见 [M1 计划](./M1_PLAN.md) 和 [Harness 设计](./AGENT_HARNESS_DESIGN.md)。
@@ -133,7 +133,7 @@ VAGENT_DEEPSEEK_MODEL=deepseek-flash
 
 `run` 支持 `--request-id`：同一会话相同 ID、相同需求返回已有运行记录；相同 ID 对应不同需求会报错。失败与中断任务也不自动重跑；继续原执行使用 `resume`，发起独立的新尝试才使用新 ID。
 
-## 模拟视频工具与持久等待（B3）
+## 模拟视频工具与持久等待（M1-B）
 
 默认关闭，启动前设置 `VAGENT_VIDEO_MODE=mock` 才注册视频工具。模式和来源可在 CLI 配置输出、Web 设置页和配置 API 查看；模式不写入 `config.yml`，不能在页面热切换，修改环境变量后需重启。
 
@@ -368,7 +368,17 @@ node --test tests/test_job_state.mjs
 .\.venv\Scripts\python.exe -m build --no-isolation --outdir dist/python
 ```
 
-本地 Python 3.12 测试结果：**452 passed，1 skipped**，另有 **7 项前端状态测试通过**。跳过的是当前 Windows 账户无符号链接创建权限的测试。B4 新增 25 项 Python 测试，覆盖自动 Worker、独立 Job 事件、API/SSE、CLI 持续等待/恢复和 Windows SIGINT 退出；B0–B3 的迁移、原图指纹、16 项生产强退、预算与工具去重继续通过。原工具闭环、质量、MCP、流式、缓存与评测回归保持。Node 仅用于开发时检查前端语法与状态逻辑，运行 Agent 无需安装。
+本地 Python 3.12 收尾测试结果：**474 passed，1 skipped**，另有 **7 项前端状态测试通过**。跳过的是当前 Windows 账户无符号链接创建权限的测试。B5 新增 20 项评测回归，验证状态独立评分、失败即停、原 Run 续跑、累计预算及证据保护；收尾同时纳入 `8abe21e` 的两项取消信号回归。B0–B4 的迁移、原图指纹、提交/等待强退、API/SSE、CLI 输入与 Windows SIGINT 退出继续通过，文本、质量、MCP、流式和缓存保持。Node 仅用于开发时检查前端语法与状态逻辑，运行 Agent 无需安装。
+
+M1-B 固定评测默认离线，通过完整应用入口执行五类用例；`--live` 才调用真实 DeepSeek，视频始终使用 Mock。套件最多 40 次模型尝试，每个 Run 沿用 8/12/180 预算。首个失败即停止，显式续跑校验原数据与检查点，保留原 Run、累计预算和旧报告；不能通过续跑提高上限。
+
+```powershell
+.\.venv\Scripts\python.exe scripts/evaluate_m1b.py
+.\.venv\Scripts\python.exe scripts/evaluate_m1b.py --live --output output/m1b-live.json
+.\.venv\Scripts\python.exe scripts/evaluate_m1b.py --live --continue-from output/m1b-live.json --output output/m1b-resumed.json
+```
+
+B5 的源码包和 wheel 位于 `dist/m1b-b5/`。独立环境在仓库外验证 CLI、Web、MCP、完整五类离线套件和等待跨服务重启后续接原 Run；`scripts/wheel_smoke.py --output <新报告路径>` 保存安装证据。报告、真实套件的 Token/调用次数及故障矩阵见 [M1-B 验收](./docs/M1B_ACCEPTANCE.md)。
 
 B3 的源码包和 wheel 已构建到 `dist/m1b-b3/`。独立虚拟环境在仓库外通过 10 项安装检查，包括持久等待跨服务重启后续接原 Run，以及安装版 SQLite 节点 pending writes 强退恢复；Worker 由脚本显式推进。完整范围与证据见 [B3 验收](./docs/M1B_B3_ACCEPTANCE.md)。
 
@@ -378,4 +388,4 @@ B3 的源码包和 wheel 已构建到 `dist/m1b-b3/`。独立虚拟环境在仓�
 
 上下文 v2 的 wheel 已在同一独立环境重新安装验证：仓库外执行 `skills list`、取消后 `resume`、`inspect`、`usage --run` 均通过，格式版本保持 2、最终仍仅有一个产物，`pip check` 通过。v1 检查点兼容由自动化测试覆盖，详细记录见 [上下文优化验收](./docs/CONTEXT_OPTIMIZATION_ACCEPTANCE.md)。
 
-自动化测试验证工程行为。2026-10-09 的完整真实套件 9/9 通过，保留了此前连接故障、步数耗尽和超长拒绝的全部证据；单套通过不代表生产成功率或创作质量保证。M1-A 已验收，M1-B 已完成 B0–B4，下一步为 B5。B0–B4 没有新增真实模型或视频 API 调用；证据见 [M1-A 验收](./docs/M1A_ACCEPTANCE.md) 和 [B4 验收](./docs/M1B_B4_ACCEPTANCE.md)。
+自动化测试验证工程行为。M1-A 的完整真实套件 9/9 通过，保留了此前连接故障、步数耗尽和超长拒绝的全部证据；M1-B 的真实 DeepSeek + Mock 套件 5/5 通过，共观测输入 55,036、输出 3,115 Token，用量完整。两个阶段均已验收；单套通过不代表生产成功率或创作质量保证，也不代表真实视频交付。证据见 [M1-A 验收](./docs/M1A_ACCEPTANCE.md) 和 [M1-B 验收](./docs/M1B_ACCEPTANCE.md)。

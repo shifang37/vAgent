@@ -1,6 +1,6 @@
 # M1-B 任务规划：模拟视频 Job 与持久等待
 
-更新日期：2026-10-09。状态：**B0–B4 完成，B5 待实施**。B1 提供 schema v2、Job/Mock Worker；B2 接入四工具、模式、上下文及只读/缓存边界；B3 接入 execution v2 的持久等待、停止、计时与跨存储恢复；B4 交付自动 Worker、CLI 持续等待/Job 命令/非阻塞输入及 Job API/SSE/页面。尚未执行真实模型联调。证据见 [B0 验收](./M1B_B0_ACCEPTANCE.md)、[B1 验收](./M1B_B1_ACCEPTANCE.md)、[B2 验收](./M1B_B2_ACCEPTANCE.md)、[B3 验收](./M1B_B3_ACCEPTANCE.md) 与 [B4 验收](./M1B_B4_ACCEPTANCE.md)。
+更新日期：2026-10-10。状态：**B0–B5 完成，M1-B 已验收**。B1 提供 schema v2、Job/Mock Worker；B2 接入四工具、模式、上下文及只读/缓存边界；B3 接入 execution v2 的持久等待、停止、计时与跨存储恢复；B4 交付自动 Worker、CLI/Web；B5 完成五类离线/真实 DeepSeek + Mock 套件、完整回归与独立 wheel。真实套件 5/5 通过，共 15 次模型调用、14 次工具调用，视频侧没有真实媒体。阶段证据见 [M1-B 验收](./M1B_ACCEPTANCE.md)，历史交付见 [B0](./M1B_B0_ACCEPTANCE.md)、[B1](./M1B_B1_ACCEPTANCE.md)、[B2](./M1B_B2_ACCEPTANCE.md)、[B3](./M1B_B3_ACCEPTANCE.md) 与 [B4](./M1B_B4_ACCEPTANCE.md)。
 
 依据：[M1 总计划](../M1_PLAN.md)、[Harness 设计](../AGENT_HARNESS_DESIGN.md)、[M1-A 验收](./M1A_ACCEPTANCE.md)。规划基线为 `a03f249`；当前能力以 [README](../README.md) 为准。数据、Job/Worker、模式配置、Agent 工具、持久等待及 CLI/Web 入口已按 [M1-B 契约](./M1B_CONTRACTS.md) 落地。
 
@@ -26,9 +26,9 @@ M1-B 的交付目标是：用户通过 Agent 登记一个模拟视频任务，Wo
 | `src/vagent/tools.py`、`video/tools.py` | 四工具、通用解析器与延迟结果；当前视频规则 v2，保留 B2 的 v1 视图与 MCP 只读限制 | B4 共享服务统一入口 |
 | `src/vagent/runner.py`、`wait_runtime.py` | B3 持久挂起、领取/原调用交付、启动补偿、停止和配置/预算检查；保留 execution v1 | B4 使用同一协调器和执行互斥 |
 | `src/vagent/journal.py`、`checkpoints.py` | B3 暂停活动计时、独立累计外部等待；识别未解决中断与已完成节点的持久 pending writes | 持续保持故障回归 |
-| `src/vagent/application.py` | B4 已管理 Worker/等待协调器生命周期、原 Run 事件与独立 Job 通知 | B5 完整应用与真实模型验收 |
-| `src/vagent/cli.py`、`console.py` | B4 接入共享等待、Job 命令和可取消非阻塞输入；退出保存队列 | B5 完整命令行验收 |
-| `src/vagent/web.py`、`web/app.js`、`web/job-state.js` | B4 已交付 Job API/快照/独立 SSE、等待态、模拟卡片与恢复查询 | B5 完整页面与真实模型验收 |
+| `src/vagent/application.py` | B4 已管理 Worker/等待协调器生命周期、原 Run 事件与独立 Job 通知 | B5 完整应用与五类真实模型套件通过 |
+| `src/vagent/cli.py`、`console.py` | B4 接入共享等待、Job 命令和可取消非阻塞输入；退出保存队列 | B5 回归与仓库外安装版命令行验收通过 |
+| `src/vagent/web.py`、`web/app.js`、`web/job-state.js` | B4 已交付 Job API/快照/独立 SSE、等待态、模拟卡片与恢复查询 | B5 API/前端回归、真实结果页面刷新/来源/错误展示通过 |
 | `src/vagent/cache.py` | 回答缓存键含项目/产物，不含 Job 与能力状态 | 视频工具可见时跳过应用回答缓存，防止复用过时的任务状态 |
 
 B3 已验证生产 Runner 的同批等待、停止、外部时间、原工具结果与跨重启交付。无等待解析器的文本 Run 保持 execution v1；新 mock Run 默认 execution v2。旧 B2 的 preparing 记录及失败 Run 不自动唤醒。B4 已通过共享服务自动推进 Worker，并提供 CLI/Web 状态与操作闭环；库级单步接口继续保留。
@@ -160,13 +160,13 @@ Job 事件绑定 Job 自己的 session/run 信息，不能写到当前活动的�
 | **B2 视频工具与能力接入（已完成）** | B1 | 四工具、通用上下文/延迟结果、启动模式/来源、能力配置指纹、按模式规则、只读和缓存边界 | 58 项新增回归；确定性模型创建唯一 Job，非法参数/来源拒绝，off/MCP/旧检查点兼容，详见 B2 验收 |
 | **B3 持久等待与恢复（已完成）** | B2、B0 验证结论 | execution v2、`wait_runtime.py`、独立活动/等待时间、自动继续/停止、应用退出/启动扫描、SQLite pending writes 补偿、旧图视图 | 54 项新增回归、16 项生产强退；等待零模型调用、原结果交付、停止不唤醒、原预算保持；见 B3 验收 |
 | **B4 CLI/Web 交付（已完成）** | B3 | 共享服务管理 Worker；CLI 查询/工作循环/非阻塞交互；Job API、快照和独立 SSE；状态卡片、模拟标记、来源版本与查询恢复 | 25 项 Python 与 7 项前端状态测试；Windows SIGINT 子进程和浏览器操作通过，见 [B4 验收](./M1B_B4_ACCEPTANCE.md) |
-| **B5 验收与打包** | B4 | 新增 `scripts/evaluate_m1b.py` 和 `docs/M1B_ACCEPTANCE.md`；扩展 wheel smoke；更新 README 和总计划 | 离线故障矩阵、真实 DeepSeek + Mock 套件、仓库外 wheel 流程有独立证据；未验证部分明确保留，不提前勾选完成 |
+| **B5 验收与打包（已完成）** | B4 | 新增 `scripts/evaluate_m1b.py` 和 `docs/M1B_ACCEPTANCE.md`；扩展 wheel smoke；更新 README 和总计划 | 收尾 474 项 Python 与 7 项前端测试通过；离线/真实均 5/5，原 Run 续跑与累计预算独立验证，仓库外 wheel 通过；见 [阶段验收](./M1B_ACCEPTANCE.md) |
 
 实施顺序为 **B0 → B1 → B2 → B3 → B4 → B5**。每包交付后记录代码、验证结果和剩余限制；B0 的等待验证与 B3 的跨存储恢复是主要风险，不能用内存回调成功代替持久恢复验收。
 
 ## 7. 验收矩阵
 
-按职责增加测试，并复用已有恢复、只读、流式和缓存夹具。B0/B1 已有契约、Job、Worker、迁移测试；B2 增加四工具与模式验证；B3 增加持久等待/恢复测试；B4 增加 `test_job_application.py`、`test_job_cli.py` 和 `test_job_state.mjs`。下表保留整个 M1-B 的验收矩阵；应用入口和浏览器已有 B4 证据，真实模型联调及完整评测仍待 B5。
+按职责增加测试，并复用已有恢复、只读、流式和缓存夹具。B0/B1 已有契约、Job、Worker、迁移测试；B2 增加四工具与模式验证；B3 增加持久等待/恢复测试；B4 增加 `test_job_application.py`、`test_job_cli.py` 和 `test_job_state.mjs`；B5 增加 20 项 `test_m1b_evaluation.py` 回归并执行完整矩阵。下表的离线故障、五类真实模型与独立安装证据汇总于 [阶段验收](./M1B_ACCEPTANCE.md)。
 
 | 场景 | 必须独立断言的结果 | 证据方式 |
 |---|---|---|
@@ -187,7 +187,7 @@ Job 事件绑定 Job 自己的 session/run 信息，不能写到当前活动的�
 
 真实 DeepSeek 验收使用 Mock 视频适配器，覆盖五类用例：登记后回复、等待成功后引用结果、生成失败后如实说明、能力不满足时纠错/澄清、未启用视频时说明能力边界。跨重启与严格调用次数主要由确定性夹具验证，不把概率性自然语言输出当作幂等证据。
 
-拟定评测入口默认离线，`--live` 才发起真实文本模型请求；每个 Run 沿用 8/12/180 限额，完整五类套件最多 40 次模型调用，任一用例失败立即停下。显式续跑沿用原 Run 与套件累计预算，保留此前报告；不能用重发新 Run 替代失败证据。报告记录 Job/源版本/原 toolCallId、submit/query 次数、恢复次数、等待与活动时间、已知 Token 和未知用量。
+评测入口 `scripts/evaluate_m1b.py` 默认离线，`--live` 才发起真实文本模型请求；每个 Run 沿用 8/12/180 限额，完整五类套件最多 40 次模型调用，任一用例失败立即停下。显式续跑沿用原 Run 与套件累计预算，保留此前报告，并校验原数据/检查点摘要；不能用重发新 Run 替代失败证据。报告记录 Job/源版本/原 toolCallId、submit/query 次数、恢复次数、等待与活动时间、已知 Token 和未知用量。
 
 实施后的基础验证沿用仓库入口：
 
@@ -201,7 +201,7 @@ node --test tests/test_job_state.mjs
 .\.venv\Scripts\python.exe -m build --no-isolation --outdir dist/python
 ```
 
-随后执行新增的离线评测及独立 wheel 验证；真实调用只在明确执行 B5 联调时进行。发布 PyPI、真实视频验证和生产成功率评估不属于上述结果。
+上述验证、离线评测、独立 wheel 和真实 DeepSeek + Mock 联调已由 B5 执行。后续重跑真实模型仍需显式 `--live`；发布 PyPI、真实视频验证和生产成功率评估不属于上述结果。
 
 ## 8. 阶段完成清单
 
@@ -210,6 +210,6 @@ node --test tests/test_job_state.mjs
 - [x] B2：四工具、模式、只读与缓存边界完成，见 [B2 验收](./M1B_B2_ACCEPTANCE.md)。
 - [x] B3：等待、停止、计时和跨重启恢复完成，见 [B3 验收](./M1B_B3_ACCEPTANCE.md)。
 - [x] B4：CLI/Web 状态与操作闭环完成，见 [B4 验收](./M1B_B4_ACCEPTANCE.md)。
-- [ ] B5：离线/真实证据分开记录，独立安装通过，验收文档完成。
+- [x] B5：离线/真实证据分开记录，独立安装通过，验收文档完成，见 [M1-B 验收](./M1B_ACCEPTANCE.md)。
 
-下一项可执行任务为 **B5：增加完整 M1-B 离线/真实评测入口，执行真实 DeepSeek + Mock 五类套件，补齐独立安装矩阵及 `docs/M1B_ACCEPTANCE.md`。继续保留原 Run、累计预算和失败证据，不调用真实视频 API。**
+**M1-B 阶段已完成。** 下一阶段为总计划中的 M1-C：单条真实视频生成；供应商、视频凭证、计费及媒体落盘验收需在该阶段单独确定，不能把本阶段 Mock 成功当成真实视频交付。
