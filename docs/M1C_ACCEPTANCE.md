@@ -1,6 +1,6 @@
 # M1-C C3.1 验收：离线评测与安装媒体流程
 
-日期：2026-10-15。实现基线为 C2 `f74958c`，工作分支 `codex/m1c-c3`，代码提交 `a3cafba`。范围依据 [任务规划](./M1C_PLAN.md)、[冻结契约](./M1C_CONTRACTS.md)和 [C2 验收](./M1C_C2_ACCEPTANCE.md)。
+日期：2026-10-15。实现基线为 C2 `f74958c`，工作分支 `codex/m1c-c3`，代码提交 `a3cafba` 与 CI 修复 `206866f`。范围依据 [任务规划](./M1C_PLAN.md)、[冻结契约](./M1C_CONTRACTS.md)和 [C2 验收](./M1C_C2_ACCEPTANCE.md)。
 
 **C3.1 已完成：专项离线评测 7/7 通过，仓库外安装的 wheel 通过含真实协议夹具与本地媒体的完整 smoke。** 本次真实视频提交数为 0、真实文本模型调用数为 0；所有供应商与媒体请求均由受控 HTTP 响应处理，未调用收费模型，未产生费用。**C3.2 真实联调尚未执行**：当前未配置 `VAGENT_DASHSCOPE_KEY` 与 `VAGENT_DASHSCOPE_WORKSPACE_ID`；账号权限、真实 CDN、真实输出编码/音频与账单继续保持未验证。
 
@@ -66,7 +66,11 @@ Windows / Python 3.11.15 全量回归：**786 passed，2 skipped，215.24 秒**�
 
 ## 5. 远端 CI
 
-仓库 Actions 对 Ubuntu/Windows × Python 3.11/3.12 执行 lint、前端检查、pytest、构建与仓库外 smoke；本次提交的远端结果以 [C3 分支运行记录](https://github.com/shifang37/vAgent/actions?query=branch%3Acodex%2Fm1c-c3) 为准，本地通过不替代远端状态。
+仓库 Actions 对 Ubuntu/Windows × Python 3.11/3.12 执行 lint、前端检查、pytest、构建与仓库外 smoke。
+
+首轮 [运行 38692797642](https://github.com/shifang37/vAgent/actions/runs/38692797642)（`a3cafba`）保留：Ubuntu 3.11/3.12 与 Windows 3.12 通过；Windows/Python 3.11 在既有 `smoke_video_tools` 的等待断言处失败（`wheel_smoke.py` 第 120 行 `pending["status"] == "waiting_external"`，失败日志已取回核对）。该 runner 的同一 smoke 步骤耗时 56 秒（C2 通过时为 27 秒）；慢速环境中排队中的 mock Job 可能在等待 Run 的 `await_job` 执行前完成，使 Run 直接以结果结束。修复 `206866f` 在首个服务实例中冻结 Job 时钟：提交仍立即发生，排队查询改为等待显式重启；并为两处等待断言补充状态与错误码消息，便于后续失败自证。本机在独立安装环境复跑 smoke 通过。
+
+修复后 [运行 38696458231](https://github.com/shifang37/vAgent/actions/runs/38696458231)（`206866f`）**四组全部通过**。远端结果以 [C3 分支运行记录](https://github.com/shifang37/vAgent/actions?query=branch%3Acodex%2Fm1c-c3) 为准，本地通过不替代远端状态。
 
 ## 6. C3.2 真实联调（待执行）
 
