@@ -21,9 +21,9 @@
 | MCP | 已实现并验证 stdio | 显式只读白名单、工具发现、Schema 校验、取消/超时、结果大小限制 |
 | 内容质量校验 | 已通过回归与真实纠错验收 | 记忆字段职责、旧事实残留检查、持久字数上限、保存前计数、未纠正错误禁止报告完成 |
 | M1-B 模拟视频 | B0–B5 已验收 | 自动 Worker、四工具、持久等待/停止/恢复、CLI/Web；离线与真实 DeepSeek + Mock 均 5/5 通过，详见 [M1-B 验收](./docs/M1B_ACCEPTANCE.md) |
-| M1-C 真实视频 | C0–C2 已完成；C3 待实施 | schema v3 兼容、Wan HTTP、双 Key 配置、本地媒体校验/恢复、Range 与播放器；详见 [C2 验收](./docs/M1C_C2_ACCEPTANCE.md)，下一步为 C3 专项安装与真实联调 |
+| M1-C 真实视频 | C0–C2 已完成；C3.1 离线/安装验收已完成，C3.2 真实联调待视频 Key | schema v3 兼容、Wan HTTP、双 Key 配置、本地媒体校验/恢复、Range 与播放器、离线评测与安装媒体流程；详见 [C2 验收](./docs/M1C_C2_ACCEPTANCE.md)与 [C3.1 验收](./docs/M1C_ACCEPTANCE.md) |
 
-2026-10-10 完成 C0–C2：固定北京 `wan2.7-t2v-2026-06-12`、5 秒 720P 16:9，官方参考生成费为 3.00 元，采用业务空间专属域名。应用支持 off/mock/live，任务只提交一次，按原 ID 持久查询；云端成功后由独立媒体 Worker 下载，完整文件与索引提交后才进入 `succeeded`。下载重试、重启和媒体修复沿用原 Job/mediaId；Web 可播放、拖动进度和下载。账号视频权限、实际上游媒体与账单未验证，本次未调用收费模型。接口依据及完整阶段范围见 [官方核实](./docs/VIDEO_API_NOTES.md)、[冻结契约](./docs/M1C_CONTRACTS.md)和[任务规划](./docs/M1C_PLAN.md)。
+2026-10-10 完成 C0–C2：固定北京 `wan2.7-t2v-2026-06-12`、5 秒 720P 16:9，官方参考生成费为 3.00 元，采用业务空间专属域名。应用支持 off/mock/live，任务只提交一次，按原 ID 持久查询；云端成功后由独立媒体 Worker 下载，完整文件与索引提交后才进入 `succeeded`。下载重试、重启和媒体修复沿用原 Job/mediaId；Web 可播放、拖动进度和下载。账号视频权限、实际上游媒体与账单未验证，本次未调用收费模型。接口依据及完整阶段范围见 [官方核实](./docs/VIDEO_API_NOTES.md)、[冻结契约](./docs/M1C_CONTRACTS.md)和[任务规划](./docs/M1C_PLAN.md)。2026-10-15 完成 C3.1：`scripts/evaluate_m1c.py` 离线套件 7/7 通过，仓库外安装 wheel 通过含 live 协议夹具、下载中重启、CLI 与媒体 API 证据的完整 smoke；真实提交数保持 0，C3.2 真实联调待配置视频 Key，见 [C3.1 验收](./docs/M1C_ACCEPTANCE.md)。
 
 每个独立完成的代码部分都同步更新本 README、提交并推送 GitHub。阶段目标见 [M1 计划](./M1_PLAN.md) 和 [Harness 设计](./AGENT_HARNESS_DESIGN.md)。
 

@@ -1,9 +1,9 @@
 # vagent M1 实施计划：先实现 Agent，再接入视频生成
 
-> 更新日期：2026-10-10
-> 状态：M1-A、M1-B 已验收，M1-C 的 C0–C2 已完成；当前已完成内容、验证与限制以 [README](./README.md) 为准。
+> 更新日期：2026-10-15
+> 状态：M1-A、M1-B 已验收，M1-C 的 C0–C2 已完成、C3.1 离线与安装验收已完成；当前已完成内容、验证与限制以 [README](./README.md) 为准。
 > 设计依据：[产品设计](./DESIGN.md)、[Agent 选型与 Harness 设计](./AGENT_HARNESS_DESIGN.md)。  
-> 当前优先级：C2.1/C2.2 的本地媒体交付、恢复和 CLI/Web 已完成，下一步为 C3.1 专项离线评测与安装验证，再进行 C3.2 真实联调；见 [C2 验收](./docs/M1C_C2_ACCEPTANCE.md)、[M1-C 任务规划](./docs/M1C_PLAN.md)及[冻结契约](./docs/M1C_CONTRACTS.md)。媒体链路已用受控响应和测试视频验证，账号权限与实际账单未验证。M1-B 历史证据见 [M1-B 验收](./docs/M1B_ACCEPTANCE.md)。
+> 当前优先级：C3.1 专项离线评测与安装验证已完成（离线套件 7/7、仓库外安装 smoke 通过，见 [C3.1 验收](./docs/M1C_ACCEPTANCE.md)）；下一步为 C3.2 真实联调，需配置视频 Key。范围见 [C2 验收](./docs/M1C_C2_ACCEPTANCE.md)、[M1-C 任务规划](./docs/M1C_PLAN.md)及[冻结契约](./docs/M1C_CONTRACTS.md)。媒体链路已用受控响应和测试视频验证，账号权限与实际账单未验证。M1-B 历史证据见 [M1-B 验收](./docs/M1B_ACCEPTANCE.md)。
 
 当前已补齐 SQLite 图检查点和 `vagent resume RUN_ID`，包含部分工具提交后的重放保护与累计预算验证，记录见 [持久恢复验收](./docs/RECOVERY_ACCEPTANCE.md)。2026-10-08 新增共享应用服务、本地 Web API/SSE 与只读 MCP；首组真实 DeepSeek 多轮编排已验证，发现记忆冗余与文本长度约束问题，详见 [编排验收](./docs/AGENT_ORCHESTRATION_ACCEPTANCE.md)。
 
@@ -207,7 +207,7 @@ M1-A 已于 2026-10-09 验收。M1-B 于 2026-10-10 完成 B5 验收，验证视
 
 ## 10. M1-C：接入首个真实视频模型
 
-2026-10-10：**C0–C2 已完成，C3 待实施**，见 [M1-C 任务规划](./docs/M1C_PLAN.md)和 [C2 验收](./docs/M1C_C2_ACCEPTANCE.md)。C2 从 C1 提交 `30ca949` 继续，保留 B5 `2cc764d` 的历史行为。首个供应商固定为阿里云百炼万相；官方接口、能力与价格见 [C0 核实记录](./docs/VIDEO_API_NOTES.md)，数据/媒体协议与固定迁移夹具见 [C0 契约](./docs/M1C_CONTRACTS.md)。C1/C2 使用受控 HTTP 与本地测试媒体验证；账户权限、实际上游媒体与账单仍未验证。
+2026-10-10：**C0–C2 已完成，C3 待实施**，见 [M1-C 任务规划](./docs/M1C_PLAN.md)和 [C2 验收](./docs/M1C_C2_ACCEPTANCE.md)。C2 从 C1 提交 `30ca949` 继续，保留 B5 `2cc764d` 的历史行为。首个供应商固定为阿里云百炼万相；官方接口、能力与价格见 [C0 核实记录](./docs/VIDEO_API_NOTES.md)，数据/媒体协议与固定迁移夹具见 [C0 契约](./docs/M1C_CONTRACTS.md)。C1/C2 使用受控 HTTP 与本地测试媒体验证；账户权限、实际上游媒体与账单仍未验证。2026-10-15：**C3.1 离线与安装验收已完成**（离线套件 7/7、仓库外安装 smoke 通过，含 live 协议夹具与下载中重启），真实提交数保持 0；C3.2 真实联调待配置视频 Key，见 [C3.1 验收](./docs/M1C_ACCEPTANCE.md)。
 
 | 工作包 | 内容 | 完成门槛 |
 |---|---|---|
