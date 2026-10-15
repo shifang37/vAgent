@@ -369,12 +369,20 @@ class WaitService:
         return stopped
 
     def block_auto(self, run_id: str, error: AppError) -> None:
+        """Record one auto-resume blocker; a stop or delivery racing the scan wins."""
         value = {"code": error.code, "message": str(error)}
-        if self.store.snapshot()["runs"][run_id].get("waitResumeError") == value:
+
+        def record(draft):
+            current = draft["runs"][run_id]
+            if current["status"] not in {"waiting_external", "interrupted", "running"}:
+                return False
+            if current.get("waitResumeError") == value:
+                return False
+            current.update(waitResumeError=value, updatedAt=now())
+            return True
+
+        if not self.store.transaction(record):
             return
-        self.store.transaction(
-            lambda draft: draft["runs"][run_id].update(waitResumeError=value, updatedAt=now())
-        )
         if self.on_event:
             with contextlib.suppress(Exception):
                 self.on_event({"type": "run.resume_blocked", "runId": run_id, "error": value})
