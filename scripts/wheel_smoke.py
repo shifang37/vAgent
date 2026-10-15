@@ -107,6 +107,11 @@ async def smoke_video_tools(directory):
     async with ApplicationService.open(config, model=model) as service:
         assert service.configuration()["sources"]["videoMode"] == "environment"
         assert not service.configuration()["editable"]["videoMode"]
+        # Freeze the Job clock: the submit still happens immediately, but the queued
+        # queries wait for the explicit restart instead of racing the wait run on a
+        # slow runner.
+        frozen = datetime.fromisoformat(service.video_jobs.timestamp())
+        service.video_jobs.clock = lambda: frozen
         first = await service.start("wheel", "register a simulated job", "register")
         registered = await service.wait_for_run(first["id"])
         assert registered["status"] == "completed" and registered["videoMode"] == "mock"
@@ -117,7 +122,11 @@ async def smoke_video_tools(directory):
         first_wait = await service.start("wheel", "await pending job", "wait", read_only=True)
         await service.task
         pending = service.run_record(first_wait["id"])
-        assert pending["status"] == "waiting_external" and pending["resumable"]
+        assert pending["status"] == "waiting_external" and pending["resumable"], (
+            pending["status"],
+            pending["resumable"],
+            pending["errorCode"],
+        )
         assert pending["executionVersion"] == 2
         assert waiting_model.calls == 1 and pending["toolCalls"] == 1
         binding = WaitBinding.model_validate(next(iter(service.store.snapshot()["waits"].values())))
@@ -319,7 +328,11 @@ async def smoke_live_media(directory):
             first = await service.start("wheel", "deliver one live fixture video", "live")
             await service.task
             pending = service.run_record(first["id"])
-            assert pending["status"] == "waiting_external" and pending["resumable"]
+            assert pending["status"] == "waiting_external" and pending["resumable"], (
+                pending["status"],
+                pending["resumable"],
+                pending["errorCode"],
+            )
             binding = WaitBinding.model_validate(next(iter(service.store.snapshot()["waits"].values())))
             assert binding.status == "armed" and binding.context.tool_call_id == "await"
             async with asyncio.timeout(5):
