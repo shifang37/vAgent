@@ -2,6 +2,7 @@
 
 import argparse
 import asyncio
+import hashlib
 import json
 import os
 import subprocess
@@ -13,14 +14,19 @@ from datetime import datetime
 from pathlib import Path
 
 import httpx
-from langchain_core.messages import AIMessage
+from langchain_core.messages import AIMessage, ToolMessage
 
 import vagent
 from vagent.application import ApplicationService
 from vagent.config import load_config
 from vagent.models import DemoModel
 from vagent.video.contracts import VideoCapabilities, VideoRequest, VideoSpec, validate_video_request
+from vagent.video.jobs import JobService
+from vagent.video.media_http import MediaHttpClient
+from vagent.video.media_worker import MediaWorker
 from vagent.video.providers.mock import MockVideoAdapter
+from vagent.video.providers.wan import WanAdapter
+from vagent.video.worker import JobWorker
 from vagent.waiting import WAIT_EXECUTION_VERSION, DeferredToolResult, ExternalResourceRef, WaitBinding
 from vagent.web import create_app
 
@@ -192,6 +198,227 @@ async def smoke_video_tools(directory):
     }
 
 
+class LiveMediaDemo:
+    name = "wheel-live-fixture"
+
+    def __init__(self):
+        self.calls = 0
+        self.job_id = None
+
+    async def generate(self, messages, tools):
+        self.calls += 1
+        assert {"video_capabilities", "video_generate", "job_get", "await_job"} <= {
+            item["function"]["name"] for item in tools
+        }
+        seen = [message.name for message in messages if isinstance(message, ToolMessage)]
+        if "video_capabilities" not in seen:
+            return AIMessage(
+                content="",
+                tool_calls=[{"id": "capabilities", "name": "video_capabilities", "args": {}}],
+            )
+        if "video_generate" not in seen:
+            capability = json.loads(messages[-1].content)["data"]["models"][0]
+            args = {
+                **{key: capability[key] for key in ("provider", "model", "capabilitiesVersion")},
+                "prompt": "wheel live fixture",
+                "spec": capability["specs"][0],
+            }
+            return AIMessage(
+                content="", tool_calls=[{"id": "generate", "name": "video_generate", "args": args}]
+            )
+        if "await_job" not in seen:
+            data = json.loads(messages[-1].content)["data"]
+            assert data["status"] == "pending_submit" and not data["mediaAvailable"]
+            assert data["simulated"] is False
+            self.job_id = data["jobId"]
+            return AIMessage(
+                content="",
+                tool_calls=[{"id": "await", "name": "await_job", "args": {"jobId": self.job_id}}],
+            )
+        data = json.loads(messages[-1].content)["data"]
+        assert data["status"] == "succeeded" and data["mediaAvailable"] and len(data["mediaRefs"]) == 1
+        return AIMessage(content="Live fixture media delivered locally.")
+
+
+async def smoke_live_media(directory):
+    """Installed live-protocol and media flow: one submit, restart keeps the original Job."""
+    import vagent.application as application
+
+    home = Path(directory) / "live-state"
+    sample = Path(__file__).resolve().parent.parent / "tests" / "fixtures" / "m1c" / "sample-720p.mp4"
+    data = sample.read_bytes()
+    video_url = (
+        "https://dashscope-result-sh.oss-accelerate.aliyuncs.com/wheel-fixture.mp4?Signature=wheel-fixture"
+    )
+    fixture = {"submissions": 0, "queries": [], "downloads": 0, "gate": asyncio.Event()}
+    clock = [datetime.fromisoformat("2030-01-01T00:00:00+00:00")]
+
+    def upstream(request):
+        if request.method == "POST":
+            fixture["submissions"] += 1
+            return httpx.Response(
+                200,
+                json={
+                    "request_id": "wheel-trace",
+                    "output": {"task_id": "wheel-task", "task_status": "PENDING"},
+                },
+            )
+        task = request.url.path.rsplit("/", 1)[-1]
+        fixture["queries"].append(task)
+        return httpx.Response(
+            200,
+            json={
+                "request_id": "wheel-query",
+                "output": {"task_id": task, "task_status": "SUCCEEDED", "video_url": video_url},
+            },
+        )
+
+    async def media(request):
+        fixture["downloads"] += 1
+        await fixture["gate"].wait()
+        return httpx.Response(
+            200, content=data, headers={"Content-Type": "video/mp4", "Content-Length": str(len(data))}
+        )
+
+    def advance(service):
+        deadlines = []
+        for job in service.video_jobs.list():
+            if job.next_poll_at and not job.query_started_at:
+                deadlines.append(job.next_poll_at)
+            download = getattr(job, "download", None)
+            if download is not None and download.next_attempt_at:
+                deadlines.append(download.next_attempt_at)
+        if deadlines:
+            clock[0] = max(clock[0], min(datetime.fromisoformat(value) for value in deadlines))
+
+    originals = (
+        application.WanAdapter,
+        application.MediaHttpClient,
+        application.JobService,
+        application.JobWorker,
+        application.MediaWorker,
+    )
+    application.WanAdapter = lambda **kwargs: WanAdapter(**kwargs, transport=httpx.MockTransport(upstream))
+    application.MediaHttpClient = lambda: MediaHttpClient(transport=httpx.MockTransport(media))
+    application.JobService = lambda *args, **kwargs: JobService(*args, **kwargs, clock=lambda: clock[0])
+    application.JobWorker = lambda service: JobWorker(service, idle_interval_seconds=0.05)
+    application.MediaWorker = lambda media_service, client: MediaWorker(
+        media_service, client, idle_interval_seconds=0.05
+    )
+    try:
+        config = load_config(
+            {
+                "VAGENT_HOME": str(home),
+                "VAGENT_VIDEO_MODE": "live",
+                "VAGENT_DASHSCOPE_KEY": "wheel-video-fixture-key",
+                "VAGENT_DASHSCOPE_WORKSPACE_ID": "wheel-fixture",
+            }
+        )
+        model = LiveMediaDemo()
+        async with ApplicationService.open(config, model=model) as service:
+            first = await service.start("wheel", "deliver one live fixture video", "live")
+            await service.task
+            pending = service.run_record(first["id"])
+            assert pending["status"] == "waiting_external" and pending["resumable"]
+            binding = WaitBinding.model_validate(next(iter(service.store.snapshot()["waits"].values())))
+            assert binding.status == "armed" and binding.context.tool_call_id == "await"
+            async with asyncio.timeout(5):
+                while True:
+                    advance(service)
+                    job = service.video_jobs.get(model.job_id)
+                    if (
+                        job.status == "downloading"
+                        and job.download.attempts >= 1
+                        and fixture["downloads"] >= 1
+                    ):
+                        break
+                    await asyncio.sleep(0.01)
+            original = service.video_jobs.get(model.job_id)
+            assert original.provider_task_id == "wheel-task" and original.submit_attempts == 1
+            assert original.download.phase == "writing" and original.download.window_attempts == 1
+            media_id = original.download.media_id
+            assert fixture["submissions"] == 1 and fixture["queries"] == ["wheel-task"]
+            assert fixture["downloads"] == 1
+            assert not (home / "media" / "wheel" / f"{media_id}.mp4").exists()
+        assert not (home / "instance.lock").exists()
+
+        resumed_model = LiveMediaDemo()
+        async with ApplicationService.open(config, model=resumed_model) as service:
+            async with asyncio.timeout(5):
+                while True:
+                    advance(service)
+                    job = service.video_jobs.get(model.job_id)
+                    if (
+                        job.download.attempts >= 2
+                        and job.download.phase == "writing"
+                        and fixture["downloads"] >= 2
+                    ):
+                        break
+                    await asyncio.sleep(0.01)
+            fixture["gate"].set()
+            async with asyncio.timeout(5):
+                while service.video_jobs.get(model.job_id).status != "succeeded":
+                    await asyncio.sleep(0.01)
+            job = service.video_jobs.get(model.job_id)
+            assert job.provider_task_id == "wheel-task" and job.submit_attempts == 1
+            assert job.download.media_id == media_id and job.download.attempts == 2
+            assert job.download.phase == "committed"
+            assert fixture["submissions"] == 1 and fixture["queries"] == ["wheel-task"]
+            finished = await asyncio.wait_for(service.wait_for_run(pending["id"]), 5)
+            assert finished["status"] == "completed" and finished["id"] == pending["id"]
+            assert finished["policy"] == pending["policy"] and resumed_model.calls == 1
+            delivered = WaitBinding.model_validate(service.store.snapshot()["waits"][binding.id])
+            assert delivered.status == "delivered"
+            asset = service.store.snapshot()["media"][media_id]
+            assert asset["sha256"] == hashlib.sha256(data).hexdigest()
+            file = home / asset["relativePath"]
+            assert file.read_bytes() == data and not file.with_suffix(".mp4.part").exists()
+            app = create_app(config)
+            app.state.service = service
+            async with httpx.AsyncClient(
+                transport=httpx.ASGITransport(app=app), base_url="http://127.0.0.1:3210"
+            ) as client:
+                detail = (await client.get(f"/api/media/{media_id}")).json()
+                assert detail["mediaAvailable"] and detail["sizeBytes"] == len(data)
+                full = await client.get(detail["contentUrl"])
+                assert full.status_code == 200 and full.content == data
+                ranged = await client.get(detail["contentUrl"], headers={"Range": "bytes=0-99"})
+                assert ranged.status_code == 206 and len(ranged.content) == 100
+        assert not (home / "instance.lock").exists()
+        cli = Path(sysconfig.get_path("scripts")) / ("vagent.exe" if os.name == "nt" else "vagent")
+        env = isolated_environment(home)
+        detail = json.loads(run_command([str(cli), "jobs", "get", model.job_id], env=env))
+        assert detail["status"] == "succeeded" and detail["mediaAvailable"] is True
+        assert detail["localMediaPath"] == f"media/wheel/{media_id}.mp4"
+        assert detail["providerTaskId"] == "wheel-task" and detail["submitAttempts"] == 1
+        assert "Signature" not in json.dumps(detail)
+    finally:
+        (
+            application.WanAdapter,
+            application.MediaHttpClient,
+            application.JobService,
+            application.JobWorker,
+            application.MediaWorker,
+        ) = originals
+    return {
+        "jobId": model.job_id,
+        "providerTaskId": "wheel-task",
+        "mediaId": media_id,
+        "sha256": hashlib.sha256(data).hexdigest(),
+        "sizeBytes": len(data),
+        "submitCalls": fixture["submissions"],
+        "queryCalls": len(fixture["queries"]),
+        "downloadAttempts": 2,
+        "runId": pending["id"],
+        "toolCallId": binding.context.tool_call_id,
+        "restartedDuringDownload": True,
+        "policyPreserved": finished["policy"] == pending["policy"],
+        "mediaApiVerified": True,
+        "cliMediaVerified": True,
+        "lockReleased": True,
+    }
+
+
 def isolated_environment(home):
     env = {
         key: value
@@ -203,7 +430,9 @@ def isolated_environment(home):
 
 
 def run_command(command, *, env):
-    completed = subprocess.run(command, env=env, capture_output=True, text=True, encoding="utf-8", timeout=60)
+    completed = subprocess.run(
+        command, env=env, capture_output=True, text=True, encoding="utf-8", timeout=120
+    )
     if completed.returncode:
         raise AssertionError(
             f"Installed command failed ({completed.returncode}):\n{completed.stdout}\n{completed.stderr}"
@@ -229,6 +458,28 @@ def smoke_evaluation(directory):
     assert report["status"] == "passed" and report["mode"] == "offline-fixture"
     assert report["totals"]["passedCases"] == report["totals"]["plannedCases"] == 5
     assert report["totals"]["submitCalls"] == 3 and report["totals"]["queryCalls"] == 6
+    assert not (Path(report["dataDirectory"]) / "instance.lock").exists()
+    return report
+
+
+def smoke_m1c_evaluation(directory):
+    output = Path(directory) / "m1c-evaluation.json"
+    run_command(
+        [
+            sys.executable,
+            "-I",
+            str(Path(__file__).with_name("evaluate_m1c.py").resolve()),
+            "--home",
+            str(Path(directory) / "m1c-state"),
+            "--output",
+            str(output),
+        ],
+        env=isolated_environment(Path(directory) / "unused-config"),
+    )
+    report = json.loads(output.read_text(encoding="utf-8"))
+    assert report["status"] == "passed" and report["mode"] == "offline-fixture"
+    assert report["totals"]["passedCases"] == report["totals"]["plannedCases"] == 7
+    assert report["totals"]["submitCalls"] == 6 and report["totals"]["mediaDelivered"] == 3
     assert not (Path(report["dataDirectory"]) / "instance.lock").exists()
     return report
 
@@ -312,7 +563,9 @@ async def main(output=None):
                     assert any(e.get("errorCode") == "CONTENT_LENGTH" for e in rejected["run"]["events"])
             assert not (Path(directory) / "state" / "instance.lock").exists()
             video_report = await smoke_video_tools(directory)
+            live_report = await smoke_live_media(directory)
             evaluation_report = smoke_evaluation(directory)
+            m1c_report = smoke_m1c_evaluation(directory)
             report = {
                 "status": "passed",
                 "packagePath": str(Path(vagent.__file__).resolve()),
@@ -326,17 +579,21 @@ async def main(output=None):
                     "textAndQuality": True,
                     "localMcp": True,
                     "videoRestartAndCli": True,
+                    "liveMediaRestartAndCli": True,
                     "fiveCaseM1bSuite": True,
+                    "sevenCaseM1cSuite": True,
                 },
                 "videoRestart": video_report,
+                "liveMedia": live_report,
                 "m1bEvaluation": evaluation_report,
+                "m1cEvaluation": m1c_report,
             }
     report["temporaryDataCleaned"] = not Path(directory).exists()
     if output:
         output.parent.mkdir(parents=True, exist_ok=True)
         output.write_text(json.dumps(report, ensure_ascii=False, indent=2), encoding="utf-8")
     print(
-        "PASS: installed wheel, Web assets, config, streaming, text/quality, MCP, mock video tools, durable wait, original Run restart/automatic continuation, readonly delivery, unchanged budgets, CLI list/get/usage, five M1-B cases, cleanup."
+        "PASS: installed wheel, Web assets, config, streaming, text/quality, MCP, mock video tools, durable wait, original Run restart/automatic continuation, readonly delivery, unchanged budgets, CLI list/get/usage, five M1-B cases, live protocol with local media restart and CLI media evidence, seven M1-C cases, cleanup."
     )
     return report
 
