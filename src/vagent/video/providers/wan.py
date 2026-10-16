@@ -297,19 +297,24 @@ class WanAdapter:
         if usage is not None:
             if not isinstance(usage, dict):
                 raise ValueError("Invalid usage")
-            usage = ProviderUsage.model_validate(
-                {
-                    local: usage.get(remote)
-                    for local, remote in {
-                        "duration": "duration",
-                        "inputVideoDuration": "input_video_duration",
-                        "outputVideoDuration": "output_video_duration",
-                        "videoCount": "video_count",
-                        "resolution": "SR",
-                        "aspectRatio": "ratio",
-                    }.items()
-                }
-            )
+            values = {
+                local: usage.get(remote)
+                for local, remote in {
+                    "duration": "duration",
+                    "inputVideoDuration": "input_video_duration",
+                    "outputVideoDuration": "output_video_duration",
+                    "videoCount": "video_count",
+                    "resolution": "SR",
+                    "aspectRatio": "ratio",
+                }.items()
+            }
+            resolution = values["resolution"]
+            if isinstance(resolution, int) and not isinstance(resolution, bool):
+                # The live service reports SR numerically (e.g. 720); the frozen
+                # contract keeps the documented "720P"/"1080P" form, so map the
+                # known numeric values and still reject anything unknown.
+                values["resolution"] = {720: "720P", 1080: "1080P"}.get(resolution, resolution)
+            usage = ProviderUsage.model_validate(values)
         video_url = output.get("video_url")
         expires_at = None
         if isinstance(video_url, str):

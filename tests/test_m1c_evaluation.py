@@ -82,6 +82,7 @@ async def test_m1c_evaluation_records_real_media_delivery_and_independent_ledger
         (0, "broken-media-file", "media_matches_local_file"),
         (0, "leaked-signature", "private_url_not_exposed"),
         (1, "changed-source-version", "source_version_preserved"),
+        (1, "undelivered-job", "succeeded"),
         (1, "media-api-failure", "media_api_ok"),
         (1, "operation-result-mismatch", "durable_deliveries_match"),
         (2, "hidden-failure", "actual_failure_delivered"),
@@ -112,6 +113,12 @@ def test_m1c_grader_rejects_fabricated_or_inconsistent_evidence(
         )
     elif corruption == "changed-source-version":
         item["jobs"][0]["request"]["sourceRefs"][0]["version"] = 2
+    elif corruption == "undelivered-job":
+        item["jobs"][0]["status"] = "running"
+        item["jobs"][0]["download"] = None
+        item["assets"] = []
+        item["mediaChecks"] = {}
+        item["mediaApi"] = None
     elif corruption == "media-api-failure":
         item["mediaApi"]["get200"] = False
     elif corruption == "operation-result-mismatch":

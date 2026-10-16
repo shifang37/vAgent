@@ -41,7 +41,7 @@ async def test_exact_frozen_protocol_and_original_task_identity(video_clock):
                     "output_video_duration": 5,
                     "input_video_duration": 0,
                     "video_count": 1,
-                    "SR": "720P",
+                    "SR": 720,
                     "ratio": "16:9",
                     "bill": "ignored",
                 },
@@ -61,6 +61,7 @@ async def test_exact_frozen_protocol_and_original_task_identity(video_clock):
         assert snapshot.output.expiry_source == "signature"
         assert snapshot.output.provider_times.end_time == "2030-01-01 08:00:01"
         assert snapshot.output.usage.duration == 5 and snapshot.output.usage.video_count == 1
+        assert snapshot.output.usage.resolution == "720P"
         assert "private-signature" not in repr(snapshot)
         assert not provider.client.follow_redirects and not provider.client.trust_env
         assert provider.client.timeout.connect == 10
@@ -250,6 +251,8 @@ async def test_documented_states_and_immediate_terminal_submit(status, local):
         provider_response("SUCCEEDED"),
         provider_response("SUCCEEDED", video_url="http://plain-http.example/test.mp4"),
         {**provider_response("SUCCEEDED", video_url=VIDEO_URL), "usage": {"duration": True}},
+        {**provider_response("SUCCEEDED", video_url=VIDEO_URL), "usage": {"SR": 480}},
+        {**provider_response("SUCCEEDED", video_url=VIDEO_URL), "usage": {"SR": "4K"}},
         provider_response("SUCCEEDED", video_url=VIDEO_URL, end_time=5),
     ],
 )
@@ -259,6 +262,14 @@ async def test_invalid_query_fields_do_not_become_generation_failures(body):
             await provider.query("wan-original")
         assert caught.value.error.stage == "query" and caught.value.error.code == "QUERY_PROTOCOL_ERROR"
         assert caught.value.submission_outcome is None
+
+
+@pytest.mark.parametrize(("raw", "expected"), [(720, "720P"), (1080, "1080P"), ("720P", "720P")])
+async def test_usage_resolution_maps_numeric_and_documented_sr(raw, expected):
+    body = {**provider_response("SUCCEEDED", video_url=VIDEO_URL), "usage": {"SR": raw, "duration": 5}}
+    async with adapter(lambda _: httpx.Response(200, json=body)) as provider:
+        snapshot = await provider.query("wan-original")
+    assert snapshot.output.usage.resolution == expected
 
 
 async def test_unknown_status_and_authentication_pause_original_query():

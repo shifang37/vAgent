@@ -253,9 +253,18 @@ class WanFixture:
             output["video_url"] = MEDIA_URL
         if status == "FAILED":
             output["code"] = "DataInspectionFailed"
-        return httpx.Response(
-            200, json={"request_id": f"fixture-query-{len(record['queryTaskIds'])}", "output": output}
-        )
+        payload = {"request_id": f"fixture-query-{len(record['queryTaskIds'])}", "output": output}
+        if status == "SUCCEEDED":
+            # Pin the live response shape: the real service reports SR numerically.
+            payload["usage"] = {
+                "duration": 5,
+                "output_video_duration": 5,
+                "input_video_duration": 0,
+                "video_count": 1,
+                "SR": 720,
+                "ratio": "16:9",
+            }
+        return httpx.Response(200, json=payload)
 
 
 class MediaFixture:
@@ -632,6 +641,7 @@ def grade(case, item, *, offline):
     else:
         checks["original_task_identity"] = bool(job["providerTaskId"])
     if case.expects == "success":
+        download = job["download"] or {}
         checks.update(
             succeeded=job["status"] == "succeeded" and job["simulated"] is False,
             media_delivered=job["mediaAvailable"] is True
@@ -639,8 +649,8 @@ def grade(case, item, *, offline):
             and len(job["mediaRefs"]) == 1
             and job["result"]["mediaAvailable"] is True,
             media_matches_local_file=media_flags_ok(item["mediaChecks"], offline=offline),
-            download_accounted=job["download"]["attempts"] == upstream["downloadCalls"]
-            and job["download"]["phase"] == "committed",
+            download_accounted=download.get("attempts") == upstream["downloadCalls"]
+            and download.get("phase") == "committed",
             media_api_ok=bool(item["mediaApi"]) and all(item["mediaApi"].values()),
             answer_references_job=job["id"] in answer,
             no_fabricated_media_claim=not re.search(r"https?://", answer),
@@ -649,6 +659,7 @@ def grade(case, item, *, offline):
             refs = [{"artifactId": item["sourceId"], "version": 1}]
             checks.update(
                 source_version_preserved=job["request"]["sourceRefs"] == refs
+                and bool(item["assets"])
                 and item["assets"][0]["sourceRefs"] == refs,
                 source_was_read="artifact_read" in successful
                 and any(
