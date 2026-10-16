@@ -62,7 +62,7 @@
 - 离线全量：**839 passed / 2 skipped**（M1 基线 794；2 项跳过仍为 Windows 账户无符号链接权限）。
 - `ruff check` 与 `ruff format --check` 全库通过；wheel 构建成功，独立 wheel 环境的 `scripts/wheel_smoke.py` 完整通过（含 M1-B/M1-C 兼容、live 协议夹具与媒体证据）。
 - Mock 轨迹：`tests/test_m2_integration.py` 三镜头“保存→读取→改版保留身份”的 Runner 级与应用级轨迹通过，`toolFeatures.video=4/4`、`executionVersion=3`；off 模式不出现分镜工具。
-- 四组 CI（ubuntu/windows × 3.11/3.12）在实现补提交 `5eff0f3` 上全部通过（check runs `116955320579` / `116955320160` / `116955320530` / `116955320660`）；D0 分支提交 `0b4eb0c` 四组同样全绿。验收级汇总留 D4。
+- 四组 CI（ubuntu/windows × 3.11/3.12）在最终提交 `7ab1258` 上全部通过（check runs `116972321644` / `116972322068` / `116972322051` / `116972321903`）；中间轮次的失败与修复见第 7 节；D0 分支提交 `0b4eb0c` 四组同样全绿。验收级汇总留 D4。
 
 ## 7. 失败与偏差记录
 
@@ -70,6 +70,8 @@
 - `VIDEO_RULES_V4` 文本为 D1 定稿的过渡版本（含分镜指引，尚未含批量生成/重做条款）；D2 将在同一版本号下扩展并以 D2 验收为准。因此 D1 开发构建录制的 4/4 运行不承诺跨 D2 恢复（预发布工件边界）；**pre-M2（execution v2）运行按冻结契约保持可恢复**。
 - `scripts/wheel_smoke.py` 需安装在独立环境中的 wheel 才能运行（仓库内可编辑安装被显式拒绝）；本地已按此方式验证通过，CI 矩阵与 D4 安装流程另行覆盖。
 - 首轮 D1 CI（`9542d5e`/`f7b0b33`）3/4 通过；windows-latest 3.12 在既有计时测试 `test_timeout_cancels_hanging_model` 上失败：0.3 秒策略超时在慢 runner 上于挂起模型调用开始前到期，取消路径未运行、`stopped` 未置位。按仓库 liveness 惯例修复（`5eff0f3`：放宽为 5 秒守卫，并断言模型确已启动，使同类停顿在失败时给出明确信号），复跑四组全绿。
+- 文档提交 `d5e39d5` 的复跑中，windows-latest 3.12 在邻居用例 `test_external_task_cancellation_records_cancelled_status` 上以其 2 秒启动守卫超时失败（该轮套件 8:13，慢于前轮 6:49）。修复 `b2adc55`：把测试套件剩余的进程内启动/完成守卫统一放宽为 30 秒（test_runner、test_media_recovery、test_video_worker、test_media_api），与 122b1b4 的 liveness 约定一致。
+- `b2adc55` 的复跑中，windows-latest 3.11 上 CLI 用例 `test_cli_resume_offline_run_without_key_or_source_cwd` 以其 20 秒子进程守卫超时失败（该轮套件 9:17，三台 runner 逐轮变慢）。修复 `7ab1258`：六处 CLI 冷启动子进程守卫统一放宽为 60 秒（test_resume、test_job_cli、test_live_cli；子进程含解释器与导入启动，约定为进程内 30 秒守卫的两倍）。此后四组全绿。
 
 ## 8. 留给 D2 的入口
 
