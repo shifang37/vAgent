@@ -20,9 +20,11 @@
 | `capabilitiesVersion` | 首期 live 为 **`wan27-t2v-beijing-v1`** |
 | `adapterVersion` / `endpointProfile` | **`wan-http-v1`** / **`beijing-workspace-v1`** |
 | `priceVersion` | **`wan27-beijing-720p-20261010`** |
-| `sourcePolicyVersion` / `validationVersion` | **`wan-result-hosts-v1`** / **`mp4-avc-v1`** |
+| `sourcePolicyVersion` / `validationVersion` | **`wan-result-hosts-v2`**（v1 保留用于历史 Job）/ **`mp4-avc-v1`** |
 
 `contracts.py` 提供严格 camelCase JSON 契约、不可变请求及版本分派；`jobs.py` 负责同事务登记与不变量；`providers/wan.py` 负责固定协议、错误映射；`worker.py` 只处理提交/查询；`media.py`、`media_worker.py` 处理下载/文件提交。`storage.py` 管理 schema v3、媒体索引和恢复记录。供应商参数、媒体 HTTP 和费用规则不进入通用 Agent 图。
+
+2026-10-16：来源策略升为 **v2**：在 v1 两个示例主机之外精确新增北京结果主机 `dashscope-result-bj.oss-cn-beijing.aliyuncs.com`（依据 wan3 视频生成 API 参考的北京 SUCCEEDED 示例，https://help.aliyun.com/zh/model-studio/wan3-video-generation-api-reference ）。v1 语义不变；新 Job 与新恢复窗口采用 v2，历史窗口继续按 v1 恢复。真实样本主机与重定向情况在 C3.2 记录。
 
 持久对象沿用 `extra=forbid`、有限数值、UTC 时间与严格布尔值；嵌套不可变集合使用 tuple。解析外部供应商 JSON 时先提取已知字段再构造契约，允许忽略未知非关键字段，不将原始响应整体持久化。
 

@@ -44,6 +44,26 @@ def test_source_policy_uses_exact_https_hosts(url, code):
     assert caught.value.code == code
 
 
+def test_current_policy_allows_documented_result_hosts():
+    for host in (
+        "dashscope-result-sh.oss-accelerate.aliyuncs.com",
+        "dashscope-a717.oss-accelerate.aliyuncs.com",
+        "dashscope-result-bj.oss-cn-beijing.aliyuncs.com",
+    ):
+        assert check_source(f"https://{host}/a.mp4", SOURCE_POLICY_VERSION) == host
+
+
+def test_frozen_v1_policy_keeps_its_exact_hosts():
+    for host in (
+        "dashscope-result-sh.oss-accelerate.aliyuncs.com",
+        "dashscope-a717.oss-accelerate.aliyuncs.com",
+    ):
+        assert check_source(f"https://{host}/a.mp4", "wan-result-hosts-v1") == host
+    with pytest.raises(MediaError) as caught:
+        check_source("https://dashscope-result-bj.oss-cn-beijing.aliyuncs.com/a.mp4", "wan-result-hosts-v1")
+    assert caught.value.code == "MEDIA_SOURCE_UNAPPROVED"
+
+
 @pytest.mark.parametrize(
     "address",
     [

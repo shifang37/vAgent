@@ -316,7 +316,8 @@ WAN_ENDPOINT_PROFILE = "beijing-workspace-v1"
 WAN_PRICE_VERSION = "wan27-beijing-720p-20261010"
 WAN_PRICE_SOURCE = "https://help.aliyun.com/zh/model-studio/model-pricing#ba6f7744d5e0o"
 WAN_PROMPT_PREFIX = "生成单镜头视频。\n"
-SOURCE_POLICY_VERSION = "wan-result-hosts-v1"
+# v2 adds the documented Beijing result host; v1 stays valid for historical jobs.
+SOURCE_POLICY_VERSION = "wan-result-hosts-v2"
 MEDIA_VALIDATION_VERSION = "mp4-avc-v1"
 
 WorkspaceId = Annotated[str, Field(min_length=1, max_length=63, pattern=r"^[a-z0-9](?:[a-z0-9-]*[a-z0-9])?$")]

@@ -14,11 +14,21 @@ import httpx
 from vagent.video.contracts import SOURCE_POLICY_VERSION
 from vagent.video.media import MediaError, file_io
 
+# v1: C0 document examples (text-to-video API reference).
+# v2: adds the Beijing result host from the wan3 API reference example (2026-10-16);
+# v1 remains readable for historical download windows.
 SOURCE_HOSTS = {
     "wan-result-hosts-v1": frozenset(
         {
             "dashscope-result-sh.oss-accelerate.aliyuncs.com",
             "dashscope-a717.oss-accelerate.aliyuncs.com",
+        }
+    ),
+    "wan-result-hosts-v2": frozenset(
+        {
+            "dashscope-result-sh.oss-accelerate.aliyuncs.com",
+            "dashscope-a717.oss-accelerate.aliyuncs.com",
+            "dashscope-result-bj.oss-cn-beijing.aliyuncs.com",
         }
     ),
 }
