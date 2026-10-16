@@ -62,13 +62,14 @@
 - 离线全量：**839 passed / 2 skipped**（M1 基线 794；2 项跳过仍为 Windows 账户无符号链接权限）。
 - `ruff check` 与 `ruff format --check` 全库通过；wheel 构建成功，独立 wheel 环境的 `scripts/wheel_smoke.py` 完整通过（含 M1-B/M1-C 兼容、live 协议夹具与媒体证据）。
 - Mock 轨迹：`tests/test_m2_integration.py` 三镜头“保存→读取→改版保留身份”的 Runner 级与应用级轨迹通过，`toolFeatures.video=4/4`、`executionVersion=3`；off 模式不出现分镜工具。
-- 四组 CI（ubuntu/windows × 3.11/3.12）沿用仓库工作流，随分支推送执行；D1 的 CI 记录见提交历史，验收级汇总留 D4。
+- 四组 CI（ubuntu/windows × 3.11/3.12）在实现补提交 `5eff0f3` 上全部通过（check runs `116955320579` / `116955320160` / `116955320530` / `116955320660`）；D0 分支提交 `0b4eb0c` 四组同样全绿。验收级汇总留 D4。
 
 ## 7. 失败与偏差记录
 
 - 首轮新增用例 18 项失败，均为测试侧适配问题（缺 `ensure_session`、camelCase 键名、计数断言、只读工具集合预期），逐项修正后全绿；实现代码未因这些失败变更语义。
 - `VIDEO_RULES_V4` 文本为 D1 定稿的过渡版本（含分镜指引，尚未含批量生成/重做条款）；D2 将在同一版本号下扩展并以 D2 验收为准。因此 D1 开发构建录制的 4/4 运行不承诺跨 D2 恢复（预发布工件边界）；**pre-M2（execution v2）运行按冻结契约保持可恢复**。
 - `scripts/wheel_smoke.py` 需安装在独立环境中的 wheel 才能运行（仓库内可编辑安装被显式拒绝）；本地已按此方式验证通过，CI 矩阵与 D4 安装流程另行覆盖。
+- 首轮 D1 CI（`9542d5e`/`f7b0b33`）3/4 通过；windows-latest 3.12 在既有计时测试 `test_timeout_cancels_hanging_model` 上失败：0.3 秒策略超时在慢 runner 上于挂起模型调用开始前到期，取消路径未运行、`stopped` 未置位。按仓库 liveness 惯例修复（`5eff0f3`：放宽为 5 秒守卫，并断言模型确已启动，使同类停顿在失败时给出明确信号），复跑四组全绿。
 
 ## 8. 留给 D2 的入口
 
