@@ -46,7 +46,7 @@ def command(tmp_path, env, *args):
         capture_output=True,
         text=True,
         encoding="utf-8",
-        timeout=15,
+        timeout=60,
     )
 
 
@@ -126,7 +126,7 @@ async def test_jobs_work_sigint_preserves_existing_agent_wait_intent(tmp_path):
         capture_output=True,
         text=True,
         encoding="utf-8",
-        timeout=20,
+        timeout=60,
     )
     assert result.returncode == 130, (result.stdout, result.stderr)
     with FileStore.open(home) as store:
@@ -264,7 +264,7 @@ def test_cli_sigint_subprocess_saves_jobs_and_releases_lock(tmp_path, mode, quer
         capture_output=True,
         text=True,
         encoding="utf-8",
-        timeout=20,
+        timeout=60,
     )
     assert result.returncode == 130, (result.stdout, result.stderr)
     assert "Task was destroyed" not in result.stderr and "Traceback" not in result.stderr

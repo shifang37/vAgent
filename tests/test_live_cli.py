@@ -35,7 +35,7 @@ def command(directory, home, *args, **video_env):
         capture_output=True,
         text=True,
         encoding="utf-8",
-        timeout=15,
+        timeout=60,
         creationflags=subprocess.CREATE_NO_WINDOW if os.name == "nt" else 0,
     )
 

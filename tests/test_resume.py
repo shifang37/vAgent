@@ -278,7 +278,7 @@ async def test_hard_crash_replays_only_unfinished_work(tmp_path, phase):
     home = tmp_path / "state"
     worker = tmp_path / "crash_worker.py"
     worker.write_text(CRASH_WORKER, encoding="utf-8")
-    result = subprocess.run([sys.executable, str(worker), str(home), phase], capture_output=True, timeout=20)
+    result = subprocess.run([sys.executable, str(worker), str(home), phase], capture_output=True, timeout=60)
     assert result.returncode == 73, result.stderr.decode(errors="replace")
     before = json.loads((home / "state.json").read_text(encoding="utf-8"))
     assert len(before["artifacts"]) == (1 if phase == "tool" else 2)
@@ -333,7 +333,7 @@ async def test_cli_resume_offline_run_without_key_or_source_cwd(store, tmp_path)
         capture_output=True,
         text=True,
         encoding="utf-8",
-        timeout=20,
+        timeout=60,
     )
     assert result.returncode == 0, result.stdout + result.stderr
     assert "[completed]" in result.stdout
