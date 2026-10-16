@@ -76,6 +76,8 @@ Windows / Python 3.11.15 全量回归：**786 passed，2 skipped，215.24 秒**�
 
 随后文档提交 `da5de7c`（纯文档变更）在 Windows/Python 3.12 的 `wheel_smoke.py::smoke_live_media` 收尾等待处超时（[作业 116845557461](https://github.com/shifang37/vAgent/actions/runs/38861808016/job/116845557461)）：重启后 `wait_for_run(..., 5)` 的 5 秒活性界限在慢 runner 上不足，相同代码在前两个提交的同一平台均通过。修复把该函数的四个活性界限放宽到 30 秒并注明其不是速度断言；本机以安装版 wheel 从仓库外复跑完整 smoke 通过（`output/m1c-c3-wheel-smoke-r2.json`）。
 
+Windows/Python 3.12 的 `pytest` 步骤随后又暴露一处同类慢 runner 抖动（[作业 116850422971](https://github.com/shifang37/vAgent/actions/runs/38863333443/job/116850422971)）：`test_cli_run_keeps_waiting_and_resume_uses_same_job_and_budget` 依赖的共享活性助手 `tests/job_support.py::eventually` 的 5 秒默认上限在负载最重的 runner 上不足（该 runner 全量套件 8 分 32 秒，本机约 3.6 分钟；同一测试在前两次提交的同一平台均通过）。修复把 `eventually` 与 `finish_job` 的默认界限、以及 `test_job_cli.py` 中五处进程内等待从 5 秒放宽到 30 秒，并注明这些是活性界限而非速度断言；本机定向套件 27 项通过。CI 矩阵同时改为 `fail-fast: false`，单平台失败不再取消其余三组，便于完整判别。修复提交的远端结果以分支运行记录为准。
+
 远端结果以 [C3 分支运行记录](https://github.com/shifang37/vAgent/actions?query=branch%3Acodex%2Fm1c-c3) 为准，本地通过不替代远端状态。
 
 ## 6. C3.2 真实联调（2026-10-16 完成）

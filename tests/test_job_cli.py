@@ -157,7 +157,7 @@ async def test_cli_run_keeps_waiting_and_resume_uses_same_job_and_budget(
     )
     assert not task.done() and model.calls == 2
     task.cancel()  # Same cancellation delivered by asyncio.Runner's Ctrl+C handler.
-    assert await asyncio.wait_for(task, 5) == 130
+    assert await asyncio.wait_for(task, 30) == 130
     stopped = json.loads((tmp_path / "state.json").read_text(encoding="utf-8"))
     run = next(iter(stopped["runs"].values()))
     assert run["status"] == "cancelled" and not stopped["waits"][run["activeWaitId"]]["autoResume"]
@@ -167,7 +167,7 @@ async def test_cli_run_keeps_waiting_and_resume_uses_same_job_and_budget(
     await eventually(lambda: len(job_runtime.adapters) == 2)
     jobs.video_jobs = JobService(job_runtime.adapters[-1].store, [], clock=job_runtime.clock)
     await finish_job(jobs, job_runtime.clock, model.job_id)
-    assert await asyncio.wait_for(resumed, 5) == 0
+    assert await asyncio.wait_for(resumed, 30) == 0
     state = json.loads((tmp_path / "state.json").read_text(encoding="utf-8"))
     final = state["runs"][run["id"]]
     assert final["status"] == "completed" and final["modelSteps"] == 3 and final["toolCalls"] == 2
@@ -197,7 +197,7 @@ async def test_cli_run_waits_to_success_without_returning_at_graph_interrupt(
         job_runtime.clock,
         model.job_id,
     )
-    assert await asyncio.wait_for(task, 5) == 0 and model.calls == 3
+    assert await asyncio.wait_for(task, 30) == 0 and model.calls == 3
     assert not (tmp_path / "instance.lock").exists()
 
 
@@ -225,7 +225,7 @@ async def test_chat_input_yields_to_worker_then_exit_releases_background_tasks(
         "vagent.application.DeepSeekModel", lambda *_args, **_kwargs: model.configure(job_runtime)
     )
     task = asyncio.create_task(cli.run_agent(cli.parser().parse_args(["chat", "-s", "coffee"])))
-    await asyncio.wait_for(waiting_for_input.wait(), 5)
+    await asyncio.wait_for(waiting_for_input.wait(), 30)
     assert model.calls == 2 and not task.done()
     store = job_runtime.adapters[-1].store
     job = await finish_job(
@@ -235,7 +235,7 @@ async def test_chat_input_yields_to_worker_then_exit_releases_background_tasks(
     )
     assert job.status == "succeeded" and not task.done() and model.calls == 2
     leave.set()
-    assert await asyncio.wait_for(task, 5) == 0
+    assert await asyncio.wait_for(task, 30) == 0
     assert not (tmp_path / "instance.lock").exists()
 
 

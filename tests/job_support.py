@@ -5,7 +5,7 @@ from conftest import tool_call, video_request, video_run
 from langchain_core.messages import AIMessage
 
 
-async def eventually(read, *, timeout=5):
+async def eventually(read, *, timeout=30):
     async with asyncio.timeout(timeout):
         while True:
             result = read()
@@ -28,7 +28,7 @@ def register_job(service, *, run_id="owner", session_id="coffee"):
 
 
 async def finish_job(service, clock, job_id):
-    async with asyncio.timeout(5):
+    async with asyncio.timeout(30):
         while True:
             job = service.video_jobs.get(job_id)
             if job.status in {"succeeded", "failed", "unknown"} or job.query_state == "paused":
