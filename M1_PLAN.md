@@ -1,7 +1,8 @@
 # vagent M1 实施计划：先实现 Agent，再接入视频生成
 
-> 更新日期：2026-10-15
-> 状态：M1-A、M1-B 已验收，M1-C 的 C0–C3.2 已全部完成（真实单镜头已交付本地 MP4）；当前已完成内容、验证与限制以 [README](./README.md) 为准。
+> 更新日期：2026-10-16
+> 状态：M1-A、M1-B、M1-C 已全部验收完成（M1-C 真实单镜头已交付本地 MP4），并已整体合入 master（`cc3628e`，2026-10-16）；当前已完成内容、验证与限制以 [README](./README.md) 为准。
+> M2：**任务设计已启动（2026-10-16），尚未开始实施**，计划见 [M2 任务规划](./docs/M2_PLAN.md)。
 > 设计依据：[产品设计](./DESIGN.md)、[Agent 选型与 Harness 设计](./AGENT_HARNESS_DESIGN.md)。  
 > 当前优先级：**C3.2 真实联调已完成（2026-10-16）**：已安装应用完成真实 DeepSeek → 单个万相任务 → 本地 MP4 交付（3,183,756 字节，1280×720/H.264/AAC，浏览器播放/拖动/下载通过）；真实 `usage.SR` 数字形态问题修复（`9a49d71`）后经 `vagent jobs retry-query` 恢复原任务，全程 submit=1；估算 3.00 元、实际账单未知。证据见 [M1-C 验收](./docs/M1C_ACCEPTANCE.md)。范围见 [C2 验收](./docs/M1C_C2_ACCEPTANCE.md)、[M1-C 任务规划](./docs/M1C_PLAN.md)及[冻结契约](./docs/M1C_CONTRACTS.md)。媒体链路已完成真实联调与本地交付；账号鉴权已验证，实际账单仍未知。M1-B 历史证据见 [M1-B 验收](./docs/M1B_ACCEPTANCE.md)。
 
