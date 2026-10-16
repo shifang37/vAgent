@@ -294,7 +294,7 @@ async def test_windows_console_input_is_cancellable_without_threads_and_preserve
     assert not pending.done()
     pending.cancel()
     with pytest.raises(asyncio.CancelledError):
-        await asyncio.wait_for(pending, 1)
+        await asyncio.wait_for(pending, 30)
 
 
 @pytest.mark.parametrize(

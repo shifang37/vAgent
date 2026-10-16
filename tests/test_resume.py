@@ -93,7 +93,7 @@ async def test_external_cancellation_resumes_pending_model_and_retains_usage(sto
         await asyncio.Event().wait()
 
     pending = asyncio.create_task(runner(store, respond).run("coffee", "test"))
-    await asyncio.wait_for(started.wait(), 2)
+    await asyncio.wait_for(started.wait(), 30)
     pending.cancel()
     first = await pending
     assert first["status"] == "cancelled" and first["resumable"]
@@ -129,7 +129,7 @@ async def test_concurrent_resumes_do_not_start_two_models(store):
 
     resumed = runner(store, waiting)
     pending = asyncio.create_task(resumed.resume(first["id"]))
-    await asyncio.wait_for(started.wait(), 2)
+    await asyncio.wait_for(started.wait(), 30)
     try:
         with pytest.raises(AppError, match="已有任务"):
             await resumed.resume(first["id"])

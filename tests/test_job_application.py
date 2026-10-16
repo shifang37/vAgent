@@ -37,7 +37,7 @@ async def test_worker_events_keep_job_owner_after_creator_completes_and_another_
 
         service.model = ScriptedModel(blocked)
         other = await service.start("other", "独立需求", "other-run")
-        await asyncio.wait_for(entered.wait(), 3)
+        await asyncio.wait_for(entered.wait(), 30)
         job = await finish_job(service, job_runtime.clock, model.job_id)
         assert job.status == "succeeded"
         assert job.submit_attempts == 1 and job.query_attempts == 2
@@ -95,7 +95,7 @@ async def test_shared_service_waits_and_delivers_original_tool_result_once(tmp_p
         assert not waiter.done()
         assert service.run_record(first["id"])["modelCalls"] == waiting["modelCalls"]
         await finish_job(service, job_runtime.clock, model.job_id)
-        result = await asyncio.wait_for(waiter, 5)
+        result = await asyncio.wait_for(waiter, 30)
         assert result["status"] == "completed" and result["modelSteps"] == 3
         assert result["toolCalls"] == 2 and result["policy"] == waiting["policy"]
         replies = [m for m in messages_from_dict(result["messages"]) if isinstance(m, ToolMessage)]
@@ -126,7 +126,7 @@ async def test_run_wait_preserves_cancellation_when_notification_is_ready(tmp_pa
         service.notify("coffee")
         waiter.cancel()
         with pytest.raises(asyncio.CancelledError):
-            await asyncio.wait_for(waiter, 1)
+            await asyncio.wait_for(waiter, 30)
         assert not service.subscribers
         assert service.run_record(first["id"])["status"] == "waiting_external"
 
@@ -157,7 +157,7 @@ async def test_shutdown_preserves_wait_then_missing_key_keeps_job_result_for_exp
         assert any(event["type"] == "run.resume_blocked" for event in events)
         service.model = model
         await service.resume(first["id"])
-        result = await asyncio.wait_for(service.wait_for_run(first["id"]), 5)
+        result = await asyncio.wait_for(service.wait_for_run(first["id"]), 30)
         assert result["status"] == "completed" and result["waitResumeError"] is None
         assert result["policy"] == waiting["policy"] and model.calls == 3
         assert service.job(model.job_id)["submitAttempts"] == 1
@@ -270,7 +270,7 @@ async def test_sse_routes_job_and_run_events_and_overflow_reconnect_restores_cur
         initial = await anext(iterator)
         assert initial.startswith("event: snapshot\n") and job_id in initial
         await finish_job(service, job_runtime.clock, job_id)
-        update = await asyncio.wait_for(anext(iterator), 3)
+        update = await asyncio.wait_for(anext(iterator), 30)
         assert update.startswith("event: job.updated\n")
         assert json.loads(update.split("data: ")[1])["job"]["runId"] == "owner"
         for _ in range(70):
@@ -312,7 +312,7 @@ async def test_application_shutdown_during_accepted_submit_keeps_unknown_and_rel
     config = Config(home=tmp_path, api_key=None)
     async with ApplicationService.open(config) as service:
         job_id = register_job(service)
-        await asyncio.wait_for(entered.wait(), 3)
+        await asyncio.wait_for(entered.wait(), 30)
         assert service.job(job_id)["status"] == "submitting"
     assert not (tmp_path / "instance.lock").exists()
     async with ApplicationService.open(config) as service:

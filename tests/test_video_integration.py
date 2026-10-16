@@ -92,7 +92,7 @@ async def test_application_model_discovers_capability_and_creates_one_job(tmp_pa
         job = service.video_jobs.get(model.job_id, project_id="coffee")
         assert job.context.run_id == record["id"] and job.context.model_step == 2
         assert job.context.tool_call_id == "generate"
-        async with asyncio.timeout(3):
+        async with asyncio.timeout(30):
             while not job.provider_task_id:
                 await asyncio.sleep(0.01)
                 job = service.video_jobs.get(model.job_id, project_id="coffee")

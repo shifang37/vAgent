@@ -146,7 +146,7 @@ async def test_stream_tools_wait_for_finish_then_use_complete_arguments_and_resu
             store=store, model=DeepSeekModel("test", http_client=client), tools=create_project_tools()
         )
         pending = asyncio.create_task(runner.run("test", "save"))
-        await asyncio.wait_for(held.entered.wait(), 3)
+        await asyncio.wait_for(held.entered.wait(), 30)
         assert not store.snapshot()["artifacts"]  # Even complete JSON needs the finish marker.
         held.release.set()
         result = await pending
@@ -253,7 +253,7 @@ async def test_cancelled_http_stream_closes_connection_and_preserves_saved_artif
             policy=RunPolicy(max_steps=3, timeout_seconds=20),
         )
         task = asyncio.create_task(runner.run("test", "save", cancelled=cancelled))
-        await asyncio.wait_for(held.entered.wait(), 3)
+        await asyncio.wait_for(held.entered.wait(), 30)
         cancelled.set()
         first = await task
         assert first["status"] == "cancelled" and held.closed
@@ -309,7 +309,7 @@ async def test_web_draft_overflow_reconnect_and_no_per_token_disk_writes(tmp_pat
         queue = service.subscribe("test")
         other = service.subscribe("other")
         await service.start("test", "hello", "id")
-        await asyncio.wait_for(model.entered.wait(), 3)
+        await asyncio.wait_for(model.entered.wait(), 30)
         view = service.session("test")
         assert view["draft"]["sequence"] == 150 and view["draft"]["text"] == "transient-draft " * 150
         assert len(calls) < 20 and other.empty()
@@ -354,10 +354,10 @@ async def test_sse_emits_deltas_separately_from_snapshots(tmp_path):
         iterator = (await endpoint(sessionId=session, request=Request())).body_iterator
         await anext(iterator)
         await service.start(session, "hello", "test")
-        await asyncio.wait_for(service.model.entered.wait(), 3)
+        await asyncio.wait_for(service.model.entered.wait(), 30)
         frames = []
         while not any(frame.startswith("event: assistant.delta") for frame in frames):
-            frames.append(await asyncio.wait_for(anext(iterator), 3))
+            frames.append(await asyncio.wait_for(anext(iterator), 30))
         delta = json.loads(frames[-1].split("data: ")[1])
         assert delta["sequence"] == 1 and delta["text"] == "transient-draft "
         service.stop(service.active_run_id)

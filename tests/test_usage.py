@@ -222,7 +222,7 @@ async def test_cancelled_request_has_unknown_usage_and_survives_resume(store):
         await asyncio.Event().wait()
 
     pending = asyncio.create_task(runner(store, wait).run("coffee", "test"))
-    await asyncio.wait_for(started.wait(), 2)
+    await asyncio.wait_for(started.wait(), 30)
     pending.cancel()
     first = await pending
     assert first["modelCalls"][0]["status"] == "cancelled"

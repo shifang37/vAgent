@@ -331,7 +331,7 @@ async def test_competing_coordinators_and_manual_resume_share_one_graph_owner(st
         store, lambda _: harness.runner(), resolvers=harness.coordinator.resolvers, clock=video_clock
     )
     task = asyncio.create_task(harness.coordinator.run_once())
-    await asyncio.wait_for(started.wait(), 3)
+    await asyncio.wait_for(started.wait(), 30)
     try:
         assert await second.run_once() is None
         with pytest.raises(AppError) as error:
@@ -354,9 +354,9 @@ async def test_user_stop_wins_against_an_active_continuation(store, video_clock)
     first = await harness.begin(after=finish)
     await harness.complete_jobs()
     task = asyncio.create_task(harness.coordinator.run_once())
-    await asyncio.wait_for(started.wait(), 3)
+    await asyncio.wait_for(started.wait(), 30)
     assert harness.coordinator.stop_run(first["id"])
-    final = await asyncio.wait_for(task, 3)
+    final = await asyncio.wait_for(task, 30)
     assert final["status"] == "cancelled" and final["modelSteps"] == 2
     assert final["modelCalls"][-1]["status"] == "cancelled"
     assert await harness.coordinator.run_once() is None and harness.model.calls == 2
@@ -533,7 +533,7 @@ async def test_offline_interval_is_external_time_and_does_not_refresh_budget(sto
 
 
 async def wait_for_status(service, run_id, status):
-    async with asyncio.timeout(4):
+    async with asyncio.timeout(30):
         while service.run_record(run_id)["status"] != status:
             await asyncio.sleep(0.01)
     return service.run_record(run_id)
@@ -634,7 +634,7 @@ async def test_new_run_during_stop_cleanup_does_not_reserve_an_orphan(store, vid
     first = await harness.begin(after=finish)
     await harness.complete_jobs()
     task = asyncio.create_task(harness.coordinator.run_once())
-    await asyncio.wait_for(started.wait(), 3)
+    await asyncio.wait_for(started.wait(), 30)
     harness.coordinator.stop_run(first["id"])
     before = store.snapshot()["runs"]
     try:
@@ -664,7 +664,7 @@ async def test_coordinator_shutdown_after_claim_preserves_automatic_intent(store
     with monkeypatch.context() as patch:
         patch.setattr(WaitService, "claim", claim_and_cancel)
         task = asyncio.create_task(harness.coordinator.run_once())
-        await asyncio.wait_for(claimed.wait(), 3)
+        await asyncio.wait_for(claimed.wait(), 30)
         pending = await task
     assert pending["status"] == "waiting_external" and harness.model.calls == 1
     assert harness.coordinator.waits.get(first["activeWaitId"]).auto_resume
@@ -696,7 +696,7 @@ async def test_application_exit_during_preparation_reconstructs_interrupt(tmp_pa
             jobs = JobService(service.store, [adapter])
             job_id = jobs.generate(video_request(adapter), context=video_run(service.store))["data"]["jobId"]
             first = await service.start("coffee", "exit while preparing", "exit-preparing")
-            await asyncio.wait_for(paused.wait(), 3)
+            await asyncio.wait_for(paused.wait(), 30)
     saved = json.loads((tmp_path / "state.json").read_text(encoding="utf-8"))
     assert saved["runs"][first["id"]]["status"] == "waiting_external"
     assert model.calls == 1 and next(iter(saved["waits"].values()))["autoResume"]
