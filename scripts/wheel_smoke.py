@@ -335,7 +335,9 @@ async def smoke_live_media(directory):
             )
             binding = WaitBinding.model_validate(next(iter(service.store.snapshot()["waits"].values())))
             assert binding.status == "armed" and binding.context.tool_call_id == "await"
-            async with asyncio.timeout(5):
+            # Liveness guards, not speed assertions: slow CI runners need runway for the
+            # download, restart, delivery and resume chain.
+            async with asyncio.timeout(30):
                 while True:
                     advance(service)
                     job = service.video_jobs.get(model.job_id)
@@ -357,7 +359,7 @@ async def smoke_live_media(directory):
 
         resumed_model = LiveMediaDemo()
         async with ApplicationService.open(config, model=resumed_model) as service:
-            async with asyncio.timeout(5):
+            async with asyncio.timeout(30):
                 while True:
                     advance(service)
                     job = service.video_jobs.get(model.job_id)
@@ -369,7 +371,7 @@ async def smoke_live_media(directory):
                         break
                     await asyncio.sleep(0.01)
             fixture["gate"].set()
-            async with asyncio.timeout(5):
+            async with asyncio.timeout(30):
                 while service.video_jobs.get(model.job_id).status != "succeeded":
                     await asyncio.sleep(0.01)
             job = service.video_jobs.get(model.job_id)
@@ -377,7 +379,7 @@ async def smoke_live_media(directory):
             assert job.download.media_id == media_id and job.download.attempts == 2
             assert job.download.phase == "committed"
             assert fixture["submissions"] == 1 and fixture["queries"] == ["wheel-task"]
-            finished = await asyncio.wait_for(service.wait_for_run(pending["id"]), 5)
+            finished = await asyncio.wait_for(service.wait_for_run(pending["id"]), 30)
             assert finished["status"] == "completed" and finished["id"] == pending["id"]
             assert finished["policy"] == pending["policy"] and resumed_model.calls == 1
             delivered = WaitBinding.model_validate(service.store.snapshot()["waits"][binding.id])

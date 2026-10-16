@@ -74,6 +74,8 @@ Windows / Python 3.11.15 全量回归：**786 passed，2 skipped，215.24 秒**�
 
 文档提交 `afbb6cb` 的 [运行 38698120292](https://github.com/shifang37/vAgent/actions/runs/38698120292) 在 Ubuntu/Python 3.11 暴露另一处既有竞态（与文档变更无关）：停止等待 Run 的同时，协调器已通过的扫描在 `advance_wait` 再次校验自动恢复资格前撞上停止事务，向已取消的 Run 写入 `run.resume_blocked (WAIT_NOT_READY)`，触发 `test_media_application.py::test_download_can_finish_after_stopped_or_timed_out_wait[stop]` 的“停止后 Run 记录不变”断言（1 failed、784 passed、3 skipped）。修复 `b268828` 把资格校验移入 `block_auto` 的同一事务：停止或交付抢先完成的扫描不再记录阻塞事件与 `waitResumeError`。定向套件 71 项、该用例连续 25 次与全量回归 786 项通过。
 
+随后文档提交 `da5de7c`（纯文档变更）在 Windows/Python 3.12 的 `wheel_smoke.py::smoke_live_media` 收尾等待处超时（[作业 116845557461](https://github.com/shifang37/vAgent/actions/runs/38861808016/job/116845557461)）：重启后 `wait_for_run(..., 5)` 的 5 秒活性界限在慢 runner 上不足，相同代码在前两个提交的同一平台均通过。修复把该函数的四个活性界限放宽到 30 秒并注明其不是速度断言；本机以安装版 wheel 从仓库外复跑完整 smoke 通过（`output/m1c-c3-wheel-smoke-r2.json`）。
+
 远端结果以 [C3 分支运行记录](https://github.com/shifang37/vAgent/actions?query=branch%3Acodex%2Fm1c-c3) 为准，本地通过不替代远端状态。
 
 ## 6. C3.2 真实联调（2026-10-16 完成）
