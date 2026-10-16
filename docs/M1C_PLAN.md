@@ -158,6 +158,6 @@ pending_submit → submitting → queued/running → downloading → succeeded
 - [x] C2：live 成功以本地媒体提交为条件；下载重试与强退恢复保持一次生成，CLI/Web 媒体入口已通过受控视频与浏览器验证。
 - [x] C3.1：专项离线评测 7/7 与仓库外安装媒体 smoke 通过；真实提交数保持 0，证据见 [M1-C 验收](./M1C_ACCEPTANCE.md)。
 - [x] C3.2：已安装应用完成真实单镜头交付（2026-10-16；1 次 submit；本地 MP4 3,183,756 字节，浏览器播放/下载校验通过）；报告保留原任务、媒体与费用证据，离线/真实结果分开记录，见 [M1-C 验收](./M1C_ACCEPTANCE.md)。
-- [x] 完整回归（794 passed / 2 skipped）、wheel/sdist 构建与仓库外安装 smoke 通过；四组 CI 已在 `55bf5a8`、`09a0a37` 通过，本提交的远端结果以 [C3 分支运行记录](https://github.com/shifang37/vAgent/actions?query=branch%3Acodex%2Fm1c-c3) 为准；README/总计划/验收文档已同步。
+- [x] 完整回归（794 passed / 2 skipped）、wheel/sdist 构建与仓库外安装 smoke 通过；四组 CI 已在 `55bf5a8`、`09a0a37`、`9a49d71`、`26689b2` 通过（后者见 [运行 38860636066](https://github.com/shifang37/vAgent/actions/runs/38860636066)），此后文档提交以 [C3 分支运行记录](https://github.com/shifang37/vAgent/actions?query=branch%3Acodex%2Fm1c-c3) 为准；README/总计划/验收文档已同步。
 
 达到上述条件后，M1 的“自然语言需求 → 单条真实视频 → 本地交付”目标才完成。之后再规划多镜头、逐镜头修改和拼接能力。

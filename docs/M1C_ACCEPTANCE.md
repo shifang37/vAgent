@@ -121,7 +121,7 @@ Windows / Python 3.11.15 全量回归：**786 passed，2 skipped，215.24 秒**�
 ### 6.7 安装与远端
 
 - 修复后 wheel `8c4af34f…`（提交 `9a49d71`）在仓库外安装环境通过完整 smoke（安装包来源、Web 资源、配置、流式、文本/质量、MCP、Mock 视频、持久等待与重启续接、预算保持、CLI、M1-B 五类与 M1-C 七类离线套件、live 协议夹具与本地媒体、清理）：`output/m1c-c3-final-wheel-smoke.json`。
-- 分支 CI：`55bf5a8`、`09a0a37` 均四组通过；本验收提交的远端结果以 [C3 分支运行记录](https://github.com/shifang37/vAgent/actions?query=branch%3Acodex%2Fm1c-c3) 为准。
+- 分支 CI：`55bf5a8`、`09a0a37`、`9a49d71`（修复提交，[运行 38859024527](https://github.com/shifang37/vAgent/actions/runs/38859024527)）与 `26689b2`（文档提交，[运行 38860636066](https://github.com/shifang37/vAgent/actions/runs/38860636066)）均四组全部通过；此后文档提交的远端结果以 [C3 分支运行记录](https://github.com/shifang37/vAgent/actions?query=branch%3Acodex%2Fm1c-c3) 为准。
 
 ### 6.8 仍未验证 / 与计划的差异
 
