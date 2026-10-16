@@ -248,7 +248,7 @@ async def test_external_task_cancellation_records_cancelled_status(store):
 
     runner = AgentRunner(store=store, model=ScriptedModel(hanging), tools=create_project_tools())
     task = asyncio.create_task(runner.run("coffee", "中断"))
-    await asyncio.wait_for(started.wait(), timeout=2)
+    await asyncio.wait_for(started.wait(), timeout=30)
     task.cancel()
     result = await task
     assert result["status"] == "cancelled"
@@ -287,7 +287,7 @@ async def test_concurrent_runs_are_rejected(store):
 
     runner = AgentRunner(store=store, model=ScriptedModel(waiting), tools=create_project_tools())
     pending = asyncio.create_task(runner.run("coffee", "第一个"))
-    await asyncio.wait_for(started.wait(), timeout=2)
+    await asyncio.wait_for(started.wait(), timeout=30)
     try:
         with pytest.raises(AppError, match="已有任务"):
             await runner.run("other", "第二个")

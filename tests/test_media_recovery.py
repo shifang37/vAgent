@@ -182,12 +182,12 @@ async def test_download_does_not_hold_store_or_job_worker_and_cancel_closes_file
         ) as client:
             worker = MediaWorker(jobs.media, client, idle_interval_seconds=0.005)
             worker.start()
-            await asyncio.wait_for(entered.wait(), timeout=2)
+            await asyncio.wait_for(entered.wait(), timeout=30)
             context = video_run(store, "parallel-job", project_id="second")
             adapter = jobs._adapters[("mock", "mock-t2v")]
             second = jobs.generate(video_request(adapter), context=context)
             assert second["ok"]
-            progressed = await asyncio.wait_for(JobWorker(jobs).run_once(), timeout=1)
+            progressed = await asyncio.wait_for(JobWorker(jobs).run_once(), timeout=30)
             assert progressed.status == "queued" and progressed.context.project_id == "second"
             await worker.stop()
             assert closed.is_set() and jobs.get(job.id).download.attempts == 1

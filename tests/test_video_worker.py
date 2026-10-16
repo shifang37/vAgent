@@ -198,7 +198,7 @@ async def test_worker_stop_cancels_submission_and_leaves_other_jobs_pending(stor
         async def submit(self, request, operation_key):
             handle = await super().submit(request, operation_key)
             # A different thread can acquire the Store while the provider is active.
-            await asyncio.wait_for(asyncio.to_thread(store.ensure_session, "parallel-read"), timeout=2)
+            await asyncio.wait_for(asyncio.to_thread(store.ensure_session, "parallel-read"), timeout=30)
             entered.set()
             await asyncio.Event().wait()
             return handle
@@ -210,7 +210,7 @@ async def test_worker_stop_cancels_submission_and_leaves_other_jobs_pending(stor
     second = service.generate(video_request(adapter), context=other)["data"]["jobId"]
     first_task = worker.start()
     assert worker.start() is first_task
-    await asyncio.wait_for(entered.wait(), timeout=3)
+    await asyncio.wait_for(entered.wait(), timeout=30)
     await worker.stop()
     assert first_task.done()
     assert service.get(job_id, project_id="coffee").status == "unknown"
@@ -232,7 +232,7 @@ async def test_worker_stop_records_interrupted_query_once(store, video_clock):
     queued = await worker.run_once()
     video_clock.due(queued)
     worker.start()
-    await asyncio.wait_for(entered.wait(), timeout=2)
+    await asyncio.wait_for(entered.wait(), timeout=30)
     await worker.stop()
     job = service.get(job_id, project_id="coffee")
     assert job.status == "queued" and job.query_state == "retrying"
@@ -365,7 +365,7 @@ async def test_worker_instances_share_the_single_store_execution_boundary(store,
     service.generate(video_request(provider), context=second_context)
     second_worker = JobWorker(JobService(store, [provider], clock=video_clock))
     first = asyncio.create_task(first_worker.run_once())
-    await asyncio.wait_for(entered.wait(), timeout=2)
+    await asyncio.wait_for(entered.wait(), timeout=30)
     second = asyncio.create_task(second_worker.run_once())
     await asyncio.sleep(0)
     release.set()

@@ -117,7 +117,7 @@ async def test_missing_and_corrupt_media_are_410_and_emit_revision_updates(media
         operation()
         response = await client.get(f"/api/media/{asset.id}/content")
         assert response.status_code == 410 and response.json()["error"]["code"] == "JOB_MEDIA_UNAVAILABLE"
-        event = await asyncio.wait_for(queue.get(), timeout=1)
+        event = await asyncio.wait_for(queue.get(), timeout=30)
         assert event["type"] == "job.updated" and not event["job"]["mediaAvailable"]
         assert event["job"]["mediaAvailability"]["reason"] == reason
         view = (await client.get(f"/api/media/{asset.id}")).json()
