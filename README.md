@@ -22,8 +22,9 @@
 | 内容质量校验 | 已通过回归与真实纠错验收 | 记忆字段职责、旧事实残留检查、持久字数上限、保存前计数、未纠正错误禁止报告完成 |
 | M1-B 模拟视频 | B0–B5 已验收 | 自动 Worker、四工具、持久等待/停止/恢复、CLI/Web；离线与真实 DeepSeek + Mock 均 5/5 通过，详见 [M1-B 验收](./docs/M1B_ACCEPTANCE.md) |
 | M1-C 真实视频 | C0–C3.2 已完成；真实单镜头已交付本地 MP4 | schema v3 兼容、Wan HTTP、双 Key 配置、本地媒体校验/恢复、Range 与播放器、离线评测与安装媒体流程、真实联调（查询协议修复与暂停恢复）；详见 [C2 验收](./docs/M1C_C2_ACCEPTANCE.md)与 [M1-C 验收](./docs/M1C_ACCEPTANCE.md) |
+| M2 分镜多镜头 | D0–D1 已完成 | D0 契约冻结（i2v/首尾帧能力与价格、图片 Base64 输入、费用三重上限、集合等待语义）；D1 schema v4、结构化分镜域与 storyboard 工具（mock，4/4）、execution v3、v3→v4 迁移与旧 Run 签名恢复；详见 [M2 任务规划](./docs/M2_PLAN.md)与 [D1 验收](./docs/M2_D1_ACCEPTANCE.md) |
 
-2026-10-10 完成 C0–C2：固定北京 `wan2.7-t2v-2026-06-12`、5 秒 720P 16:9，官方参考生成费为 3.00 元，采用业务空间专属域名。应用支持 off/mock/live，任务只提交一次，按原 ID 持久查询；云端成功后由独立媒体 Worker 下载，完整文件与索引提交后才进入 `succeeded`。下载重试、重启和媒体修复沿用原 Job/mediaId；Web 可播放、拖动进度和下载。账号视频权限、实际上游媒体与账单未验证，本次未调用收费模型。接口依据及完整阶段范围见 [官方核实](./docs/VIDEO_API_NOTES.md)、[冻结契约](./docs/M1C_CONTRACTS.md)和[任务规划](./docs/M1C_PLAN.md)。2026-10-15 完成 C3.1：`scripts/evaluate_m1c.py` 离线套件 7/7 通过，仓库外安装 wheel 通过含 live 协议夹具、下载中重启、CLI 与媒体 API 证据的完整 smoke；真实提交数保持 0。2026-10-16 完成 C3.2 真实联调：真实 DeepSeek 提交 1 个万相任务（北京 5 秒 720P，生成约 140 秒），应用下载并交付本地 MP4（3,183,756 字节、1280×720/H.264/AAC，浏览器播放、拖动与下载校验通过）；期间修复真实响应的 `usage.SR` 数字形态（`9a49d71`），查询暂停后经 `vagent jobs retry-query` 复用原任务完成交付，全程 submit=1；估算 3.00 元、实际账单未知。C3.1/C3.2 证据见 [M1-C 验收](./docs/M1C_ACCEPTANCE.md)。2026-10-16：M1 全部完成并合入 master（`cc3628e`）；M2（分镜多镜头工作流）任务设计见 [M2 任务规划](./docs/M2_PLAN.md)，尚未开始实施。
+2026-10-10 完成 C0–C2：固定北京 `wan2.7-t2v-2026-06-12`、5 秒 720P 16:9，官方参考生成费为 3.00 元，采用业务空间专属域名。应用支持 off/mock/live，任务只提交一次，按原 ID 持久查询；云端成功后由独立媒体 Worker 下载，完整文件与索引提交后才进入 `succeeded`。下载重试、重启和媒体修复沿用原 Job/mediaId；Web 可播放、拖动进度和下载。账号视频权限、实际上游媒体与账单未验证，本次未调用收费模型。接口依据及完整阶段范围见 [官方核实](./docs/VIDEO_API_NOTES.md)、[冻结契约](./docs/M1C_CONTRACTS.md)和[任务规划](./docs/M1C_PLAN.md)。2026-10-15 完成 C3.1：`scripts/evaluate_m1c.py` 离线套件 7/7 通过，仓库外安装 wheel 通过含 live 协议夹具、下载中重启、CLI 与媒体 API 证据的完整 smoke；真实提交数保持 0。2026-10-16 完成 C3.2 真实联调：真实 DeepSeek 提交 1 个万相任务（北京 5 秒 720P，生成约 140 秒），应用下载并交付本地 MP4（3,183,756 字节、1280×720/H.264/AAC，浏览器播放、拖动与下载校验通过）；期间修复真实响应的 `usage.SR` 数字形态（`9a49d71`），查询暂停后经 `vagent jobs retry-query` 复用原任务完成交付，全程 submit=1；估算 3.00 元、实际账单未知。C3.1/C3.2 证据见 [M1-C 验收](./docs/M1C_ACCEPTANCE.md)。2026-10-16：M1 全部完成并合入 master（`cc3628e`）；M2（分镜多镜头工作流）进入实施：D0 完成接口核实与契约冻结（[M2 契约](./docs/M2_CONTRACTS.md)；submit=0），D1 完成 schema v4 与结构化分镜域——新增 `storyboards`/`assets` 集合的机械迁移（历史对象逐字节保留）、稳定 Shot ID 与只增不改的分镜版本、`storyboard_read`/`storyboard_save`（mock，工具与规则 4/4）、execution v3 与 pre-M2 Run 原签名恢复；离线全量回归 839 passed / 2 skipped，submit=0。证据见 [D1 验收](./docs/M2_D1_ACCEPTANCE.md)，任务全貌见 [M2 任务规划](./docs/M2_PLAN.md)。
 
 每个独立完成的代码部分都同步更新本 README、提交并推送 GitHub。阶段目标见 [M1 计划](./M1_PLAN.md)、[M2 任务规划](./docs/M2_PLAN.md) 和 [Harness 设计](./AGENT_HARNESS_DESIGN.md)。
 
@@ -149,9 +150,11 @@ $env:VAGENT_VIDEO_MODE = 'mock'
 | `video_capabilities` | 读取适配器提供的模型、能力版本和完整合法规格组合 |
 | `video_generate` | 只在本地登记 Job，返回 jobId 与登记状态；每个 Run 最多一个新 Job，不在工具中提交上游 |
 | `job_get` | 读取当前项目的本地 Job 快照；同一调用重放原结果，新调用读取最新状态 |
-| `await_job` | 终态立即返回；未结束则保存持久等待，由 execution v2 挂起，结果就绪后回填原工具调用 |
+| `await_job` | 终态立即返回；未结束则保存持久等待，由执行图挂起（execution v2/v3），结果就绪后回填原工具调用 |
+| `storyboard_read` | M2 D1 起（mock）：读取当前项目的结构化分镜、当前版本有序镜头与各镜头版本摘要；只读，跨项目拒绝 |
+| `storyboard_save` | M2 D1 起（mock）：新建或修改结构化分镜，校验来源/素材引用与上限，产生新版本并保留旧版本，返回服务端稳定 Shot ID |
 
-新 mock Run 使用 execution v2。`AgentRunner.run()` 在持久中断保存后返回 `waiting_external`，释放图执行任务；已完成工具保留，未完成调用不伪造成功。`WaitCoordinator` 扫描持久结果并续接原调用，`ApplicationService` 已管理协调器启动、关闭及启动补偿。等待仍占用唯一未结束 Run 名额，新消息返回 `RUN_BUSY`。
+新 mock Run 自 M2 D1 起使用 execution v3；v1/v2 运行仍按原路径恢复。`AgentRunner.run()` 在持久中断保存后返回 `waiting_external`，释放图执行任务；已完成工具保留，未完成调用不伪造成功。`WaitCoordinator` 扫描持久结果并续接原调用，`ApplicationService` 已管理协调器启动、关闭及启动补偿。等待仍占用唯一未结束 Run 名额，新消息返回 `RUN_BUSY`。
 
 用户停止会先持久关闭自动继续，并补齐可见的终止工具结果；Job 继续独立跟踪。正常退出保留等待意图，重启只自动继续有效等待。结果之后已经开始过模型尝试的中断要求显式 `resume`；缺少原配置、检查点或预算时保留结果，原因记录在 `waitResumeError`。
 
@@ -379,9 +382,9 @@ description: 说明哪些任务需要这个技能。
 
 ## 数据兼容与限制
 
-默认数据目录为 `~/.vagent/`，可用 `VAGENT_HOME` 覆盖。`state.json` 保存会话、项目、产物、Run、操作结果、jobs/waits 和 C1 的 media 索引；`checkpoints.sqlite` 保存图执行位置和消息。B1 的 `mock-video.json` 独立保存模拟上游受理记录、请求、轨迹和调用计数。应在程序退出后备份完整数据目录。配置 Key 不写入状态；真实 Job 的私有上游 URL 仅保存在本地状态中，不经公开接口返回。`inspect` 会显示创作正文。
+默认数据目录为 `~/.vagent/`，可用 `VAGENT_HOME` 覆盖。`state.json` 保存会话、项目、产物、Run、操作结果、jobs/waits、media 索引与 M2 的 `storyboards`/`assets` 集合；`checkpoints.sqlite` 保存图执行位置和消息。B1 的 `mock-video.json` 独立保存模拟上游受理记录、请求、轨迹和调用计数。应在程序退出后备份完整数据目录。配置 Key 不写入状态；真实 Job 的私有上游 URL 仅保存在本地状态中，不经公开接口返回。`inspect` 会显示创作正文。
 
-当前存储为 schema v3。打开 v1/v2 数据时，在实例锁下使用原版本校验器验证状态与消息，先将原始字节保存为同目录的 `state-v1-<UUID>.json` 或 `state-v2-<UUID>.json`，再原子迁移。迁移只增加缺少的顶层集合并升级版本，历史 Job、Run、Operation、来源版本和指纹不重编码、不补写默认字段，也不修改 SQLite；运行恢复单独提交。旧 Mock Job 保持 contract v1，新 live Job 使用 v2。缺少视频字段的旧 Run 按 off 解释，execution v1/v2 与上下文 v1/v2 按原签名恢复。迁移写入失败、损坏数据和未知版本保留原状态文件。v3 不能交给旧应用直接读取；回退需在服务退出后恢复完整数据目录，单份状态备份不能替代它。
+当前存储为 schema v4。打开 v1/v2/v3 数据时，在实例锁下使用原版本校验器验证状态与消息，先将原始字节保存为同目录的 `state-v1-<UUID>.json` 等备份，再原子迁移。迁移只增加缺少的顶层集合（v4 新增 `storyboards`、`assets`）并升级版本，历史 Job、Run、Operation、来源版本和指纹不重编码、不补写默认字段，也不修改 SQLite；运行恢复单独提交。旧 Mock Job 保持 contract v1，新 live Job 使用 v2。缺少视频字段的旧 Run 按 off 解释，execution v1/v2 与上下文 v1/v2 按原签名恢复；M2 新 Run 使用 execution v3，恢复 pre-M2 Run 时按其记录的 toolFeatures 还原原工具集，签名逐字节不变。迁移写入失败、损坏数据和未知版本保留原状态文件。v4/v3 不能交给更旧的应用直接读取；回退需在服务退出后恢复完整数据目录，单份状态备份不能替代它。
 
 - 成功会话可跨重启继续；执行中的普通 Run 重启后标记为 `interrupted`，已提交产物保留，不自动重放。B3 保留有效的 `waiting_external` 和原 Run 名额，启动时核对等待、检查点、配置与原预算后继续；后续模型尝试已经开始但未完成时要求显式恢复。
 - B1 已登记但尚未提交的 Job 可由 Worker 继续推进；丢失提交结果的任务进入 `unknown`，不自动重提。已确认上游 ID 只用于继续查询，失败窗口和累计次数跨重启保留。
