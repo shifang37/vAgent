@@ -216,9 +216,11 @@ async def test_cancelled_before_tool_does_not_write_and_keeps_pairs(store):
 
 
 async def test_timeout_cancels_hanging_model(store):
+    started = asyncio.Event()
     stopped = asyncio.Event()
 
     async def hanging(*_):
+        started.set()
         try:
             await asyncio.Event().wait()
         finally:
@@ -228,9 +230,12 @@ async def test_timeout_cancels_hanging_model(store):
         store=store,
         model=ScriptedModel(hanging),
         tools=create_project_tools(),
-        policy=RunPolicy(timeout_seconds=0.3),
+        # A liveness guard, not a speed assertion: the deadline must fire while the
+        # model call is hanging, so slow-runner setup stalls cannot outrun it.
+        policy=RunPolicy(timeout_seconds=5.0),
     ).run("coffee", "超时")
     assert result["errorCode"] == "TIMEOUT"
+    assert started.is_set(), "the deadline expired before the hanging model call started"
     assert stopped.is_set()
 
 
