@@ -1,8 +1,8 @@
-# M1-C C3.1 验收：离线评测与安装媒体流程
+# M1-C 验收：离线评测、安装媒体流程与真实单镜头交付
 
-日期：2026-10-15。实现基线为 C2 `f74958c`，工作分支 `codex/m1c-c3`，代码提交 `a3cafba` 与 CI 修复 `206866f`、`b268828`。范围依据 [任务规划](./M1C_PLAN.md)、[冻结契约](./M1C_CONTRACTS.md)和 [C2 验收](./M1C_C2_ACCEPTANCE.md)。
+更新日期：2026-10-16。实现基线为 C2 `f74958c`，工作分支 `codex/m1c-c3`；C3.1 代码提交 `a3cafba`（含 CI 修复 `206866f`、`b268828`），C3.2 修复提交 `9a49d71`。范围依据 [任务规划](./M1C_PLAN.md)、[冻结契约](./M1C_CONTRACTS.md)和 [C2 验收](./M1C_C2_ACCEPTANCE.md)。
 
-**C3.1 已完成：专项离线评测 7/7 通过，仓库外安装的 wheel 通过含真实协议夹具与本地媒体的完整 smoke。** 本次真实视频提交数为 0、真实文本模型调用数为 0；所有供应商与媒体请求均由受控 HTTP 响应处理，未调用收费模型，未产生费用。**C3.2 真实联调尚未执行**：当前未配置 `VAGENT_DASHSCOPE_KEY` 与 `VAGENT_DASHSCOPE_WORKSPACE_ID`；账号权限、真实 CDN、真实输出编码/音频与账单继续保持未验证。
+**C3.1 已完成**：专项离线评测 7/7 通过，仓库外安装的 wheel 通过含真实协议夹具与本地媒体的完整 smoke（第 1–5 节，真实提交数为 0）。**C3.2 真实联调已完成（2026-10-16）**：已安装应用经真实 DeepSeek 提交 1 个万相任务并交付本地可播放 MP4（第 6 节）；期间发现并修复真实响应 `usage.SR` 数字形态导致查询暂停的问题，恢复沿用原任务，全程 submit=1、无二次提交；估算 3.00 元，实际账单保持未知。
 
 ## 1. 已交付范围
 
@@ -76,18 +76,56 @@ Windows / Python 3.11.15 全量回归：**786 passed，2 skipped，215.24 秒**�
 
 远端结果以 [C3 分支运行记录](https://github.com/shifang37/vAgent/actions?query=branch%3Acodex%2Fm1c-c3) 为准，本地通过不替代远端状态。
 
-## 6. C3.2 真实联调（待执行）
+## 6. C3.2 真实联调（2026-10-16 完成）
 
-未执行的原因：当前未配置视频凭证，不能发起真实提交。执行入口与预算已就绪：
+### 6.1 执行方式、预算与预检
 
-```powershell
-$env:VAGENT_DASHSCOPE_KEY = "<北京业务空间 Key>"
-$env:VAGENT_DASHSCOPE_WORKSPACE_ID = "<业务空间 ID>"
-.\.venv\Scripts\python.exe scripts/evaluate_m1c.py --live --max-model-calls 16 --output output/m1c-c3-live-<新名>.json
-```
+- 从仓库外安装环境发起：`tmp/m1c-c3-wheel-env/` 内以 `-I` 运行 `scripts/evaluate_m1c.py` 与 CLI/Web；独立数据目录 `tmp/m1c-c3-live/home-live-r1`。
+- 预算：套件上限 16 次模型调用；真实样本最多 1 个视频 Job、1 次 submit（实际全程 1 次）；金额上限沿用 C0 冻结的 3.00 CNY 估算。
+- 零费用预检：DeepSeek `GET /models` 返回 200（`deepseek-flash` 在线）；对不存在的任务 ID 发起一次 DashScope 查询返回 200 / `task_status=UNKNOWN`，证明 Key、业务空间主机与鉴权有效（查询不扣费、不生成）；安装版离线套件两轮 7/7（`output/m1c-c3-live-preflight-20261016.json`、`output/m1c-c3-live-preflight-r2-20261016.json`）。
 
-- 结构上只运行一个视频用例：**最多 1 个 Job、1 次 submit**；参考估算 3.00 CNY，实际账单未取得前保持 unknown。
-- 计划从仓库外安装的 wheel 发起，使用独立数据目录；验收核对自然语言工具调用、原 task ID、完整文件、大小/哈希与浏览器实际元数据及播放下载。
-- 仍然未验证（本次离线/安装证据不能替代）：账号视频权限与精确模型可用性、真实 CDN 主机与重定向、真实输出的编码/帧率/音频、浏览器解码与拖动、实际扣费与免费额度。
+### 6.2 首轮真实运行与发现的协议偏差
 
-M1-C 的“自然语言需求 → 单条真实视频 → 本地交付”在 C3.2 完成后才算整体验收。
+首轮（安装 wheel `6e020257…`，提交 `09a0a37`）报告保留为失败记录：`output/m1c-c3-live-20261016-r1.json`（状态 error）。
+
+- 真实 DeepSeek（`deepseek-flash`）完成 5 次模型调用（21,379 输入 / 919 输出 Token，覆盖率完整）：`project_read → artifact_read(brief v1) → video_capabilities → video_generate → await_job`；登记请求的冻结参数与来源版本逐字段一致。
+- 云端任务 `cb6a8290-f6f1-40f6-b745-fc1c452aeab1` 仅提交 1 次（13:46:20 本地提交），13:48:40 生成成功（约 140 秒）。
+- 生成成功后的应用查询被判为 `QUERY_PROTOCOL_ERROR`：12 次查询（含 15/30/60 秒退避）后按策略暂停（`retry_exhausted`）。等待在期限（600 秒）前收到可操作错误 `JOB_QUERY_PAUSED` 并自动恢复一次；模型如实报告查询已暂停、无法确认状态；Run 正常完成（活动 7.36 秒，外部等待 245.9 秒，未超原预算）。
+- 评测器 `grade()` 在 Job 无下载记录时以 `TypeError` 崩溃，报告状态为 error——两个缺陷都由本次真实样本暴露：离线夹具此前把 `usage.SR` 定为字符串，且评分路径未覆盖“成功用例未交付”。
+
+根因（用保存的真实响应原文离线复现）：真实 `usage.SR` 为数字 `720`，与冻结契约的字面量 `720P` 不符，快照校验失败。真实响应（脱敏）存于 `output/m1c-c3-live-probe-task-20261016.json`。
+
+### 6.3 修复与验证
+
+- `9a49d71`：适配器将数字 `720/1080` 归一化为契约字面量（未知值仍拒绝）；评测器对无下载记录或无媒体的成功用例优雅判 False；离线夹具改钉真实数字形态。新增/调整 6 项回归。
+- 验证：真实响应原文离线复现通过（usage 5.0 秒 / 720P / 16:9，签名到期 2026-10-17T05:48:38Z，主机 `dashscope-a717.oss-accelerate.aliyuncs.com`）；全量回归 **794 passed / 2 skipped**；安装版离线套件 7/7（r2）；对原失败证据重评不再崩溃（29 项检查：23 项通过，6 项交付类如实为 False）。
+
+### 6.4 恢复与真实交付（零新增费用）
+
+- `vagent jobs retry-query`（安装版 CLI）恢复原任务查询（revision 28，error 清空，submit 保持 1）→ Web 服务启动后第 13 次查询摄取 SUCCEEDED，随即下载 1 次即成并原子提交媒体。
+- 结果：Job `d9e25ca5-ca57-40b8-a0d2-52566708dfaf` `succeeded`、媒体 `65b0e452-39f1-4eb7-ae00-bc7264d5d22c` 可用；`submitAttempts=1`、`queryAttempts=13`、`download.attempts=1`（generation 1，策略 `wan-result-hosts-v2`）。
+- 媒体：3,183,756 字节，SHA-256 `9d87d7fa17d3edcc0f6fb1cb2ea3b9fd27e1dc2d4f4f7104913f7a5d81fe8a8c`；1280×720、5.033 秒、H.264 + AAC、30fps、`mp4-avc-v1` 校验；真实结果主机为 v1 允许集内的 `dashscope-a717.oss-accelerate.aliyuncs.com`，签名 24 小时，未观察到重定向。
+- 媒体接口（`output/m1c-c3-live-recovery-20261016.json`、`tmp/m1c-c3-live/media-api-curl.txt`）：详情/GET/HEAD/单 Range 206/不可满足 416/下载附件名/ETag 与哈希一致，全部通过。
+- 浏览器（Chrome 155 headless，真实页面）：元数据 1280×720 / 5.04 秒、实际播放、拖动到 3.0 秒、`<video>` 三次 206 Range 请求、页面下载按钮保存文件与资产哈希一致、零页面错误；证据 `output/m1c-c3-live-browser-20261016.json`、截图 `output/m1c-c3-live-browser.png`。
+- CLI：`vagent jobs get` 显示 succeeded、媒体可用、受控相对路径与费用记录（`tmp/m1c-c3-live/cli-jobs-get.json`）。
+
+### 6.5 重启不重复提交
+
+服务以新进程再次打开同一数据目录：15 秒内两次快照完全一致（零写入），`revision 33`、submit=1、query=13、download=1、媒体可用与 task ID 均不变（`tmp/m1c-c3-live/state-web2-t0.json`、`state-web2-t1.json`）。恢复过程本身即为跨进程续接：评测进程退出后，由 CLI/Web 新进程完成查询、下载与交付，submit 始终为 1。强杀进程后实例锁按设计保留，确认无 vagent 进程后手动移除（运维观察；优雅退出自动释放）。
+
+### 6.6 费用与用量
+
+- 估算 3.00 CNY（0.60 × 5 秒，价格版本 `wan27-beijing-720p-20261010`）；上游 usage（5 秒 / 720P / 16:9）已记录；**实际扣费未取得，保持 unknown**，免费额度是否抵扣未知。
+- 真实模型用量：首轮 5 次调用 21,379 输入 / 919 输出 Token，覆盖率完整；恢复不新增模型调用。
+
+### 6.7 安装与远端
+
+- 修复后 wheel `8c4af34f…`（提交 `9a49d71`）在仓库外安装环境通过完整 smoke（安装包来源、Web 资源、配置、流式、文本/质量、MCP、Mock 视频、持久等待与重启续接、预算保持、CLI、M1-B 五类与 M1-C 七类离线套件、live 协议夹具与本地媒体、清理）：`output/m1c-c3-final-wheel-smoke.json`。
+- 分支 CI：`55bf5a8`、`09a0a37` 均四组通过；本验收提交的远端结果以 [C3 分支运行记录](https://github.com/shifang37/vAgent/actions?query=branch%3Acodex%2Fm1c-c3) 为准。
+
+### 6.8 仍未验证 / 与计划的差异
+
+- 实际扣费与免费额度抵扣；真实结果链接过期后的行为（本次在 24 小时窗口内完成，本地缓存不受影响）。
+- 生成进行中的真实服务重启未覆盖（云端 140 秒内完成）；由恢复流程的跨进程续接与 C3.1 离线强退矩阵共同覆盖。
+- 上游断点续传、多区域 CDN、浏览器以外的播放设备。
+- live 套件报告状态为 error（诚实保留）；修复后未重新发起收费样本（预算仅 1 次提交），交付证据来自恢复流程与独立探测。
