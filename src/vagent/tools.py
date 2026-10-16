@@ -113,7 +113,7 @@ class ToolRegistry:
         self._features: dict[str, ToolFeature] = {}
         self.wait_resolvers: dict[str, Callable] = {}
         self._resolver_features: dict[str, str | None] = {}
-        self._execution_variants: dict[int, tuple[list[ToolFeature], dict[str, str]]] = {}
+        self._execution_variants: dict[int, tuple[list[ToolFeature], dict[str, str], frozenset[str]]] = {}
 
     def register_wait_resolver(self, kind: str, resolve: Callable, *, feature=None) -> "ToolRegistry":
         if kind in self.wait_resolvers:
@@ -122,17 +122,24 @@ class ToolRegistry:
         self._resolver_features[kind] = feature
         return self
 
-    def register_execution_variant(self, version: int, *, features, descriptions) -> None:
-        """Keep historical prompts/specs without teaching the Runner domain rules."""
-        old_features, old_descriptions = self._execution_variants.get(version, ([], {}))
+    def register_execution_variant(self, version: int, *, features, descriptions, exclude=()) -> None:
+        """Keep historical prompts/specs without teaching the Runner domain rules.
+
+        `exclude` hides tool names added after this execution version so a restored
+        Run sees exactly the tool set it was recorded with.
+        """
+        old_features, old_descriptions, old_exclude = self._execution_variants.get(
+            version, ([], {}, frozenset())
+        )
         self._execution_variants[version] = (
             [*old_features, *copy.deepcopy(features)],
             {**old_descriptions, **descriptions},
+            old_exclude | frozenset(exclude),
         )
 
     def for_execution_version(self, version: int) -> "ToolRegistry":
-        registry = self._filtered(lambda _: True)
-        features, descriptions = self._execution_variants.get(version, ([], {}))
+        features, descriptions, excluded = self._execution_variants.get(version, ([], {}, frozenset()))
+        registry = self._filtered(lambda definition: definition.name not in excluded)
         for feature in features:
             if feature.name in registry._features:
                 registry._features[feature.name] = copy.deepcopy(feature)

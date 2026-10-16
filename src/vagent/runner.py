@@ -40,7 +40,13 @@ from vagent.storage import FileStore, now
 from vagent.tools import ToolRegistry
 from vagent.usage import extract_usage
 from vagent.wait_runtime import WaitService, close_pending_calls, execution_control, utc_now
-from vagent.waiting import WAIT_EXECUTION_VERSION, DeferredToolResult, ResumeToken, ToolExecutionContext
+from vagent.waiting import (
+    WAIT_EXECUTION_VERSION,
+    WAIT_EXECUTION_VERSIONS,
+    DeferredToolResult,
+    ResumeToken,
+    ToolExecutionContext,
+)
 
 SYSTEM_PROMPT = """你是 vagent 视频创作 Agent，使用中文协助用户规划和修改创作方案。
 根据需求自主选择工具，观察工具真实结果后再行动。普通交流无需工具。
@@ -202,7 +208,7 @@ class AgentRunner:
             if execution_version is not None
             else (WAIT_EXECUTION_VERSION if self.base_tools.wait_resolvers else CHECKPOINT_VERSION)
         )
-        if self.execution_version not in {CHECKPOINT_VERSION, WAIT_EXECUTION_VERSION}:
+        if self.execution_version not in {CHECKPOINT_VERSION, *WAIT_EXECUTION_VERSIONS}:
             raise AppError("NO_CHECKPOINT", "不支持此图执行版本。")
         self.tools = self.base_tools.for_execution_version(self.execution_version)
         self.clock = clock
@@ -337,7 +343,7 @@ class AgentRunner:
                 "videoMode": self.video_mode,
                 "toolFeatures": self.tools.features,
             }
-            if self.execution_version == WAIT_EXECUTION_VERSION:
+            if self.execution_version in WAIT_EXECUTION_VERSIONS:
                 record.update(
                     activeWaitId=None, externalWaitSeconds=0, externalWaitStartedAt=None, waitResumeError=None
                 )
@@ -361,7 +367,7 @@ class AgentRunner:
     def validate_resume(self, record: dict, state: dict) -> None:
         if record.get("executionVersion") not in {
             CHECKPOINT_VERSION,
-            WAIT_EXECUTION_VERSION,
+            *WAIT_EXECUTION_VERSIONS,
         } or not record.get("policy"):
             raise AppError("NO_CHECKPOINT", "旧版 Run 没有持久图检查点，请发起新请求。")
         if state["sessions"][record["sessionId"]].get("latestRunId") != record["id"]:
@@ -422,7 +428,7 @@ class AgentRunner:
         if record is None:
             raise AppError("NOT_FOUND", "没有这个 Run。")
         restored = self.for_record(record)
-        if record.get("executionVersion") != WAIT_EXECUTION_VERSION or record["status"] not in {
+        if record.get("executionVersion") not in WAIT_EXECUTION_VERSIONS or record["status"] not in {
             "waiting_external",
             "interrupted",
             "running",
@@ -458,7 +464,7 @@ class AgentRunner:
         limits = record["policy"]
         policy = RunPolicy(limits["maxSteps"], limits["maxToolCalls"], limits["timeoutSeconds"])
         context = self.context.for_version(record.get("contextVersion", 1))
-        durable_waits = record.get("executionVersion") == WAIT_EXECUTION_VERSION
+        durable_waits = record.get("executionVersion") in WAIT_EXECUTION_VERSIONS
         journal = RunJournal(store, record["id"], active=not (resume and durable_waits))
         waits = WaitService(store, clock=self.clock, on_event=self.emit)
         cancelled = cancelled if cancelled is not None else asyncio.Event()

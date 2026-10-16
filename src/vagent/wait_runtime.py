@@ -16,7 +16,7 @@ from vagent.checkpoints import checkpoint_id, pending_interrupts
 from vagent.errors import AppError, failure, public_error
 from vagent.storage import FileStore, now
 from vagent.waiting import (
-    WAIT_EXECUTION_VERSION,
+    WAIT_EXECUTION_VERSIONS,
     DeferredToolResult,
     ResumeToken,
     ToolExecutionContext,
@@ -448,7 +448,7 @@ class WaitCoordinator:
             return None
         for record in self.store.snapshot()["runs"].values():
             if (
-                record.get("executionVersion") != WAIT_EXECUTION_VERSION
+                record.get("executionVersion") not in WAIT_EXECUTION_VERSIONS
                 or record["status"] not in {"waiting_external", "interrupted", "running"}
                 or self.waits.recovery_binding(record["id"]) is None
             ):

@@ -1,22 +1,38 @@
 """Scoped video tools. Registration and waiting never call the provider."""
 
 from datetime import datetime, timedelta
+from typing import Annotated
 from uuid import uuid4
+
+from pydantic import Field, field_validator, model_validator
 
 from vagent.contracts import Identifier
 from vagent.errors import AppError, failure
 from vagent.storage import FileStore
 from vagent.tools import Arguments, ToolDefinition, ToolFeature, ToolRegistry
-from vagent.video.contracts import Job, JobV2, VideoIntentV2, VideoRequest, parse_job
+from vagent.video.contracts import (
+    ArtifactRef,
+    Job,
+    JobV2,
+    VideoCapabilities,
+    VideoIntentV2,
+    VideoRequest,
+    VideoSpec,
+    parse_job,
+)
 from vagent.video.jobs import JobService
+from vagent.video.storyboards import Framing, ShotMode, read_storyboard, save_storyboard
 from vagent.video.views import job_snapshot
 from vagent.waiting import ExternalResourceRef, ToolExecutionContext, ToolResultError, WaitBinding
 
-VIDEO_TOOLS_VERSION = 2
-VIDEO_RULES_VERSION = 2
+# Mock moves to the M2 toolset (storyboard tools); live keeps its frozen M1-C
+# 3/3 identity until the M2 Wan protocol lands in D2.
+VIDEO_TOOLS_VERSION = 4
+VIDEO_RULES_VERSION = 4
 LIVE_VIDEO_TOOLS_VERSION = 3
 LIVE_VIDEO_RULES_VERSION = 3
 WAIT_TIMEOUT_SECONDS = 600
+M2_STORYBOARD_TOOL_NAMES = ("storyboard_read", "storyboard_save")
 
 LEGACY_VIDEO_RULES = """当前启用 mock 视频模式，只能登记模拟任务；所有结果均为 simulated=true、mediaAvailable=false。
 需要生成时先调用 video_capabilities，根据返回的模型、能力版本和完整规格组合构造 video_generate。
@@ -26,13 +42,41 @@ video_generate 只返回本地 jobId 与登记状态；每个 Run 最多新建�
 job_get 可读取本地状态，await_job 可取得已有终态；不要循环查询。提交不确定或查询暂停时明确报告原因。
 成功也只是模拟结果描述，没有可播放或下载的媒体；不能声称已生成真实视频。"""
 
-VIDEO_RULES = LEGACY_VIDEO_RULES.replace(
+VIDEO_RULES_V2 = LEGACY_VIDEO_RULES.replace(
     "已登记不等于已完成。当前入口不会自动推进 Job，也不能挂起等待未完成任务；先报告 jobId 与真实状态。\n"
     "job_get 可读取本地状态，await_job 可取得已有终态；不要循环查询。提交不确定或查询暂停时明确报告原因。",
     "已登记不等于已完成。可以先报告 jobId 与真实状态；需要等待结果时调用 await_job，Run 会持久挂起。\n"
     "Job 由独立 Worker 推进；等待不会请求模型或占用活动时间，结果就绪后续接原调用。\n"
     "job_get 读取本地状态；不要循环查询。等待到期、提交不确定或查询暂停时明确报告原因。",
 )
+
+VIDEO_RULES_V4 = """当前启用 mock 视频模式，只能登记模拟任务；所有结果均为 simulated=true、mediaAvailable=false。
+多镜头需求先用 storyboard_save 保存结构化分镜：按顺序给出每个镜头的 description、framing、durationSeconds 与 mode；
+镜头 id 由服务端生成并跨版本稳定，修改时带 storyboardId 与 expectedVersion，产生新版本并保留旧版本。
+storyboard_read 读取当前分镜与各镜头版本摘要。保存分镜不创建视频任务。
+需要生成时先调用 video_capabilities，根据返回的模型、能力版本和完整规格组合构造 video_generate。
+sourceRefs 可省略；引用文本产物时先读取并使用工具确认的 artifactId 和确切 version。
+video_generate 只返回本地 jobId 与登记状态；每个 Run 最多新建一个 Job，不能自动降低规格、拆分或重提。
+已登记不等于已完成。可以先报告 jobId 与真实状态；需要等待结果时调用 await_job，Run 会持久挂起。
+Job 由独立 Worker 推进；等待不会请求模型或占用活动时间，结果就绪后续接原调用。
+job_get 读取本地状态；不要循环查询。等待到期、提交不确定或查询暂停时明确报告原因。
+成功也只是模拟结果描述，没有可播放或下载的媒体；不能声称已生成真实视频。"""
+
+
+def legacy_mock_capabilities() -> list[dict]:
+    """Exact pre-M2 mock capability JSON, pinned so restores keep frozen toolFeatures."""
+    return [
+        VideoCapabilities(
+            provider="mock",
+            model="mock-t2v",
+            capabilities_version="v1",
+            specs=(
+                VideoSpec(duration_seconds=5, resolution="720p", aspect_ratio="16:9"),
+                VideoSpec(duration_seconds=10, resolution="1080p", aspect_ratio="9:16"),
+            ),
+        ).model_dump(mode="json", by_alias=True)
+    ]
+
 
 LIVE_VIDEO_RULES = """当前启用 live 视频模式，可登记真实万相单镜头文生视频任务。
 生成前调用 video_capabilities，按返回的精确模型、能力版本和完整规格组合构造 video_generate；不猜测或替换模型、地域、时长及画幅。
@@ -52,6 +96,54 @@ LEGACY_AWAIT_DESCRIPTION = (
 
 class JobLookup(Arguments):
     job_id: Identifier
+
+
+CanonicalId = Annotated[
+    str, Field(pattern=r"^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$")
+]
+
+
+class StoryboardShotSpec(Arguments):
+    id: CanonicalId | None = None
+    description: str = Field(min_length=1, max_length=2000)
+    framing: Framing
+    camera_movement: str | None = Field(default=None, max_length=200)
+    duration_seconds: int = Field(default=5, ge=2, le=15)
+    mode: ShotMode = "t2v"
+    reference_asset_ids: list[CanonicalId] = Field(default_factory=list, max_length=2)
+
+    @field_validator("camera_movement")
+    @classmethod
+    def blank_movement(cls, value):
+        if value is None:
+            return None
+        return value.strip() or None
+
+    @model_validator(mode="after")
+    def references_match_mode(self):
+        if len(self.reference_asset_ids) != {"t2v": 0, "i2v": 1, "flf2v": 2}[self.mode]:
+            raise ValueError("镜头模式要求的参考图数量不匹配")
+        if len(set(self.reference_asset_ids)) != len(self.reference_asset_ids):
+            raise ValueError("同一镜头的参考图不能重复")
+        return self
+
+
+class StoryboardSave(Arguments):
+    storyboard_id: CanonicalId | None = None
+    expected_version: int | None = Field(default=None, ge=1)
+    title: str = Field(min_length=1, max_length=120)
+    shots: list[StoryboardShotSpec] = Field(min_length=1, max_length=64)
+    source_refs: list[ArtifactRef] | None = Field(default=None, max_length=16)
+
+    @model_validator(mode="after")
+    def require_version(self):
+        if bool(self.storyboard_id) != bool(self.expected_version):
+            raise ValueError("修改时必须同时提供 storyboardId 和 expectedVersion")
+        return self
+
+
+class StoryboardRead(Arguments):
+    storyboard_id: CanonicalId | None = None
 
 
 def completed_job_data(job: Job) -> dict:
@@ -110,11 +202,12 @@ def register_video_tools(registry: ToolRegistry, service: JobService, *, mode="m
                 "rulesVersion": LIVE_VIDEO_RULES_VERSION if live else VIDEO_RULES_VERSION,
                 "capabilities": capabilities,
             },
-            instructions=LIVE_VIDEO_RULES if live else VIDEO_RULES,
+            instructions=LIVE_VIDEO_RULES if live else VIDEO_RULES_V4,
             bypass_answer_cache=True,
         )
     )
     if not live:
+        legacy_capabilities = legacy_mock_capabilities()
         registry.register_execution_variant(
             1,
             features=[
@@ -124,13 +217,32 @@ def register_video_tools(registry: ToolRegistry, service: JobService, *, mode="m
                         "mode": "mock",
                         "toolsVersion": 1,
                         "rulesVersion": 1,
-                        "capabilities": capabilities,
+                        "capabilities": legacy_capabilities,
                     },
                     instructions=LEGACY_VIDEO_RULES,
                     bypass_answer_cache=True,
                 )
             ],
             descriptions={"await_job": LEGACY_AWAIT_DESCRIPTION},
+            exclude=M2_STORYBOARD_TOOL_NAMES,
+        )
+        registry.register_execution_variant(
+            2,
+            features=[
+                ToolFeature(
+                    name="video",
+                    configuration={
+                        "mode": "mock",
+                        "toolsVersion": 2,
+                        "rulesVersion": 2,
+                        "capabilities": legacy_capabilities,
+                    },
+                    instructions=VIDEO_RULES_V2,
+                    bypass_answer_cache=True,
+                )
+            ],
+            descriptions={},
+            exclude=M2_STORYBOARD_TOOL_NAMES,
         )
     registry.register_wait_resolver(
         "job", lambda binding: resolve_job_wait(service.store, binding, service=service), feature="video"
@@ -291,4 +403,28 @@ def register_video_tools(registry: ToolRegistry, service: JobService, *, mode="m
         ),
     ):
         registry.register(definition)
+    if not live:
+        registry.register(
+            ToolDefinition(
+                "storyboard_read",
+                "读取当前项目的结构化分镜：当前版本的有序镜头（稳定 shotId、景别、时长、模式、参考图）与各镜头版本摘要；"
+                "省略 storyboardId 时读取最新分镜。只读，不创建视频任务。",
+                StoryboardRead,
+                "read",
+                read_storyboard,
+                feature="video",
+            )
+        )
+        registry.register(
+            ToolDefinition(
+                "storyboard_save",
+                "新建或修改结构化分镜：shots 按给定顺序编号，镜头 id 由服务端生成并跨版本稳定；"
+                "修改时同时提供 storyboardId 与 expectedVersion，产生新版本并保留旧版本；显式传入既有镜头 id 保持其身份。"
+                "i2v 镜头需 1 张、flf2v 需 2 张素材库参考图。只保存分镜结构，不创建视频任务。",
+                StoryboardSave,
+                "write",
+                save_storyboard,
+                feature="video",
+            )
+        )
     return registry

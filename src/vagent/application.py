@@ -36,6 +36,7 @@ from vagent.video.tools import register_video_tools, resolve_job_wait
 from vagent.video.views import job_view
 from vagent.video.worker import JobWorker
 from vagent.wait_runtime import WaitCoordinator, execution_control
+from vagent.waiting import WAIT_EXECUTION_VERSIONS
 
 
 class ApplicationService:
@@ -687,7 +688,7 @@ class ApplicationService:
 
     def stop(self, run_id):
         record = self.run_record(run_id)
-        if record.get("executionVersion") == 2 and self.wait_coordinator:
+        if record.get("executionVersion") in WAIT_EXECUTION_VERSIONS and self.wait_coordinator:
             stopped = self.wait_coordinator.stop_run(run_id)
             self.notify(record["sessionId"])
             return {"runId": run_id, "stopRequested": stopped}

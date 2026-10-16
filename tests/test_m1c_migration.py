@@ -29,8 +29,13 @@ def test_frozen_c0_migration_envelope_and_original_bytes(tmp_path, entry):
         (tmp_path / name).write_bytes(content)
     with FileStore.open(tmp_path) as store:
         state = store.snapshot()
-        assert state["schemaVersion"] == 3 and state["media"] == {}
-        assert canonical_fingerprint(state) == entry["expectedV3CanonicalSha256"]
+        assert state["schemaVersion"] == 4 and state["media"] == {}
+        assert state["storyboards"] == {} and state["assets"] == {}
+        # The frozen v1/v2->v3 envelope stays byte-identical; v4 adds exactly the
+        # two empty M2 collections on top of the recorded v3 shape.
+        v3_shape = {key: value for key, value in state.items() if key not in {"storyboards", "assets"}}
+        v3_shape["schemaVersion"] = 3
+        assert canonical_fingerprint(v3_shape) == entry["expectedV3CanonicalSha256"]
         Database.model_validate(state)
         for collection, digest in entry["preservedCollectionsSha256"].items():
             assert canonical_fingerprint(state[collection]) == digest
@@ -76,7 +81,7 @@ def test_both_source_versions_preserved_on_migration_write_failure(tmp_path, mon
         assert backups[0].read_bytes() == raw
     monkeypatch.undo()
     with FileStore.open(tmp_path) as store:
-        assert store.snapshot()["schemaVersion"] == 3
+        assert store.snapshot()["schemaVersion"] == 4
 
 
 @pytest.mark.parametrize("corrupt", ["job-version", "fingerprint", "operation", "message"])

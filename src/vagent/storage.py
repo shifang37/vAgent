@@ -19,7 +19,8 @@ from pydantic.alias_generators import to_camel
 from vagent.config import assert_id
 from vagent.errors import AppError, failure
 from vagent.video.contracts import Job, MediaAsset, StoredJob
-from vagent.waiting import WAIT_EXECUTION_VERSION, WaitBinding
+from vagent.video.storyboards import Asset, Storyboard
+from vagent.waiting import WAIT_EXECUTION_VERSIONS, WaitBinding
 
 T = TypeVar("T")
 
@@ -202,24 +203,31 @@ class DatabaseV2(DatabaseV1):
     waits: dict[str, WaitBinding]
 
 
-class Database(DatabaseV2):
+class DatabaseV3(DatabaseV2):
     schema_version: Literal[3]
     runs: dict[str, RunRecord]
     jobs: dict[str, StoredJob]
     media: dict[str, MediaAsset]
 
 
+class Database(DatabaseV3):
+    schema_version: Literal[4]
+    storyboards: dict[str, Storyboard]
+    assets: dict[str, Asset]
+
+
 def migrated_state(state: dict) -> dict:
     """Mechanical envelope upgrade; never re-encode historical domain objects."""
     version = state["schemaVersion"]
-    if type(version) is not int or version not in {1, 2, 3}:
+    if type(version) is not int or version not in {1, 2, 3, 4}:
         raise ValueError("Unsupported schema version")
     upgraded = copy.deepcopy(state)
-    if version == 3:
-        return upgraded
     if version == 1:
         upgraded.update(jobs={}, waits={})
-    upgraded.update(schemaVersion=3, media={})
+    if version < 3:
+        upgraded.update(media={})
+    if version < 4:
+        upgraded.update(schemaVersion=4, storyboards={}, assets={})
     return upgraded
 
 
@@ -248,7 +256,7 @@ class FileStore:
                 raw = (home / "state.json").read_bytes()
             except FileNotFoundError:
                 state = {
-                    "schemaVersion": 3,
+                    "schemaVersion": 4,
                     "projects": {},
                     "sessions": {},
                     "artifacts": {},
@@ -257,26 +265,34 @@ class FileStore:
                     "jobs": {},
                     "waits": {},
                     "media": {},
+                    "storyboards": {},
+                    "assets": {},
                 }
             else:
                 try:
                     state = json.loads(raw)
                     version = state["schemaVersion"]
-                    if type(version) is not int or version not in {1, 2, 3}:
+                    if type(version) is not int or version not in {1, 2, 3, 4}:
                         raise ValueError("Unsupported schema version")
-                    {1: DatabaseV1, 2: DatabaseV2, 3: Database}[version].model_validate(state)
+                    {1: DatabaseV1, 2: DatabaseV2, 3: DatabaseV3, 4: Database}[version].model_validate(state)
                     for collection in (state["sessions"], state["runs"]):
                         for item in collection.values():
                             messages_from_dict(item["messages"])
                     from vagent.video.jobs import validate_job_changes
+                    from vagent.video.storyboards import (
+                        validate_asset_changes,
+                        validate_storyboard_changes,
+                    )
 
-                    checked = migrated_state(state) if version < 3 else state
+                    checked = migrated_state(state) if version < 4 else state
                     validate_job_changes(checked["jobs"], checked)
+                    validate_storyboard_changes(checked["storyboards"], checked)
+                    validate_asset_changes(checked["assets"], checked)
                 except (ValueError, TypeError, KeyError, AppError):
                     raise AppError(
                         "INVALID_STORE", "本地状态损坏或版本不支持，已保留原文件，未重置数据。"
                     ) from None
-                if version < 3:
+                if version < 4:
                     # Keep the exact pre-migration bytes, including legacy message encoding.
                     atomic_write_bytes(home / f"state-v{version}-{uuid4()}.json", raw)
                     state = migrated_state(state)
@@ -299,7 +315,7 @@ class FileStore:
                         for call in run.get("modelCalls", []):
                             if call["status"] == "started":
                                 call.update(status="interrupted", errorCode="INTERRUPTED")
-                        if run.get("executionVersion") == WAIT_EXECUTION_VERSION:
+                        if run.get("executionVersion") in WAIT_EXECUTION_VERSIONS:
                             bindings = [
                                 WaitBinding.model_validate(raw)
                                 for raw in draft["waits"].values()
@@ -353,6 +369,7 @@ class FileStore:
 
     def transaction(self, mutate: Callable[[dict], T]) -> T:
         from vagent.video.jobs import validate_job_changes, validate_media_changes
+        from vagent.video.storyboards import validate_asset_changes, validate_storyboard_changes
 
         with self.locked():
             draft = copy.deepcopy(self._state)
@@ -360,6 +377,8 @@ class FileStore:
             Database.model_validate(draft)
             validate_job_changes(self._state["jobs"], draft)
             validate_media_changes(self._state["media"], draft)
+            validate_storyboard_changes(self._state["storyboards"], draft)
+            validate_asset_changes(self._state["assets"], draft)
             atomic_write_json(self.home / "state.json", draft)
             self._state = draft
             return copy.deepcopy(value)

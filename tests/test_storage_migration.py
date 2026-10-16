@@ -30,6 +30,8 @@ def legacy_state(home):
         state.pop("jobs")
         state.pop("waits")
         state.pop("media")
+        state.pop("storyboards")
+        state.pop("assets")
         state["schemaVersion"] = 1
         run = state["runs"][context.run_id]
         run.update(
@@ -70,7 +72,15 @@ def test_migration_keeps_exact_backup_and_all_legacy_domain_data(tmp_path):
     checkpoint.write_bytes(b"untouched-checkpoint-fixture")
     with FileStore.open(home) as store:
         migrated = store.snapshot()
-        assert migrated == {**original, "schemaVersion": 3, "jobs": {}, "waits": {}, "media": {}}
+        assert migrated == {
+            **original,
+            "schemaVersion": 4,
+            "jobs": {},
+            "waits": {},
+            "media": {},
+            "storyboards": {},
+            "assets": {},
+        }
         assert next(home.glob("state-v1-*.json")).read_bytes() == raw
         assert checkpoint.read_bytes() == b"untouched-checkpoint-fixture"
         parsed = Database.model_validate(migrated)
@@ -108,10 +118,10 @@ def test_migration_failure_preserves_original_and_releases_lock(tmp_path, monkey
         assert backups[0].read_bytes() == raw
     monkeypatch.undo()
     with FileStore.open(home) as store:
-        assert store.snapshot()["schemaVersion"] == 3
+        assert store.snapshot()["schemaVersion"] == 4
 
 
-@pytest.mark.parametrize("version", [0, 4, True, "1", None])
+@pytest.mark.parametrize("version", [0, 5, True, "1", None])
 def test_unknown_or_coerced_versions_are_not_migrated(tmp_path, version):
     state = tmp_path / "state.json"
     raw = json.dumps({"schemaVersion": version, "projects": {}}).encode()

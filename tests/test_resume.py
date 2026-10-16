@@ -161,7 +161,7 @@ async def test_resume_keeps_original_step_limit_even_with_larger_new_policy(stor
 
 
 @pytest.mark.parametrize("frozen_tick", [None, 100.002])
-@pytest.mark.parametrize("execution_version", [1, 2])
+@pytest.mark.parametrize("execution_version", [1, 2, 3])
 async def test_resume_keeps_spent_time_and_does_not_call_model(
     store, monkeypatch, frozen_tick, execution_version
 ):

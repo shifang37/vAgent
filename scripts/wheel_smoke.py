@@ -127,7 +127,7 @@ async def smoke_video_tools(directory):
             pending["resumable"],
             pending["errorCode"],
         )
-        assert pending["executionVersion"] == 2
+        assert pending["executionVersion"] == WAIT_EXECUTION_VERSION
         assert waiting_model.calls == 1 and pending["toolCalls"] == 1
         binding = WaitBinding.model_validate(next(iter(service.store.snapshot()["waits"].values())))
         assert binding.status == "armed" and binding.context.run_id == pending["id"]
@@ -563,7 +563,7 @@ async def main(output=None):
                         generation=1,
                         resource=ExternalResourceRef(kind="job", id="wheel-job"),
                     )
-                    assert deferred.kind == "deferred" and WAIT_EXECUTION_VERSION == 2
+                    assert deferred.kind == "deferred" and WAIT_EXECUTION_VERSION == 3
                     assert (await client.get("/.env")).status_code == 404
                     bounded = await client.post(
                         "/api/sessions/quality/messages",

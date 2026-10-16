@@ -254,7 +254,7 @@ async def test_live_application_model_tools_replay_http_views_and_client_closure
         assert record["status"] == "completed" and record["modelSteps"] == 5 and record["toolCalls"] == 4
         assert (
             record["videoMode"] == "live"
-            and record["executionVersion"] == 2
+            and record["executionVersion"] == 3
             and record["contextVersion"] == 2
         )
         assert record["toolFeatures"]["video"]["toolsVersion"] == 3

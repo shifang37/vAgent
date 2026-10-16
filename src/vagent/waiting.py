@@ -8,7 +8,12 @@ from pydantic import Field, JsonValue, model_validator
 from vagent.contracts import Contract, Fingerprint, Identifier, Name, UtcTimestamp
 from vagent.errors import AppError
 
-WAIT_EXECUTION_VERSION = 2
+WAIT_EXECUTION_VERSION = 3
+# Version 2 is the recoverable pre-M2 wait generation: its validators and its
+# recovery path keep their original behavior. Version 3 labels M2 Runs, whose
+# historical tool registry is restored by this exact number.
+LEGACY_WAIT_EXECUTION_VERSION = 2
+WAIT_EXECUTION_VERSIONS = (LEGACY_WAIT_EXECUTION_VERSION, WAIT_EXECUTION_VERSION)
 
 
 class ToolExecutionContext(Contract):

@@ -47,7 +47,7 @@ from vagent.video.media_http import MediaHttpClient
 from vagent.video.media_worker import MediaWorker
 from vagent.video.providers.wan import WanAdapter
 from vagent.video.worker import JobWorker
-from vagent.waiting import ToolExecutionContext
+from vagent.waiting import WAIT_EXECUTION_VERSION, ToolExecutionContext
 from vagent.web import create_app
 
 
@@ -583,7 +583,7 @@ def grade(case, item, *, offline):
         and set(result_ids) == {call["id"] for call in trace},
         "capability_read": "video_capabilities" in successful,
         "video_tools_visible": VIDEO_TOOLS.issubset(set(item["toolInventory"])),
-        "saved_mode_live": run["videoMode"] == "live" and run["executionVersion"] == 2,
+        "saved_mode_live": run["videoMode"] == "live" and run["executionVersion"] == WAIT_EXECUTION_VERSION,
         "private_url_not_exposed": "Signature" not in json.dumps(item["toolResults"], ensure_ascii=False)
         and "Signature" not in answer
         and "Signature" not in json.dumps(jobs, ensure_ascii=False),

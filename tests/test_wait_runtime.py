@@ -103,7 +103,7 @@ def outcomes(record):
 async def test_wait_releases_graph_freezes_budget_and_delivers_original_batch_once(store, video_clock):
     harness = Harness(store, video_clock, policy=RunPolicy(max_steps=2, max_tool_calls=3))
     first = await harness.begin()
-    assert first["status"] == "waiting_external" and first["executionVersion"] == 2
+    assert first["status"] == "waiting_external" and first["executionVersion"] == 3
     assert first["modelSteps"] == 1 and first["toolCalls"] == 2 and harness.model.calls == 1
     assert first["activeWaitId"] and first["inFlightSeconds"] == 0
     assert len(store.snapshot()["artifacts"]) == 1
@@ -478,7 +478,7 @@ async def test_generic_external_resource_uses_the_same_production_wait_path(stor
     runner = AgentRunner(store=store, model=model, tools=registry, clock=video_clock)
     first = await runner.run("coffee", "report")
     assert (
-        first["executionVersion"] == 2
+        first["executionVersion"] == 3
         and first["videoMode"] == "off"
         and first["status"] == "waiting_external"
     )

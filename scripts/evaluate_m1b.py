@@ -29,7 +29,7 @@ from vagent.errors import AppError, public_error
 from vagent.runner import RunPolicy
 from vagent.storage import atomic_write_json, now
 from vagent.video.providers.mock import MockScenario, MockVideoAdapter
-from vagent.waiting import ToolExecutionContext
+from vagent.waiting import WAIT_EXECUTION_VERSION, ToolExecutionContext
 
 
 @dataclass(frozen=True)
@@ -259,7 +259,7 @@ def grade(case, item, *, offline):
     checks.update(
         capability_read="video_capabilities" in successful,
         simulated_answer=bool(re.search(r"模拟|mock", answer, re.I)),
-        saved_mode_mock=run["videoMode"] == "mock" and run["executionVersion"] == 2,
+        saved_mode_mock=run["videoMode"] == "mock" and run["executionVersion"] == WAIT_EXECUTION_VERSION,
     )
     if case.name == "unsupported-spec":
         checks.update(
