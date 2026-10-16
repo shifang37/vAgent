@@ -183,6 +183,75 @@ S2 列出该模型北京免费额度 **50 秒**，有效期自开通百炼/模�
 
 **公开接口与实现策略已冻结，可进入 C1 离线实现。** 当前账号权限、精确模型实际可用性、真实 CDN、音频编码与浏览器表现保留为 C3 验证项；不要求现在生成视频来补齐这些事实。C0 没有把“已配置”升级为“已验证”，也没有宣称 C1/C2 已实现。
 
+## 9. D0：图生视频、首尾帧与视频续写核实
+
+查阅日期：**2026-10-16（Asia/Shanghai）**。范围：M2 的图生视频（首帧）、首尾帧生视频与镜头延长（视频续写）。**本次未调用生成接口、未查询账号任务、未上传或生成素材、未读取凭证；视频 submit 次数为 0。** 实现契约与裁剪决定见 [M2_CONTRACTS.md](./M2_CONTRACTS.md) 第 4 节。
+
+### 9.1 来源与证据等级
+
+| 编号 | 官方资料 | 本次用途 |
+|---|---|---|
+| D1 | [万相2.7-图生视频 API 参考][D1] | 模型、`media` 组合、输入约束、输出、状态 |
+| D2 | [如何调用万相 wan 图生视频模型][D2] | 续写/首尾帧参数与示例、计费口径 |
+| D3 | [视频生成模型列表][D3] | `wan2.7-i2v` 版本、规格、任务类型 |
+| D4 | [上传文件获取临时 URL][D4] | 图片/视频送达上游的官方通道与其限制 |
+| D5 | [模型价格][D5] | i2v/首尾帧单价与免费额度 |
+| D6 | [限流：万相系列][D6] | i2v 创建 RPS 与并发 |
+
+以下结论均来自上述页面正文。D5 的视频章节正文过长、抓取时被截断，其行值经页面检索快照读取，标记为**文档支持（部分经检索快照）**。
+
+### 9.2 冻结的组合
+
+| 项目 | 官方支持 / 本项目采用 | 证据 |
+|---|---|---|
+| 模型 | **`wan2.7-i2v-2026-04-25`**；不使用会漂移的 `wan2.7-i2v` 别名；新端点仅支持 wan2.7 | 文档支持，D1/D3 |
+| 地域 | **`cn-beijing`（华北2，北京）** | 文档支持，D1 |
+| 任务（本地模式） | 首帧 `i2v`（`first_frame`）、首尾帧 `flf2v`（`first_frame+last_frame`）；**视频续写裁剪**（见 9.4） | 文档支持，D1/D2 |
+| 时长 | 整数 2–15 秒，默认 5；M2 首期开放 **5 秒** | 文档支持，D1 |
+| 画质 | 720P/1080P；M2 只开放 **720P**；**输出画幅由输入图决定**，不设 `ratio` 参数，边长取 16 的倍数，不承诺精确比例 | 文档支持，D1 |
+| 声音 | i2v 未传 `driving_audio` 时自动生成匹配音频；M2 **不开放参考音频** | 文档支持，D1/D2 |
+| 端点 | 与 t2v 相同：`POST .../api/v1/services/aigc/video-generation/video-synthesis`、`GET .../api/v1/tasks/{task_id}`、`X-DashScope-Async: enable` | 文档支持，D1 |
+| 预计费用 | 北京 720P **0.60 元/输出秒 × 5 秒 = 3.00 元**；1080P 1.00 元/秒；输入不计费，失败不计费 | 文档支持（部分经检索快照），D2/D5 |
+
+### 9.3 输入素材的送达方式（首要风险，已定）
+
+`media` 是数组，元素固定为 `{type, url}`，`type ∈ {first_frame, last_frame, driving_audio, first_clip}`，每个 `type` 最多出现一次；合法组合仅 `first_frame`、`first_frame+last_frame`（可加 `driving_audio`）、`first_clip`、`first_clip+last_frame`。
+
+| 送达方式 | 官方支持 | 本项目 |
+|---|---|---|
+| Base64 data URL `data:{MIME};base64,{data}` | **图片专用** | **采用**（i2v/flf2v 参考图） |
+| 公网 HTTP/HTTPS URL | 支持 | 不采用（私有部署无公网暴露） |
+| `oss://` 临时 URL（D4 上传通道） | 支持，图片/音频/视频 | 不采用（见 9.4） |
+
+图片输入约束（与上游一致）：`JPEG/JPG/PNG/WEBP/BMP`；单边像素 `[240, 8000]`；宽高比 `1:8～8:1`；单图 ≤20 MB；PNG 不支持透明通道。本项目再裁剪为 `PNG/JPEG/WebP`、≤20 MiB。
+
+### 9.4 视频续写裁剪（镜头延长）
+
+- 官方续写输入为 `first_clip`（**仅 URL**，mp4/mov，2–10 秒，单边 `[240,4096]`，比 `1:8～8:1`，≤100 MB），无“原任务 ID”形态；`duration` 是输出总时长，**输入片段时长计入计费**（例：输入 2 秒、`duration=12` → 输出 12 秒）。
+- 把本地媒体送上游只有 D4 的 `GET /api/v1/uploads?action=getPolicy` + multipart 上传（返回 `oss://`，ACL 私有，临时 URL 有效期 48 小时，调用时需 `X-DashScope-OssResourceResolve: enable`）。
+- 裁剪理由：D4 正文明确“**请勿用于生产环境**”，且上传接口位于**已弃用的旧域名** `dashscope.aliyuncs.com`，与本项目“只冻结业务空间专属域名、不私搭公网暴露、不引入第三方图床”的边界冲突。
+- 重新纳入条件：上游提供与专属域名一致、且非“勿用于生产环境”的文件通道。未满足前能力表不出现延长条目，`extendSource` 恒为 null。
+
+### 9.5 限流与生命周期
+
+| 项目 | 结论 | 证据 |
+|---|---|---|
+| 创建限流 | 每模型 **5 RPS、5 个处理中任务**，按**主账号**维度合并计算（子账号/业务空间/Key 共享） | 文档支持，D6 |
+| 查询限流 | 默认 20 RPS；沿用本地 15 秒与持久退避 | 文档支持，D1 |
+| 时效 | `task_id` 与 `video_url` 各 24 小时；超期查询返回 `UNKNOWN` | 文档支持，D1 |
+| 免费额度 | 北京 `wan2.7-i2v-2026-04-25` **50 秒**，有效期自开通/发布/通过之日起 90 天内（以较晚者为准） | 文档支持（部分经检索快照），D5 |
+
+### 9.6 未确认项（保留为 D4 验证）
+
+当前账号对 i2v 的模型授权与 IP 权限；i2v 真实结果主机与重定向（沿用 `wan-result-hosts-v2` 允许集）；首帧真实输出画幅与音频表现；实际账单（保持 `unknown`）；免费额度是否抵扣。本次不把“文档支持”升级为“账号已验证”。
+
+[D1]: https://help.aliyun.com/zh/model-studio/image-to-video-general-api-reference
+[D2]: https://help.aliyun.com/zh/model-studio/wan-image-to-video-guide
+[D3]: https://help.aliyun.com/zh/model-studio/use-video-generation
+[D4]: https://help.aliyun.com/zh/model-studio/get-temporary-file-url
+[D5]: https://help.aliyun.com/zh/model-studio/model-pricing
+[D6]: https://help.aliyun.com/zh/model-studio/rate-limit
+
 [S1]: https://help.aliyun.com/zh/model-studio/text-to-video-api-reference
 [S2]: https://help.aliyun.com/zh/model-studio/model-pricing#ba6f7744d5e0o
 [S3]: https://help.aliyun.com/zh/model-studio/rate-limit

@@ -1,0 +1,306 @@
+{
+  "schemaVersion": 3,
+  "projects": {
+    "coffee": {
+      "id": "coffee",
+      "revision": 0,
+      "goal": "",
+      "audience": "",
+      "style": "",
+      "constraints": [],
+      "plan": []
+    }
+  },
+  "sessions": {
+    "coffee": {
+      "id": "coffee",
+      "messages": [],
+      "latestRunId": "live-run"
+    }
+  },
+  "artifacts": {},
+  "runs": {
+    "live-run": {
+      "id": "live-run",
+      "sessionId": "coffee",
+      "requestId": "live-run",
+      "prompt": "offline video fixture",
+      "model": "no-model",
+      "status": "completed",
+      "messages": [],
+      "modelSteps": 0,
+      "toolCalls": 0,
+      "inputTokens": 0,
+      "outputTokens": 0,
+      "contextBytes": 0,
+      "droppedMessages": 0,
+      "answer": "",
+      "errorCode": null,
+      "createdAt": "2030-01-01T00:00:00+00:00",
+      "updatedAt": "2030-01-01T00:00:00+00:00",
+      "executionVersion": 2,
+      "contextSignature": null,
+      "contextVersion": 1,
+      "policy": null,
+      "resumable": false,
+      "activeSeconds": 0,
+      "inFlightSeconds": 0,
+      "toolCallKeys": [],
+      "usageStartStep": null,
+      "modelCalls": [],
+      "readOnly": false,
+      "answerCache": {},
+      "events": [],
+      "videoMode": "live"
+    }
+  },
+  "operations": {
+    "live-run:1:generate": {
+      "fingerprint": "34e1e602da9c88d37f47601839c8763802daf3110ed3f5f3d5b3bf9b5a913fb4",
+      "result": {
+        "ok": true,
+        "data": {
+          "jobId": "1875a669-b4bb-401a-9cf8-463ebe99fd14",
+          "status": "pending_submit",
+          "mode": "live",
+          "simulated": false,
+          "mediaAvailable": false
+        }
+      }
+    }
+  },
+  "jobs": {
+    "1875a669-b4bb-401a-9cf8-463ebe99fd14": {
+      "contractVersion": 2,
+      "id": "1875a669-b4bb-401a-9cf8-463ebe99fd14",
+      "context": {
+        "projectId": "coffee",
+        "sessionId": "coffee",
+        "runId": "live-run",
+        "modelStep": 1,
+        "toolCallId": "generate"
+      },
+      "operationKey": "live-run:1:generate",
+      "revision": 6,
+      "mode": "live",
+      "request": {
+        "provider": "wan",
+        "model": "wan2.7-t2v-2026-06-12",
+        "capabilitiesVersion": "wan27-t2v-beijing-v1",
+        "prompt": "雨夜咖啡店，镜头缓慢推近。",
+        "spec": {
+          "durationSeconds": 5,
+          "resolution": "720p",
+          "aspectRatio": "16:9"
+        },
+        "sourceRefs": [],
+        "region": "cn-beijing",
+        "workspaceId": "test-workspace",
+        "endpointProfile": "beijing-workspace-v1",
+        "adapterVersion": "wan-http-v1",
+        "providerPrompt": "生成单镜头视频。\n雨夜咖啡店，镜头缓慢推近。",
+        "parameters": {
+          "resolution": "720P",
+          "ratio": "16:9",
+          "duration": 5,
+          "prompt_extend": false,
+          "watermark": true,
+          "seed": 0
+        }
+      },
+      "requestFingerprint": "288e2c859260a0f7fa54eb28f856d3baac4d8f0a936215c8d021504b885e5ae1",
+      "capabilities": {
+        "provider": "wan",
+        "model": "wan2.7-t2v-2026-06-12",
+        "capabilitiesVersion": "wan27-t2v-beijing-v1",
+        "mode": "live",
+        "inputTypes": [
+          "text"
+        ],
+        "specs": [
+          {
+            "durationSeconds": 5,
+            "resolution": "720p",
+            "aspectRatio": "16:9"
+          }
+        ],
+        "supportsCancel": false,
+        "supportsIdempotentSubmit": false,
+        "region": "cn-beijing",
+        "maxPromptCharacters": 4991,
+        "shotMode": "single",
+        "audioMode": "auto",
+        "promptExtend": false,
+        "watermark": true,
+        "seed": 0,
+        "supportsResultUrlRefresh": false,
+        "price": {
+          "currency": "CNY",
+          "unit": "output_second",
+          "unitPrice": "0.60",
+          "quantity": "5",
+          "amount": "3.00",
+          "priceVersion": "wan27-beijing-720p-20261010",
+          "checkedAt": "2026-10-10",
+          "sourceUrl": "https://help.aliyun.com/zh/model-studio/model-pricing#ba6f7744d5e0o"
+        }
+      },
+      "status": "succeeded",
+      "providerTaskId": "wan-original",
+      "submitAttempts": 1,
+      "queryAttempts": 0,
+      "consecutiveQueryErrors": 0,
+      "queryState": "idle",
+      "queryStartedAt": null,
+      "policy": {
+        "intervalSeconds": 15.0,
+        "submitTimeoutSeconds": 30.0,
+        "queryTimeoutSeconds": 30.0,
+        "retryDelaysSeconds": [
+          15.0,
+          30.0,
+          60.0
+        ]
+      },
+      "nextPollAt": null,
+      "createdAt": "2030-01-01T00:00:00+00:00",
+      "updatedAt": "2030-01-01T00:00:00+00:00",
+      "error": null,
+      "result": {
+        "simulated": false,
+        "mediaAvailable": true,
+        "requestFingerprint": "288e2c859260a0f7fa54eb28f856d3baac4d8f0a936215c8d021504b885e5ae1",
+        "spec": {
+          "durationSeconds": 5,
+          "resolution": "720p",
+          "aspectRatio": "16:9"
+        },
+        "sourceRefs": [],
+        "artifactRefs": [],
+        "summary": "单镜头视频已完整保存到本地，可播放和下载。",
+        "mediaRefs": [
+          {
+            "mediaId": "51c8bf18-cca2-4582-9c70-fa7d45486b8e"
+          }
+        ]
+      },
+      "intentFingerprint": "30d42674a6a65d51093b774fa2fc3198cbe5695cc904a9315f2e38d278e3bb6a",
+      "submissionStartedAt": "2030-01-01T00:00:00+00:00",
+      "queryDeadlineAt": "2030-01-02T00:00:00+00:00",
+      "providerSubmissionRequestId": "trace-original",
+      "lastQueryRequestId": null,
+      "lastProviderStatus": "SUCCEEDED",
+      "queryPauseReason": null,
+      "runtimeBlock": null,
+      "cost": {
+        "estimate": {
+          "currency": "CNY",
+          "unit": "output_second",
+          "unitPrice": "0.60",
+          "quantity": "5",
+          "amount": "3.00",
+          "priceVersion": "wan27-beijing-720p-20261010",
+          "checkedAt": "2026-10-10",
+          "sourceUrl": "https://help.aliyun.com/zh/model-studio/model-pricing#ba6f7744d5e0o",
+          "maxJobCost": "3.00"
+        },
+        "providerUsage": null,
+        "actual": {
+          "status": "unknown",
+          "currency": "CNY",
+          "amount": null,
+          "source": null
+        }
+      },
+      "providerOutput": {
+        "taskId": "wan-original",
+        "receivedAt": "2030-01-01T00:00:00+00:00",
+        "videoUrl": "https://dashscope-result-sh.oss-accelerate.aliyuncs.com/test.mp4?Signature=private-signature",
+        "urlExpiresAt": null,
+        "expirySource": "unknown",
+        "providerTimes": {
+          "submitTime": null,
+          "scheduledTime": null,
+          "endTime": null
+        },
+        "usage": null
+      },
+      "downloadPolicy": {
+        "maxBytes": 268435456,
+        "connectTimeoutSeconds": 10.0,
+        "readTimeoutSeconds": 30.0,
+        "totalTimeoutSeconds": 180.0,
+        "retryDelaysSeconds": [
+          5.0,
+          30.0
+        ],
+        "maxAttemptsPerWindow": 3,
+        "maxRedirects": 3,
+        "concurrency": 1
+      },
+      "download": {
+        "mediaId": "51c8bf18-cca2-4582-9c70-fa7d45486b8e",
+        "relativePath": "media/coffee/51c8bf18-cca2-4582-9c70-fa7d45486b8e.mp4",
+        "phase": "committed",
+        "generation": 1,
+        "attempts": 1,
+        "windowAttempts": 1,
+        "nextAttemptAt": null,
+        "startedAt": null,
+        "deadlineAt": null,
+        "prepared": {
+          "sizeBytes": 209909,
+          "sha256": "b179cca0ebb91e2b49a1e212df743037a8e292a3b754ee040c2124b31a3b6a54",
+          "metadata": {
+            "width": 1280,
+            "height": 720,
+            "durationSeconds": 5.0,
+            "videoCodec": "h264",
+            "hasAudio": true,
+            "audioCodec": "aac",
+            "frameRate": {
+              "numerator": 10,
+              "denominator": 1
+            }
+          },
+          "validatedAt": "2030-01-01T00:00:00+00:00"
+        },
+        "error": null,
+        "repair": false,
+        "sourcePolicyVersion": "wan-result-hosts-v2"
+      },
+      "mediaAvailability": {
+        "status": "available",
+        "reason": null,
+        "checkedAt": "2030-01-01T00:00:00+00:00"
+      }
+    }
+  },
+  "waits": {},
+  "media": {
+    "51c8bf18-cca2-4582-9c70-fa7d45486b8e": {
+      "id": "51c8bf18-cca2-4582-9c70-fa7d45486b8e",
+      "projectId": "coffee",
+      "jobId": "1875a669-b4bb-401a-9cf8-463ebe99fd14",
+      "sourceRefs": [],
+      "relativePath": "media/coffee/51c8bf18-cca2-4582-9c70-fa7d45486b8e.mp4",
+      "mimeType": "video/mp4",
+      "sizeBytes": 209909,
+      "sha256": "b179cca0ebb91e2b49a1e212df743037a8e292a3b754ee040c2124b31a3b6a54",
+      "createdAt": "2030-01-01T00:00:00+00:00",
+      "metadata": {
+        "width": 1280,
+        "height": 720,
+        "durationSeconds": 5.0,
+        "videoCodec": "h264",
+        "hasAudio": true,
+        "audioCodec": "aac",
+        "frameRate": {
+          "numerator": 10,
+          "denominator": 1
+        }
+      },
+      "validationVersion": "mp4-avc-v1"
+    }
+  }
+}

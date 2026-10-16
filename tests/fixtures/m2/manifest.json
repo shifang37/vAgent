@@ -1,0 +1,65 @@
+{
+  "fixtureVersion": 1,
+  "capturedFrom": "92a4a87",
+  "capturedOn": "2026-10-16",
+  "kind": "synthetic-domain-migration-only",
+  "checkpointsIncluded": false,
+  "notes": "v3 baseline stores for the M2 v3->v4 migration. Checkpoint and context signature strings are sentinels, not resumable SQLite evidence; provider and media URLs are synthetic values, not credentials. The v4 envelope only adds empty 'storyboards' and 'assets' collections; every other collection must stay byte-identical. Do not regenerate these fixtures to make a migration pass.",
+  "snapshots": [
+    {
+      "file": "legacy-v3-mock.json",
+      "schemaVersion": 3,
+      "rawSha256": "fcaa566d72659fe43a8db244867f620f97badeb42d42407ade288085ca70a39e",
+      "expectedV4CanonicalSha256": "7c8ed5829edbe5d31eb5e393ca0ec057f2e12443989a2db2c70254e8774c26b7",
+      "preservedCollectionsSha256": {
+        "projects": "0370bd47dfc3e7d661b5d6c718bcf2b75d58ac5db92bcae2942fd7edd5d5cf5a",
+        "sessions": "4b86be6f0e47bc1b893f91423f8bb3c655dae39059f6f9bdaed9208288395b0f",
+        "artifacts": "927270e36b454da4c60f0feeffa8f5fa33feb023787a02bc5522e550bf42bc02",
+        "runs": "f694f54ef4b8cf53e04959f9ff7c811d539af2d7298598d31e6e9f7ca7a8cf70",
+        "operations": "a662665b21e1dd9602d1f256b4095ae313ee3255e77dc647d3b082696388e20c",
+        "jobs": "d2af18d06964c8a813dedba0fceed72c5497ccd8236428334c320a52ab77b718",
+        "waits": "9f7fbf5760b63df12a7b02f93bd1baeeeed7715024ff827e98f16dcab7557dcb",
+        "media": "44136fa355b3678a1146ad16f7e8649e94fb4fc21fe77e8310c060f61caaff8a"
+      },
+      "jobRequestFingerprints": {
+        "fdb86a5a-e4a3-45e0-a31a-e96119b8fb41": "513b542472b40954bcf0ba2dd3d05a7ad2d072055be9d8b85abb8d206c612db0",
+        "73803b81-d4ac-4726-a529-1ca0114d23d0": "416b8a7bb5e912311724b3ae29698b168b75bb42206c4f8ca48a5e1cc2ee1771"
+      },
+      "mediaIds": [],
+      "operationFingerprints": {
+        "m2-waiting-mock:source": "af61ed967c818bb26ce2e33115bed87a4345ce8d341131276e0c9709711f30d4",
+        "m2-waiting-mock:1:generate": "5c2cfa7582b78df5b8d8c0f8c538fdd5932babeff7079f5c2d24bafa8b646d50",
+        "m2-waiting-mock:revision": "44cba73ad98c6871499a6c1932219a31658f944e4bf0c2c49a47b06220f217ec",
+        "m2-completed-mock:source": "af61ed967c818bb26ce2e33115bed87a4345ce8d341131276e0c9709711f30d4",
+        "m2-completed-mock:1:generate": "ac24d89ad13888c4e7eb6507c0f8029ebc41c2bf1e0d8737ebf233cb733aa6db",
+        "m2-completed-mock:revision": "5f632e53e085ab1b80bfbfb0c5cb9701f0d2e69b795d212befc2b9c956ca1dc9",
+        "m2-completed-mock:2:await-original": "3b8be23a75bda87ae8eede1f0d6cc6bf9b915b50f88542431d5c89b3c3f627aa"
+      }
+    },
+    {
+      "file": "legacy-v3-live.json",
+      "schemaVersion": 3,
+      "rawSha256": "ba905f92211f5f7dbe1d675f121cdecb2dbbd642d45732df5eaa1d7a4eee5245",
+      "expectedV4CanonicalSha256": "51d416752aa7fcad0dfba0bea56a3efbd4728ad6ab33cbeade9f411747fbe021",
+      "preservedCollectionsSha256": {
+        "projects": "a7c7ce9984e39a2aff248988a5af1eda62283cf094f3b71a25d1a04e1cedf993",
+        "sessions": "78b1e1eca58b046240ca5ee58c007e1113b5da0f6510e474370e653ed9bfc50c",
+        "artifacts": "44136fa355b3678a1146ad16f7e8649e94fb4fc21fe77e8310c060f61caaff8a",
+        "runs": "21a69b163eb36c87821f5d325007526a5cd93bf500cca74afc876d9aa4cc00c4",
+        "operations": "78d749fa7d681b1e4737def21ae99d53e2730512f673db7bb3a3149bce0abcab",
+        "jobs": "370586ce58a80746e2220ca2b3ae4cbff1b682698d31b38a519b7a532ffedf90",
+        "waits": "44136fa355b3678a1146ad16f7e8649e94fb4fc21fe77e8310c060f61caaff8a",
+        "media": "17d3f2ee081c9013d23d5968b9b5771e01e6d2821520d3552644ca413acb48ab"
+      },
+      "jobRequestFingerprints": {
+        "1875a669-b4bb-401a-9cf8-463ebe99fd14": "288e2c859260a0f7fa54eb28f856d3baac4d8f0a936215c8d021504b885e5ae1"
+      },
+      "mediaIds": [
+        "51c8bf18-cca2-4582-9c70-fa7d45486b8e"
+      ],
+      "operationFingerprints": {
+        "live-run:1:generate": "34e1e602da9c88d37f47601839c8763802daf3110ed3f5f3d5b3bf9b5a913fb4"
+      }
+    }
+  ]
+}
