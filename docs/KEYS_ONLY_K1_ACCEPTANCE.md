@@ -54,6 +54,7 @@
 - `ruff check` 与 `ruff format --check` 按 CI 同口径（`src/vagent tests scripts`）通过。
 - 新用例：`tests/test_keys_only.py` 5 项。
 - 视频 submit=0。
+- 四组 CI（ubuntu/windows × 3.11/3.12）在最终提交 `573fe00` 上全部通过（check runs `117426325670` / `117426325971` / `117426325886` / `117426325914`；ubuntu 3.11/3.12 均 946 passed / 3 skipped，windows 3.11/3.12 均 948 passed / 1 skipped；安装态 wheel smoke 四组 PASS）；汇总证据 `output/keys-only-k1-ci-573fe00-summary.json`。
 
 ## 7. 失败与偏差记录
 
