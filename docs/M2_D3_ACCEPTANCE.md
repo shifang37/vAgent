@@ -82,7 +82,15 @@
   7. 页面无错误：上述四项计数全部为 0。
 - 证据：`output/m2-d3-browser.json`（阶段、空失败列表、浏览器版本、连播媒体尺寸、夹具与素材 ID）与 7 张截图 `output/m2-d3-browser-{storyboard,confirm,delivered,sequence,redo,assets,usage}.png`。
 
-## 9. 留给 D4 的入口
+## 9. 四组 CI
+
+四组 CI（ubuntu/windows × 3.11/3.12，`.github/workflows/ci.yml`「Agent checks」）在 D3 收尾提交 **`39e6977`** 上全部完成，结论均为 **success**：check runs `117327535036`（ubuntu 3.11）、`117327535155`（ubuntu 3.12）、`117327534768`（windows 3.11）、`117327535018`（windows 3.12）；汇总证据保存在 `output/m2-d3-ci-39e6977-summary.json`。该提交的树包含全部 D3 代码（`e5d1e90` 之后只有文档提交 `d262605` 与本验收记录）。该轮 CI 依次执行 ruff check、node 语法检查与 `node --test`（两个前端状态测试文件均为 0 跳过）、pytest、wheel 构建与安装态 `scripts/wheel_smoke.py`；安装态 smoke 输出 `PASS: installed wheel, Web assets, config, streaming, text/quality, MCP, mock video tools, durable wait, original Run restart/automatic continuation, readonly delivery, unchanged budgets, CLI …`，完整输出见该 job 的日志。
+
+套件结果：ubuntu 3.11 **916 passed / 3 skipped**（238.37 秒）、ubuntu 3.12 **916 passed / 3 skipped**（171.25 秒）、windows 3.11 **918 passed / 1 skipped**（600.02 秒）、windows 3.12 **918 passed / 1 skipped**（582.78 秒）。平台间差异（本机 Windows 2 跳过、CI Windows 1 跳过、ubuntu 3 跳过）与 D1/D2 同因，仍为既有的符号链接权限类跳过与 Windows 专用控制台夹具（`skipif(sys.platform != "win32")`），不是 D3 引入。
+
+D3 未使用 CI 试错：离线全量套件、ruff、前端检查、安装态 wheel smoke 与受控浏览器验证都在推送前于本机完成（见第 7、8 节），因此四组 CI 在首次推送即通过，没有需要记录的失败轮次或重跑。其后的文档提交（本条记录与 README、`M1_PLAN`、Web README 的同步）不改动代码。
+
+## 10. 留给 D4 的入口
 
 - `scripts/evaluate_m2.py`（默认离线）与真实成本受控多镜头联调（2 镜头 + 1 次重做，submit ≤ 3、累计估算 ≤ 9.00 CNY，须显式批准额度）；wheel smoke 的 M2 扩展（`storyboard show`、`shots redo`、`assets`、`usage --project` 与素材接口）；`docs/M2_ACCEPTANCE.md`；README 与计划的最终同步。
 - 可直接复用的 D3 证据：受控浏览器夹具与检查脚本（覆盖除真实 Key 与真实上游之外的全部路径）、用量聚合（`M2_ACCEPTANCE.md` 的费用与 Token 段落）、以及 [M2 契约](./M2_CONTRACTS.md) 第 12 节的实现补记。
