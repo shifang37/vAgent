@@ -14,7 +14,7 @@
 | 受控浏览器证据复跑（输出前缀 `m2-d4-browser`，不覆盖 D3 证据） | 完成 |
 | 四组 CI | 完成（`fb3b6d4`，[运行 39015717826](https://github.com/shifang37/vAgent/actions/runs/39015717826)） |
 | `docs/M2_ACCEPTANCE.md`、README、M1_PLAN、Harness 设计与各验收文档同步 | 完成 |
-| 真实成本受控多镜头联调（2 镜头 + 1 次单镜头重做，submit≤3、估算≤9.00 CNY） | 待额度批准（第 7 节） |
+| 真实成本受控多镜头联调（2 镜头 + 1 次单镜头重做，submit≤3、估算≤9.00 CNY） | 完成（submit=3、估算 9.00 CNY；第 7 节） |
 
 ## 2. 离线端到端套件（`scripts/evaluate_m2.py`）
 
@@ -75,11 +75,26 @@ D4 没有使用 CI 试错：离线全量套件、ruff、前端检查、安装态
 
 ## 7. 真实成本受控多镜头联调（`--live`）
 
-状态：**未执行 —— 等待显式额度批准**（M2 契约第 5 节与任务规划决策点 3 要求「须显式批准后执行」）。因此本节只记录已冻结的计划与将产生的证据，不宣称任何真实结果。
+完成日期：**2026-10-17**。形态与额度按契约第 5 节冻结执行：两镜头分镜、**一次**批量登记、**一次**集合等待、逐镜头本地交付，随后由用户显式发起**一次单镜头重做**；实际上限 submit=**3**、估算 **9.00 CNY**（每 Job 3.00）。i2v、首尾帧与镜头延长未做真实样本（见第 9 节）。
 
-- 形态（契约冻结）：一条自然语言需求 → 两镜头分镜 → **一次**批量登记 → **一次**集合等待 → 逐镜头本地交付；随后由用户显式发起**一次单镜头重做**。上限：submit ≤ 3、累计估算 ≤ 9.00 CNY（每 Job 3.00、每 Run 4 个新任务、每 Run 累计 12.00）。i2v、首尾帧与镜头延长不做真实样本。
-- 发起方式：从仓库外安装环境发起（`tmp/m2-d1-wheel-env/`，`-I` 保证导入 site-packages），独立数据目录 `tmp/m2-d4-live/home-live-r1`；先做零费用预检（DeepSeek `GET /models`、对不存在任务 ID 的一次查询），再运行 `scripts/evaluate_m2.py --live --home <新空目录> --output output/m2-d4-live.json`（会话模型为真实 `deepseek-flash`，套件上限 16 次模型调用）。
-- 待记录：两个真实 task ID 与逐镜头 MP4 的大小与哈希、浏览器播放与下载、重做只新增一次提交且其他镜头的 Job 与媒体未被重新生成或改写、重启不重复提交、估算与实际账单状态（未取得账单保持 unknown）、真实 `usage` 字段解析，以及真实结果主机是否落在 `wan-result-hosts-v2` 允许集（出现新主机时按 D0 约定在 D4 追加策略版本 v3，不改写 v2）。
+### 7.1 零费用预检（paidCalls=0）
+
+- DeepSeek `GET /models` → **200**，返回 `deepseek-flash`、`deepseek-v4-pro`，配置模型可用。
+- 对不存在的任务 ID 查询北京业务空间：**HTTP 200**，原文 `{"output":{"task_id":"…","task_status":"UNKNOWN"}}`（原始响应存 `output/m2-d4-live-probe.json`）；适配器按冻结口径把 `UNKNOWN` 归类为 `PROVIDER_TASK_UNAVAILABLE` 并暂停查询（不会重试到永久）。两者共同证明 Key、地域、业务空间专属域名与鉴权有效，且未创建任务、未计费。
+- 证据：`output/m2-d4-live-preflight.json`、`output/m2-d4-live-probe.json`。
+
+### 7.2 真实联调结果（1 个用例，37 项检查全部通过）
+
+- 发起方式：仓库外安装环境（`tmp/m2-d1-wheel-env/`，`-I` 保证导入 site-packages），独立数据目录 `tmp/m2-d4-live/home-live-r1`，会话模型为真实 `deepseek-flash`；套件上限 16 次模型调用。
+- 模型链：`video_capabilities → project_read → storyboard_save → shot_generate → await_job`；**5 次真实模型调用**，38,958 输入 / 1,333 输出 Token，缓存命中 3,584 / 未命中 35,374，用量覆盖完整；活动 8.47 秒、外部等待 140.75 秒，均在原预算内。
+- 登记：一次调用登记 **2 个镜头 Job**（`usedNewJobs=2`、合计估算 **6.00**、`remainingAmount=6.00`，上限仍为每 Job 3.00 / 每 Run 4 个 / 每 Run 12.00）；三个 Job 请求的冻结参数逐字段一致（`720P`、`ratio=16:9`、`duration=5`、`prompt_extend=false`、`watermark=true`、`seed=0`），工作空间作用域已记录。
+- 云端与交付：**3 次提交**（两镜头 + 一次重做，全部一次即成）、27 次查询、3 次下载（各 1 次尝试即提交）。真实 task ID：`e971a41c-ea5c-41bd-9fd3-b4ef3815df0e`、`d2f6c842-9c26-4907-b9a1-761d8ab0e9f2`、`ee2bf289-703a-498c-9de7-12845718109a`；结果主机均为 `dashscope-a717.oss-accelerate.aliyuncs.com`，落在 `wan-result-hosts-v2` 允许集内，**不需要追加策略版本**。
+- 逐镜头交付：三个 MP4 全部 1280×720 / 5.033 秒 / H.264 + AAC / 30fps，大小 1,926,942 / 2,544,082 / 1,960,856 字节，SHA-256 `37e3ff76d48cde8e54807fc58b3ec3093ac44ca7a56daf10a1845c8501612d4d`、`1c2d84f03a429f68f83229c68f5933d6a27b1fede2fa5f36066e499fe8239062`、`031bc03570393293f33f7d465b99ffa66184c8ee88c12310797e6db9365d8991`；本地文件与记录哈希一致，媒体接口（详情 / GET / HEAD / 单 Range 206 / 不可满足 416 / 附件名 / ETag）全部通过。
+- 上游 usage：`duration=5.0`、`output_video_duration=5.0`、`input_video_duration=0.0`、`video_count=1`、`resolution=720P`、`aspectRatio=16:9`，与冻结口径一致。
+- 逐镜头重做：目标镜头新增 1 个 ShotVersion 与 1 个 Job；其他镜头的版本增量 0、Job 身份（revision / 任务 ID / 提交次数 / 媒体 ID）与已交付媒体文件哈希逐一不变；同请求重放返回同一结果且不新增 Job。
+- 浏览器（Chrome headless，安装版应用以 live 模式打开该数据目录）：分镜面板显示版本数 [2, 1]（重做镜头两个版本）；序列连播读取到真实交付的媒体（1280×720 / 5.04 秒）并实际播放；每个交付媒体经内容接口返回 200 `video/mp4`、字节与记录哈希一致、`attachment; filename="<mediaId>.mp4"`；零页面错误。证据：`output/m2-d4-live-browser.json`、`output/m2-d4-live-browser.png`。
+- 费用：登记估算合计 **9.00 CNY**（3 × 3.00，价格版本 `wan27-beijing-720p-20261010`）；**实际账单未取得，保持 unknown**，免费额度是否抵扣未知。
+- 完整报告：`output/m2-d4-live.json`（37 项检查全部通过，含 `redo_left_other_media_untouched`、`media_matches_local_file`、`submit_accounted`、`cost_recorded`、`quota_snapshot`、`set_wait_delivered`）。
 
 ## 8. 失败与偏差记录
 
