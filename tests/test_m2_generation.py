@@ -499,6 +499,75 @@ def test_single_element_wait_uses_the_frozen_job_binding(store, video_clock):
     assert not job_settled(job)
 
 
+async def test_mock_runner_regenerates_one_shot_without_touching_the_others(store, video_clock):
+    """N shots through the real Agent loop, then one redo of a single shot."""
+    registry, service, adapter, _ = mock_tools(store, clock=video_clock)
+    saved = {}
+
+    def first_run(messages, step):
+        if step == 0:
+            return tool_call(
+                "storyboard_save",
+                {"title": "两镜头", "shots": [shot("镜头一"), shot("镜头二")]},
+                call_id="save",
+            )
+        result = json.loads(messages[-1].content)
+        if step == 1:
+            assert result["ok"] and result["data"]["version"] == 1
+            saved.update(result["data"])
+            return tool_call("shot_generate", generation_args(result["data"]), call_id="generate")
+        assert result["ok"] and len(result["data"]["shots"]) == 2
+        saved["jobIds"] = [item["jobId"] for item in result["data"]["shots"]]
+        return AIMessage(content="两个镜头已登记。")
+
+    runner = AgentRunner(store=store, model=ScriptedModel(first_run), tools=registry)
+    first = await runner.run("coffee", "两镜头分镜并生成")
+    assert first["status"] == "completed", first["answer"]
+    assert len(saved["jobIds"]) == 2
+
+    def redo_run(messages, step):
+        if step == 0:
+            return tool_call(
+                "storyboard_save",
+                {
+                    "storyboardId": saved["storyboardId"],
+                    "expectedVersion": saved["version"],
+                    "title": "两镜头",
+                    "shots": [
+                        {"id": saved["shotIds"][0], **shot("镜头一")},
+                        {"id": saved["shotIds"][1], **shot("镜头二改：推近后转向窗外")},
+                    ],
+                },
+                call_id="revise",
+            )
+        result = json.loads(messages[-1].content)
+        if step == 1:
+            assert result["ok"] and result["data"]["version"] == 2
+            return tool_call(
+                "shot_generate",
+                generation_args(result["data"], shot_ids=[saved["shotIds"][1]]),
+                call_id="redo",
+            )
+        assert result["ok"] and len(result["data"]["shots"]) == 1
+        assert not result["data"]["shots"][0]["reused"]
+        return AIMessage(content="第二个镜头已重做。")
+
+    redo = AgentRunner(store=store, model=ScriptedModel(redo_run), tools=registry)
+    second = await redo.run("coffee", "只重做第二个镜头")
+    assert second["status"] == "completed", second["answer"]
+    record = storyboard_record(store, saved["storyboardId"])
+    assert [version["version"] for version in record["versions"]] == [1, 2]
+    assert record["currentVersion"] == 2
+    untouched, redone = saved["shotIds"]
+    assert len(shot_versions(store, saved["storyboardId"], untouched)) == 1
+    assert shot_versions(store, saved["storyboardId"], untouched)[0]["jobId"] == saved["jobIds"][0]
+    versions = shot_versions(store, saved["storyboardId"], redone)
+    assert len(versions) == 2 and versions[0]["jobId"] == saved["jobIds"][1]
+    assert versions[1]["jobId"] != saved["jobIds"][1]
+    assert len(store.snapshot()["jobs"]) == 3
+    assert adapter.ledger_snapshot()["submitCalls"] == 0
+
+
 def race(call, count=4):
     """Run one call from several threads at once and collect every outcome."""
     import threading
