@@ -1,6 +1,6 @@
 # M2 任务规划：分镜多镜头工作流与素材库
 
-更新日期：2026-10-17。状态：**D0、D1、D2、D3 已完成（D3 验收见 [M2_D3_ACCEPTANCE.md](./M2_D3_ACCEPTANCE.md)），D4 起进入实施**；M1-A/B/C 已全部验收完成，全部内容已合入 master（`cc3628e`，2026-10-16）。本文确定 M2 的范围、契约方向、工作包与验收要求；契约细节、新能力数值与上限提案在 D0 评审冻结后进入实施。工作包编号沿用零基惯例（M1-A→A0–A5、M1-B→B0–B5、M1-C→C0–C3），本阶段记为 **D0–D4**。
+更新日期：2026-10-17。状态：**D0、D1、D2、D3 已完成，D4 的离线端到端套件、安装态 wheel smoke、受控浏览器与四组 CI 已完成（验收见 [M2 验收](./M2_ACCEPTANCE.md)），真实成本受控多镜头联调待显式额度批准**；M1-A/B/C 已全部验收完成，全部内容已合入 master（`cc3628e`，2026-10-16）。本文确定 M2 的范围、契约方向、工作包与验收要求；契约细节、新能力数值与上限提案在 D0 评审冻结后进入实施。工作包编号沿用零基惯例（M1-A→A0–A5、M1-B→B0–B5、M1-C→C0–C3），本阶段记为 **D0–D4**。
 
 依据：[产品设计](../DESIGN.md) 的 M2 定义、[M1 总计划](../M1_PLAN.md) 的后续边界、[M1-C 冻结契约](./M1C_CONTRACTS.md)、[上游核实记录](./VIDEO_API_NOTES.md)、[M1-C 验收](./M1C_ACCEPTANCE.md)、[Harness 设计](../AGENT_HARNESS_DESIGN.md)。
 
@@ -140,7 +140,7 @@
 - [x] D1：schema v4、分镜域模型与工具、迁移证据完成（2026-10-16，submit=0；验收见 [M2_D1_ACCEPTANCE.md](./M2_D1_ACCEPTANCE.md)）。
 - [x] D2：多镜头生成、重做与费用护栏的故障矩阵完成（2026-10-17，submit=0；验收见 [M2_D2_ACCEPTANCE.md](./M2_D2_ACCEPTANCE.md)）。
 - [x] D3：素材库、用量统计与 CLI/Web 交付完成（2026-10-17，submit=0；验收见 [M2_D3_ACCEPTANCE.md](./M2_D3_ACCEPTANCE.md)）。
-- [ ] D4：离线套件、真实成本受控多镜头验收、wheel 与四组 CI 完成；`docs/M2_ACCEPTANCE.md` 完成。
-- [ ] README、M1_PLAN、Harness 设计与各验收文档同步；M2 未完成前不宣称多镜头成片。
+- [ ] D4（部分完成）：离线端到端套件 7/7、安装态 wheel smoke 扩展、受控浏览器 7/7 与四组 CI 完成，`docs/M2_ACCEPTANCE.md` 已完成；**真实成本受控多镜头联调（2 镜头 + 1 次重做，submit≤3、估算≤9.00 CNY）待显式额度批准**。
+- [x] README、M1_PLAN、Harness 设计与各验收文档同步；M2 未完成前不宣称多镜头成片（D4 记录见 [M2 验收](./M2_ACCEPTANCE.md)）。
 
 本文为任务设计，未经评审冻结前不进入实施；提案数值（上限、预算、工具与能力版本号）以 D0 冻结为准。

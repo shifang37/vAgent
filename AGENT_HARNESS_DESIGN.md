@@ -4,7 +4,7 @@
 > 状态：已按求职项目目标选择 LangGraph 自主设计 Harness；第一部分实现与验证状态见 [README](./README.md)。本文其余能力为逐步实施的设计目标。  
 > 产品定位：以 DeepSeek 为决策模型的视频创作 Agent。先建立可独立运行的 Agent，再为它接入视频生成能力。
 
-当前原型已交付 Agent 循环、项目记忆、版本化产物、基础执行护栏、上下文裁剪、Skills、SQLite 持久图检查点和显式恢复，以及 M1 验收完成的模拟与真实单镜头视频链路（含本地媒体交付）。上下文预算暂以 UTF-8 序列化字节数衡量；2026-10-16 起 M2 进入实施，D0 契约冻结、D1 已交付 schema v4 与结构化分镜域（见 [M2 任务规划](./docs/M2_PLAN.md)），其余能力仍属逐步实施的设计目标，不能把下文全部视为已实现。恢复行为及限制见 [持久恢复验收](./docs/RECOVERY_ACCEPTANCE.md)。
+当前原型已交付 Agent 循环、项目记忆、版本化产物、基础执行护栏、上下文裁剪、Skills、SQLite 持久图检查点和显式恢复，以及 M1 验收完成的模拟与真实单镜头视频链路（含本地媒体交付）。上下文预算暂以 UTF-8 序列化字节数衡量；2026-10-17 已完成 M2 的 D0–D3 与 D4 的离线/打包部分（结构化分镜、多镜头生成与逐镜头重做、素材库、用量统计与分镜工作台，见 [M2 任务规划](./docs/M2_PLAN.md) 与 [M2 验收](./docs/M2_ACCEPTANCE.md)），真实成本受控多镜头联调待显式额度批准；其余能力仍属逐步实施的设计目标，不能把下文全部视为已实现。恢复行为及限制见 [持久恢复验收](./docs/RECOVERY_ACCEPTANCE.md)。
 
 已补齐 [模型与缓存用量观测](./docs/USAGE_ACCEPTANCE.md) 和 [上下文 v2 优化](./docs/CONTEXT_OPTIMIZATION_ACCEPTANCE.md)：固定规则、Skill 元信息位于动态项目事实之前，工具定义保持确定性顺序，JSON 去除冗余空白，并保留旧检查点的上下文格式。真实缓存命中收益待 API 联调验证。
 
@@ -296,6 +296,7 @@ M2 在 M1 之上加入结构化分镜、多镜头生成、逐镜头重做、图�
 **D1 实现状态（2026-10-16）**：schema v4 与 `storyboards`/`assets` 集合、分镜域模型（稳定 Shot ID、只增不改版本、素材引用校验）与 `storyboard_read`/`storyboard_save` 已在 mock 视图按 4/4 工具与规则版本实现；`executionVersion=3` 引入，1/2 保持原恢复路径，pre-M2 Run 按记录的 toolFeatures 还原原工具集并保持签名逐字节不变。`shot_generate`、集合等待与 live 的 4/4 协议按 D2 实施（live 暂保持 3/3）。迁移夹具、签名与回归证据见 [D1 验收](./docs/M2_D1_ACCEPTANCE.md)。
 
 **D2/D3 实现状态（2026-10-17）**：D2 交付多镜头批量原子登记、三重上限与额度快照、集合等待（execution v3 的 `jobset` 绑定）、部分失败隔离、逐镜头重做，并把 live 切换到 4/4 与 `wan27-shot-beijing-v2`（`wan-http-v2`，受控 HTTP）. D3 在同一 4/4 版本内新增只读素材工具 `asset_read`、素材库导入/读取接口与文件恢复、用量聚合读取侧、以及 CLI（`storyboard show`、`shots redo`、`assets list|import`、`usage --project`）与 Web 分镜界面（分镜面板、批量确认、序列连播、素材库页、用量面板）；显式用户动作使用独立的“客户端 Run”，不占用对话 Run 的 latest 与额度。由于 M2 视图在 4/4 内新增工具，D2 构建录制的 M2 Run 不承诺跨 D3 恢复（显式恢复返回 `RESUME_CONFIG_CHANGED`，与 D1 记录的边界一致；D2 签名哈希保存在 `tests/test_m2_compatibility.py`），`for_execution_version(1/2/3)` 继续排除全部 M2 工具，pre-M2 签名逐字节不变。证据见 [D2 验收](./docs/M2_D2_ACCEPTANCE.md)与 [D3 验收](./docs/M2_D3_ACCEPTANCE.md)。
+**D4 实现状态（2026-10-17）**：新增 `scripts/evaluate_m2.py`（默认离线的 M2 端到端套件：live 模式 + 受控上游 + 本地测试媒体 + 加速夹具时钟，7 用例）与 `tests/test_m2_evaluation.py`；`scripts/wheel_smoke.py` 扩展到安装态 M2 工作台（分镜/素材 CLI 与 HTTP 面）与离线套件。D4 未改动任何工具签名、规则文本、执行/上下文版本、能力版本、价格、来源策略或校验版本——只新增脚本与测试，因此 D3 记录的恢复边界与 pre-M2 逐字节签名证据保持不变。证据见 [M2 验收](./docs/M2_ACCEPTANCE.md)。
 
 ## 9. 首版规模边界与演进条件
 
