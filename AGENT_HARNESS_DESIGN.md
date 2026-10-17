@@ -290,9 +290,12 @@ M2 在 M1 之上加入结构化分镜、多镜头生成、逐镜头重做、图�
 | `storyboard_save` | 校验来源与镜头上限，产生新 StoryboardVersion（保留原版），返回分镜版本与稳定 Shot ID |
 | `shot_generate` | 一次调用原子登记多个镜头 Job，回显逐镜头与合计估算、已用与剩余额度；任一校验失败整体不登记 |
 | `video_generate` / `job_get` | 保留 M1-C 单镜头与只读语义不变 |
+| `asset_read` | 只读列出素材库参考图元数据（assetId、来源项目、格式、尺寸、导入时间）；不含路径、私有 URL 与指纹，也不能导入或删除 |
 | `await_job` | 接受 `jobIds` 集合，一次登记等待，返回逐镜头结果与失败摘要；单元素等价 M1-C |
 
 **D1 实现状态（2026-10-16）**：schema v4 与 `storyboards`/`assets` 集合、分镜域模型（稳定 Shot ID、只增不改版本、素材引用校验）与 `storyboard_read`/`storyboard_save` 已在 mock 视图按 4/4 工具与规则版本实现；`executionVersion=3` 引入，1/2 保持原恢复路径，pre-M2 Run 按记录的 toolFeatures 还原原工具集并保持签名逐字节不变。`shot_generate`、集合等待与 live 的 4/4 协议按 D2 实施（live 暂保持 3/3）。迁移夹具、签名与回归证据见 [D1 验收](./docs/M2_D1_ACCEPTANCE.md)。
+
+**D2/D3 实现状态（2026-10-17）**：D2 交付多镜头批量原子登记、三重上限与额度快照、集合等待（execution v3 的 `jobset` 绑定）、部分失败隔离、逐镜头重做，并把 live 切换到 4/4 与 `wan27-shot-beijing-v2`（`wan-http-v2`，受控 HTTP）. D3 在同一 4/4 版本内新增只读素材工具 `asset_read`、素材库导入/读取接口与文件恢复、用量聚合读取侧、以及 CLI（`storyboard show`、`shots redo`、`assets list|import`、`usage --project`）与 Web 分镜界面（分镜面板、批量确认、序列连播、素材库页、用量面板）；显式用户动作使用独立的“客户端 Run”，不占用对话 Run 的 latest 与额度。由于 M2 视图在 4/4 内新增工具，D2 构建录制的 M2 Run 不承诺跨 D3 恢复（显式恢复返回 `RESUME_CONFIG_CHANGED`，与 D1 记录的边界一致；D2 签名哈希保存在 `tests/test_m2_compatibility.py`），`for_execution_version(1/2/3)` 继续排除全部 M2 工具，pre-M2 签名逐字节不变。证据见 [D2 验收](./docs/M2_D2_ACCEPTANCE.md)与 [D3 验收](./docs/M2_D3_ACCEPTANCE.md)。
 
 ## 9. 首版规模边界与演进条件
 

@@ -153,6 +153,8 @@ $env:VAGENT_VIDEO_MODE = 'mock'
 | `await_job` | 终态立即返回；未结束则保存持久等待，由执行图挂起（execution v2/v3），结果就绪后回填原工具调用 |
 | `storyboard_read` | M2 D1 起（mock）：读取当前项目的结构化分镜、当前版本有序镜头与各镜头版本摘要；只读，跨项目拒绝 |
 | `storyboard_save` | M2 D1 起（mock）：新建或修改结构化分镜，校验来源/素材引用与上限，产生新版本并保留旧版本，返回服务端稳定 Shot ID |
+| `shot_generate` | M2 D2 起（mock/live）：为已保存分镜的指定镜头批量登记任务，必须显式确认，回显逐镜头与合计估算、已用与剩余额度；任一镜头校验失败整批不登记，同一分镜版本同一镜头的相同请求复用原任务 |
+| `asset_read` | M2 D3 起：只读列出素材库参考图元数据（assetId、来源项目、格式、尺寸、导入时间）；不含本地路径、私有 URL 或指纹，也不能导入或删除 |
 
 新 mock Run 自 M2 D1 起使用 execution v3；v1/v2 运行仍按原路径恢复。`AgentRunner.run()` 在持久中断保存后返回 `waiting_external`，释放图执行任务；已完成工具保留，未完成调用不伪造成功。`WaitCoordinator` 扫描持久结果并续接原调用，`ApplicationService` 已管理协调器启动、关闭及启动补偿。等待仍占用唯一未结束 Run 名额，新消息返回 `RUN_BUSY`。
 
@@ -170,6 +172,18 @@ vagent jobs retry-query JOB_ID
 vagent jobs retry-download JOB_ID
 vagent jobs work
 ```
+
+分镜、素材与用量命令同样不需要 DeepSeek Key，也不启动模型、Worker 或 MCP：
+
+```powershell
+vagent storyboard show [-s PROJECT] [--storyboard STORYBOARD_ID]
+vagent shots redo SHOT_ID [-s PROJECT] [--request-id REQUEST_ID]
+vagent assets list [-s PROJECT]
+vagent assets import PATH [PATH ...] [-s PROJECT]
+vagent usage --project [PROJECT]
+```
+
+`storyboard show`、`assets list`、`usage --project` 只读本地状态。`shots redo SHOT_ID` 由镜头 ID 解析所属分镜与项目，为该镜头新增一个 `ShotVersion` 并登记一个新 Job，其他镜头的版本、Job 与媒体不动；它只登记、不提交上游，由 Web 或 `jobs work` 继续推进。省去 `--request-id` 时每次调用都是一次新的重做；带上该参数即可让重试幂等（同一请求 ID 重放原结果，不重复登记）。`assets import` 校验魔数/尺寸/宽高比/大小后按 `(项目, SHA-256)` 去重，命中即复用原素材；同一张图片重新导入还能恢复被删除或损坏的素材文件。`usage --project` 汇总整个数据目录（按项目聚合则给出项目 ID），只读取 Jobs、估算、账单状态、分镜、素材与模型 Token 覆盖率，不做外部调用。
 
 `list/get` 读取本地状态并核对媒体可用性，发现文件缺失或损坏时保存新的可用性 revision；不发起上游 HTTP。`retry-query` 只恢复原任务查询窗口，`retry-download` 只登记原媒体的恢复窗口；这四个命令均不启动 Worker、模型或 MCP。`jobs work` 或 Web 持续推进查询、下载与有效等待；缺少原模型配置时继续推进 Job，保留等待结果。启动模式控制新 Run 的工具，已登记 mock Job 即使在 off 模式启动也继续跟踪。
 
@@ -328,6 +342,12 @@ src/vagent/
   video/media_http.py C2：HTTPS 来源策略、公网 DNS 固定连接与流量上限
   video/media_response.py C2：已核验文件的 GET/HEAD、Range 与下载响应
   video/mp4.py C2：有界 MP4 结构/样本校验与实测元数据
+  video/storyboards.py D1：分镜/镜头/素材域契约、只增不改版本与提交级不变量
+  video/views.py D1/D3：工具与本地客户端共用的 Job/分镜有界投影（含镜头媒体派生）
+  video/assets.py D3：素材库导入（魔数/尺寸/哈希校验、按项目去重、文件恢复）与只读读取
+  video/clients.py D3：显式本地动作（逐镜头重做、批量登记）的客户端 Run 与幂等重放
+  video/usage.py D3：Jobs、估算/账单状态、分镜与素材、模型 Token 覆盖率的读取侧聚合
+  web/storyboard-state.js D3：分镜面板的纯状态逻辑（分组、缩略图、连播、估算汇总）
   video/providers/mock.py B1：独立持久上游账本与服务端模拟轨迹
   video/providers/wan.py C1：固定北京协议、独立 HTTP 客户端与提交歧义处理
 skills/        内置 SKILL.md，随 wheel 分发
@@ -403,7 +423,9 @@ B1 的 JobService、MockVideoAdapter 和 JobWorker 可通过 Python API 独立�
 .\.venv\Scripts\python.exe -m ruff format --check src/vagent tests scripts
 node --check web/app.js
 node --check web/job-state.js
+node --check web/storyboard-state.js
 node --test tests/test_job_state.mjs
+node --test tests/test_storyboard_state.mjs
 .\.venv\Scripts\python.exe -m pytest -q
 .\.venv\Scripts\python.exe -m build --no-isolation --outdir dist/python
 ```

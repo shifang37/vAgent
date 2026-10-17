@@ -154,3 +154,19 @@ mock/legacy 变体保留原工具名与描述；M2 live 变体的 `toolsVersion/
 未确认（保留为 D4 验证项，不作肯定承诺）：当前账号对 i2v 的模型授权与 IP 权限；i2v 真实结果主机与重定向（沿用 `wan-result-hosts-v2` 允许集，若不符则在 D4 追加策略版本）；`first_frame` 真实输出画幅与 audio 表现；实际账单（保持 `unknown`）；免费额度是否抵扣。
 
 [D4]: https://help.aliyun.com/zh/model-studio/get-temporary-file-url
+
+## 12. D3 实现补记（2026-10-17）
+
+D3 实现素材库写入侧、用量统计读取侧与 CLI/Web 分镜界面。以下是对本文的细化，不改写任何冻结数值、版本号或既有语义。
+
+- **素材库写入侧**：`AssetService` 提供受信本地导入（`vagent assets import PATH…`、Web multipart 上传）与只读读取；导入校验按第 7 节：魔数（`inspect_image`）、尺寸/宽高比/单边像素/大小/PNG 透明通道（与提交前同一 `ImageInputRule`）、SHA-256 计算，`(projectId, sha256)` 命中即复用原 assetId 且不重写文件。跨项目复用按 `(projectId, sha256)` 各自建记录。
+- **素材文件恢复**：记录存在但其文件缺失或损坏时，重新导入同一张图片（字节相同、SHA-256 相同）会**按原记录路径恢复文件**，返回同一 `assetId` 与 `repaired=true`；删除或改写素材记录仍被 `ASSET_IMMUTABLE`/`ASSET_CONFLICT` 拒绝。这样第 7 节的不可读语义有本地恢复路径，不需要删除记录。
+- **素材读取接口与错误码**：`GET /api/assets`（可选 `projectId`）、`POST /api/assets`（multipart、CSRF、`projectId` + `file`，正文上限 `IMAGE_MAX_BYTES + 64 KiB`）、`GET /api/assets/{id}`（元数据 + `available` + `contentUrl`）、`GET/HEAD /api/assets/{id}/content`（单 Range、`?download=1`，与媒体接口同一实现，MIME 与扩展名取自素材记录）。不存在为 404 `ASSET_NOT_FOUND`，文件缺失或损坏为 410 `ASSET_UNAVAILABLE`；任何响应都不含 `relativePath` 或本地绝对路径。CLI 为 `vagent assets list|import`。
+- **素材读取工具 `asset_read`**：实现第 8 节的“素材读取”行。只读，参数 `assetId?`、`projectId?`；返回 assetId、projectId、kind、mimeType、sizeBytes、dimensions、createdAt、source、assetFormatVersion，**不含 sha256、本地路径或私有 URL**，按导入时间倒序截断到 50 条并返回 `total`/`truncated`。工具不能导入、删除或改写素材。
+- **客户端 Run（CLI/Web 的显式重做与批量登记）**：为一次显式用户动作创建一条持久 Run（`model="local-client"`、`status=completed`、0 模型步，记录当前 `videoMode` 与 4/4 `toolFeatures`），**不更新会话的 `latestRunId`**，因此对话 Run 的恢复路径不受影响；第 5 节的三重上限按该 Run 计算（每次显式请求都是新的额度）。Run ID 由 `(sessionId, clientRequestId)` 确定性派生（UUIDv5），同一请求重放原结果、不重复登记；同一请求 ID 用于另一个镜头操作返回 `OPERATION_CONFLICT`。CLI `shots redo SHOT_ID` 由镜头 ID 解析所属分镜、项目与当前版本（可不传 revision），Web 必须回传其渲染的 `expectedRevision`（过期即 `VERSION_CONFLICT`，不会以更新的分镜静默继续）。
+- **估算预览**：`GET /api/storyboards/{id}/estimate`（`projectId`、`storyboardVersion`、`shotIds`）只读返回逐镜头估算、合计与新 Run 的额度快照，供确认对话框使用；它不登记、不提交、不写状态。真正登记时服务端重新校验同样的上限。
+- **分镜读取接口**：会话快照新增 `storyboard`；另有 `GET /api/storyboards?projectId=` 与 `GET /api/storyboards/{id}?projectId=`。三者与 `storyboard_read` 共用 `video/views.py` 的同一投影：按 order 排序、逐镜头版本历史（`jobId`、`status`、`mediaAvailable`、`mediaUrl`、`current`）与 `latest`。**镜头媒体始终由 Job 派生**：M2 不写 `ShotVersion.mediaId`（保持 null），`mediaUrl` 只在对应 Job 当前可用性为 available 时出现。
+- **`JobResultV3`**：D2 的交付实现只为单镜头结果建模，`JobV3.result` 沿用 `JobResultV2` 时其 `spec`（`VideoSpecV2`）无法等于镜头的 `ShotSpecV3`，M2 真实镜头因此永远无法进入 `succeeded`。D3 新增 `JobResultV3(JobResultV2)`（`spec: ShotSpecV3`）并把 `JobV3.result` 指向它，媒体提交按 Job 类型选择结果模型；`JobV2`/M1-C 结果与校验不变。
+- **用量统计**：新增读取侧聚合（`vagent/video/usage.py`）与 `GET /api/usage?projectId=`、CLI `vagent usage --project [PROJECT]`（省略取值时汇总整个数据目录）。聚合 Jobs 计数与状态、按模式、登记估算合计与按报价版本、`actualStatus`（未取得账单保持 unknown，不与估算混同）、分镜与镜头版本数、素材数、模型 Token 覆盖率与加权缓存命中率、按日记录（最近 31 天）。不调用模型或供应商，不写状态。
+- **界面**：Web 新增分镜面板（顺序、状态、缩略图、逐镜头版本、播放/下载/重做、按镜头分组的 Job 卡）、批量生成确认对话框（逐镜头与合计估算 + 剩余额度）、客户端序列连播（按顺序播放各镜头本地 MP4，不做服务端拼接；尚无媒体的镜头明确标注并跳过）、素材库页与用量面板；`web/storyboard-state.js` 承载可测试的纯状态逻辑（`tests/test_storyboard_state.mjs`）。
+- **版本边界**：M2 视图仍为工具/规则 **4/4**、能力版本 `wan27-shot-beijing-v2`、`executionVersion=3`、`contextVersion=2`、`schemaVersion=4`；D3 在同一个 4/4 版本内新增只读工具并扩展规则文本。与 D1 记录的边界一致：**D2 构建录制的 M2 Run 不承诺跨 D3 恢复**——签名不再匹配时显式恢复返回 `RESUME_CONFIG_CHANGED`，绝不会以不同工具集静默继续（D2 构建的签名哈希保存在 `tests/test_m2_compatibility.py` 作为证据）；**pre-M2（execution v2、工具 1/2/3）继续逐字节可恢复**。
