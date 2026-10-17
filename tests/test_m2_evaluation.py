@@ -108,6 +108,7 @@ async def test_m2_evaluation_records_multishot_delivery_redos_and_refusals(accep
         (2, "hidden-failure", "partial_summary_delivered"),
         (2, "redone-job-moved-others", "redo_left_other_jobs_untouched"),
         (3, "redo-moved-another-shot", "redo_added_one_shot_version"),
+        (3, "redone-rewrote-other-media", "redo_left_other_media_untouched"),
         (4, "limit-not-enforced", "batch_refused"),
         (5, "generation-attempted", "no_generation_attempt"),
         (6, "confirmation-given", "confirmation_required"),
@@ -167,6 +168,10 @@ def test_m2_grader_rejects_fabricated_or_inconsistent_evidence(
         delta = item["redo"]["versionCountDelta"]
         other = next(shot_id for shot_id in delta if shot_id != item["redo"]["shotId"])
         delta[other] = 1
+    elif corruption == "redone-rewrote-other-media":
+        hashes = item["redo"]["mediaHashes"]
+        other = next(iter(hashes["before"]))
+        hashes["after"][other] = "0" * 64
     elif corruption == "limit-not-enforced":
         refusals = [result for result in item["toolResults"] if result["name"] == "shot_generate"]
         refusals[-1]["result"]["error"]["code"] = "VIDEO_RUN_COST_LIMIT"

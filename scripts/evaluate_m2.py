@@ -569,7 +569,6 @@ def job_identity(job):
         "submitAttempts": job.get("submitAttempts"),
         "mediaAvailable": job.get("mediaAvailable"),
         "mediaId": download.get("mediaId"),
-        "mediaSha": (job.get("result") or {}).get("mediaRefs", [{}])[0].get("sha256"),
     }
 
 
@@ -1075,6 +1074,8 @@ def redo_checks(case, item):
     target = redo.get("shotId")
     before, after = redo.get("before") or {}, redo.get("after") or {}
     delta = redo.get("versionCountDelta") or {}
+    hashes = redo.get("mediaHashes") or {}
+    untouched_bytes = hashes.get("before") or {}
     checks = {
         "redo_registered_one_job": bool(redo.get("body"))
         and len(redo["body"].get("shots", [])) == 1
@@ -1083,6 +1084,11 @@ def redo_checks(case, item):
         and all(count == 0 for shot_id, count in delta.items() if shot_id != target),
         "redo_left_other_jobs_untouched": bool(before)
         and all(before[job_id] == after.get(job_id, {}).get("identity") for job_id in before),
+        "redo_left_other_media_untouched": bool(untouched_bytes)
+        and all(
+            (hashes.get("after") or {}).get(media_id) == digest
+            for media_id, digest in untouched_bytes.items()
+        ),
         "redo_replay_is_idempotent": replay.get("body") == redo.get("body")
         and replay.get("jobs") == replay.get("jobsAfterReplay"),
         "redo_new_job_delivered": bool(redo.get("delivered"))
@@ -1236,6 +1242,7 @@ async def redo_shot(service, item, case, *, live, clock):
     target = view["shots"][case.redo_index - 1]["id"]
     before_jobs = {job["id"]: job_identity(job) for job in item["jobs"]}
     versions_before = dict(item["shotVersions"])
+    hashes_before = media_file_hashes(service.store.home, service.store.snapshot())
     request = {
         "clientRequestId": f"eval-{case.name}-redo",
         "storyboardId": view["storyboardId"],
@@ -1247,6 +1254,7 @@ async def redo_shot(service, item, case, *, live, clock):
     jobs_after = {job["jobId"]: job_identity(job) for job in service.jobs(case.name)}
     state = service.store.snapshot()
     record = state["storyboards"][view["storyboardId"]]
+    hashes_after = media_file_hashes(service.store.home, state)
     after_versions = {
         shot_id: len([entry for entry in record["shotVersions"] if entry["shotId"] == shot_id])
         for shot_id in versions_before
@@ -1264,6 +1272,7 @@ async def redo_shot(service, item, case, *, live, clock):
             shot_id: after_versions[shot_id] - versions_before[shot_id] for shot_id in versions_before
         },
         "delivered": next((job for job in service.jobs(case.name) if job["jobId"] == new_job), None),
+        "mediaHashes": {"before": hashes_before, "after": hashes_after},
     }
     replay = service.redo_shot(case.name, target, request)
     redo["replay"] = {
