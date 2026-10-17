@@ -67,7 +67,7 @@ class Harness:
         for index, job_id in enumerate(job_ids):
             if writes:
                 calls.append(save_call(f"save-{index}"))
-            calls.append({"id": f"await-{index}", "name": "await_job", "args": {"jobId": job_id}})
+            calls.append({"id": f"await-{index}", "name": "await_job", "args": {"jobIds": [job_id]}})
         if writes:
             calls.append(save_call(f"save-{len(job_ids)}"))
 
@@ -399,7 +399,7 @@ async def test_rewaiting_after_timeout_is_a_new_call_with_cumulative_budget(stor
         if step < 2:
             if step == 1:
                 assert json.loads(messages[-1].content)["error"]["code"] == "JOB_WAIT_TIMEOUT"
-            return tool_call("await_job", {"jobId": job_id}, call_id="same-id")
+            return tool_call("await_job", {"jobIds": [job_id]}, call_id="same-id")
         assert json.loads(messages[-1].content)["data"]["jobId"] == job_id
         return AIMessage(content="done")
 
@@ -542,7 +542,9 @@ async def wait_for_status(service, run_id, status):
 async def test_application_exit_preserves_wait_and_startup_resumes_original_run(tmp_path):
     config = Config(home=tmp_path, api_key=None, video_mode="mock")
     job_id = None
-    original_model = ScriptedModel(lambda *_: tool_call("await_job", {"jobId": job_id}, call_id="original"))
+    original_model = ScriptedModel(
+        lambda *_: tool_call("await_job", {"jobIds": [job_id]}, call_id="original")
+    )
     async with ApplicationService.open(config, model=original_model) as service:
         await service.job_worker.stop()  # B3 controls the provider completion boundary explicitly.
         adapter = MockVideoAdapter(service.store, scenario=MockScenario(states=["succeeded"]))
@@ -577,7 +579,7 @@ async def test_application_exit_preserves_wait_and_startup_resumes_original_run(
 async def test_application_stop_wait_persists_before_returning(tmp_path):
     config = Config(home=tmp_path, api_key=None, video_mode="mock")
     job_id = None
-    model = ScriptedModel(lambda *_: tool_call("await_job", {"jobId": job_id}))
+    model = ScriptedModel(lambda *_: tool_call("await_job", {"jobIds": [job_id]}))
     async with ApplicationService.open(config, model=model) as service:
         job_id = service.video_jobs.generate(
             video_request(MockVideoAdapter(service.store)), context=video_run(service.store)
@@ -598,7 +600,7 @@ async def test_application_configuration_validation_defers_automatic_continuatio
     job_id = None
     model = ScriptedModel(
         lambda messages, step: (
-            tool_call("await_job", {"jobId": job_id}) if step == 0 else AIMessage(content="done")
+            tool_call("await_job", {"jobIds": [job_id]}) if step == 0 else AIMessage(content="done")
         )
     )
     async with ApplicationService.open(config, model=model) as service:
@@ -680,7 +682,7 @@ async def test_application_exit_during_preparation_reconstructs_interrupt(tmp_pa
     paused = asyncio.Event()
     original = AsyncSqliteSaver.aput_writes
     job_id = None
-    model = ScriptedModel(lambda *_: tool_call("await_job", {"jobId": job_id}))
+    model = ScriptedModel(lambda *_: tool_call("await_job", {"jobIds": [job_id]}))
 
     async def suspend_interrupt_write(self, config, writes, task_id, task_path=""):
         if any(channel == "__interrupt__" for channel, _ in writes):

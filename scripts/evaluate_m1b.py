@@ -141,7 +141,7 @@ class FixtureModel:
         if case.name == "register-and-reply":
             return AIMessage(content=f"模拟任务已登记：{job_id}，没有真实媒体。")
         if "await_job" not in by_name:
-            return calls(("await_job", {"jobId": job_id}))
+            return calls(("await_job", {"jobIds": [job_id]}))
         result = by_name["await_job"]
         if not result["ok"]:
             return AIMessage(content=f"模拟任务 {job_id} 生成失败：{result['error']['code']}。没有真实媒体。")
@@ -309,7 +309,9 @@ def grade(case, item, *, offline):
     awaited = [r for r in results if r["name"] == "await_job"]
     checks.update(
         await_original_job=bool(awaited)
-        and all(call["arguments"] == {"jobId": job["id"]} for call in trace if call["name"] == "await_job"),
+        and all(
+            call["arguments"] == {"jobIds": [job["id"]]} for call in trace if call["name"] == "await_job"
+        ),
         durable_deliveries_match=all(
             binding["status"] == "delivered"
             and len([r for r in awaited if r["id"] == binding["context"]["toolCallId"]]) == 1

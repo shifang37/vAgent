@@ -23,6 +23,12 @@ VIDEO_SETTINGS = {
     "videoModel": ("video_model", "VAGENT_VIDEO_MODEL", WAN_MODEL),
     "videoRegion": ("video_region", "VAGENT_VIDEO_REGION", WAN_REGION),
     "videoMaxJobCost": ("video_max_job_cost", "VAGENT_VIDEO_MAX_JOB_COST", "3.00"),
+    "videoMaxNewJobsPerRun": (
+        "video_max_new_jobs_per_run",
+        "VAGENT_VIDEO_MAX_NEW_JOBS_PER_RUN",
+        4,
+    ),
+    "videoMaxRunCost": ("video_max_run_cost", "VAGENT_VIDEO_MAX_RUN_COST", "12.00"),
 }
 _SETTINGS = {"apiKey": ("api_key", None, None), "model": ("model", None, "deepseek-flash"), **VIDEO_SETTINGS}
 
@@ -46,6 +52,8 @@ class Config:
     video_model: str = WAN_MODEL
     video_region: str = WAN_REGION
     video_max_job_cost: str = "3.00"
+    video_max_new_jobs_per_run: int = 4
+    video_max_run_cost: str = "12.00"
 
     def __post_init__(self):
         if self.video_mode not in {"off", "mock", "live"}:
@@ -76,6 +84,8 @@ class LocalSettings(BaseModel):
     videoModel: Literal["wan2.7-t2v-2026-06-12"] | None = None
     videoRegion: Literal["cn-beijing"] | None = None
     videoMaxJobCost: Money | None = None
+    videoMaxNewJobsPerRun: int | None = Field(default=None, ge=1, le=4)
+    videoMaxRunCost: Money | None = None
 
 
 class ConfigUpdate(LocalSettings):

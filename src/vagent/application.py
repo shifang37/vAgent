@@ -26,13 +26,15 @@ from vagent.skills import SkillCatalog, register_skill_tool
 from vagent.storage import FileStore, now
 from vagent.tools import create_project_tools
 from vagent.usage import summarize_usage
+from vagent.video.assets import asset_reference_loader
+from vagent.video.contracts import ImageInputRule
 from vagent.video.jobs import JobService
 from vagent.video.media import file_io
 from vagent.video.media_http import MediaHttpClient
 from vagent.video.media_worker import MediaWorker
 from vagent.video.providers.mock import MockVideoAdapter
 from vagent.video.providers.wan import WanAdapter
-from vagent.video.tools import register_video_tools, resolve_job_wait
+from vagent.video.tools import register_video_tools, resolve_job_wait, resolve_jobset_wait
 from vagent.video.views import job_view
 from vagent.video.worker import JobWorker
 from vagent.wait_runtime import WaitCoordinator, execution_control
@@ -91,6 +93,7 @@ class ApplicationService:
                     workspace_id=config.video_workspace_id,
                     model=config.video_model,
                     region=config.video_region,
+                    reference_loader=asset_reference_loader(store, ImageInputRule()),
                 )
             )
             video_jobs = JobService(store, [MockVideoAdapter(store), wan], config=config)
@@ -130,7 +133,10 @@ class ApplicationService:
             service.wait_coordinator = WaitCoordinator(
                 store,
                 service._waiting_runner,
-                resolvers={"job": lambda binding: resolve_job_wait(store, binding, service=video_jobs)},
+                resolvers={
+                    "job": lambda binding: resolve_job_wait(store, binding, service=video_jobs),
+                    "jobset": lambda binding: resolve_jobset_wait(store, binding, service=video_jobs),
+                },
                 on_event=service._wait_event,
             )
             stack.push_async_callback(service.aclose)

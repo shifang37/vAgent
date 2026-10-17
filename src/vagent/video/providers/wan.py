@@ -15,8 +15,10 @@ from vagent.errors import AppError
 from vagent.video.contracts import (
     WAN_ADAPTER_VERSION,
     WAN_ENDPOINT_PROFILE,
+    WAN_I2V_MODEL,
     WAN_MODEL,
     WAN_REGION,
+    WAN_SHOT_ADAPTER_VERSION,
     JobErrorV2,
     ProviderCallError,
     ProviderOutput,
@@ -24,9 +26,12 @@ from vagent.video.contracts import (
     ProviderTaskSnapshotV2,
     ProviderTimes,
     ProviderUsage,
+    ShotMediaInput,
     VideoRequestV2,
+    VideoRequestV3,
     WorkspaceId,
     wan_capabilities,
+    wan_shot_capabilities,
 )
 
 MAX_RESPONSE_BYTES = 1024 * 1024
@@ -160,6 +165,7 @@ class WanAdapter:
         model: str = WAN_MODEL,
         transport: httpx.AsyncBaseTransport | None = None,
         clock: Callable[[], datetime] = lambda: datetime.now(UTC),
+        reference_loader: Callable[[ShotMediaInput], str] | None = None,
     ):
         if workspace_id is not None:
             TypeAdapter(WorkspaceId).validate_python(workspace_id)
@@ -167,6 +173,8 @@ class WanAdapter:
             raise AppError("VIDEO_CONFIG_INVALID", "视频服务仅支持已冻结的北京地域和万相模型。")
         self._key = api_key
         self.workspace_id, self.region, self.model = workspace_id, region, model
+        # Reference images are re-proven and encoded only when a body is built.
+        self._reference_loader = reference_loader
         self.clock = clock
         self.client = httpx.AsyncClient(
             transport=transport or httpx.AsyncHTTPTransport(retries=0),
@@ -187,12 +195,28 @@ class WanAdapter:
     def capabilities(self):
         return wan_capabilities()
 
+    def shot_capabilities(self):
+        """The M2 entries this adapter also serves; the legacy entry stays registered."""
+        return wan_shot_capabilities()
+
     def check_configuration(self, request: VideoRequestV2 | None = None):
         if not self._key:
             raise AppError("VIDEO_KEY_MISSING", "请配置视频服务 Key，文本模型 Key 不能代替视频 Key。")
         if not self.workspace_id:
             raise AppError("VIDEO_WORKSPACE_REQUIRED", "请配置北京视频 Key 对应的业务空间 ID。")
-        if request is not None and (
+        if request is None:
+            return
+        if isinstance(request, VideoRequestV3):
+            if (
+                request.workspace_id != self.workspace_id
+                or request.region != self.region
+                or request.model not in {WAN_MODEL, WAN_I2V_MODEL}
+                or request.adapter_version != WAN_SHOT_ADAPTER_VERSION
+                or request.endpoint_profile != self.endpoint_profile
+            ):
+                raise AppError("VIDEO_PROVIDER_UNAVAILABLE", "缺少原镜头任务的地域、业务空间或适配器配置。")
+            return
+        if (
             request.workspace_id != self.workspace_id
             or request.region != self.region
             or request.model != self.model
@@ -341,18 +365,35 @@ class WanAdapter:
             task_id=task_id, request_id=request_id, status="succeeded", output=provider_output
         )
 
-    async def submit(self, request: VideoRequestV2, operation_key: str) -> ProviderTaskHandleV2:
-        request = VideoRequestV2.model_validate(request)
+    def _body(self, request) -> dict:
+        """The exact provider body; a shot request adds only its proofed reference frames."""
+        parameters = request.parameters.model_dump(mode="json", by_alias=True)
+        if isinstance(request, VideoRequestV3):
+            input_value = {"prompt": request.provider_prompt}
+            if request.media:
+                if self._reference_loader is None:
+                    raise AppError("VIDEO_PROVIDER_UNAVAILABLE", "缺少参考图读取器，未提交。")
+                input_value["media"] = [
+                    {"type": item.frame, "url": self._reference_loader(item)} for item in request.media
+                ]
+            if parameters.get("ratio") is None:
+                parameters.pop("ratio", None)
+            return {"model": request.model, "input": input_value, "parameters": parameters}
+        return {
+            "model": request.model,
+            "input": {"prompt": request.provider_prompt},
+            "parameters": parameters,
+        }
+
+    async def submit(self, request, operation_key: str) -> ProviderTaskHandleV2:
+        request = (
+            VideoRequestV3.model_validate(request)
+            if isinstance(request, VideoRequestV3)
+            else VideoRequestV2.model_validate(request)
+        )
         self.check_configuration(request)
         status, payload, _ = await self._request(
-            "POST",
-            SUBMIT_PATH,
-            stage="submit",
-            body={
-                "model": request.model,
-                "input": {"prompt": request.provider_prompt},
-                "parameters": request.parameters.model_dump(mode="json", by_alias=True),
-            },
+            "POST", SUBMIT_PATH, stage="submit", body=self._body(request)
         )
         output = payload.get("output")
         task_id = safe_identifier(output.get("task_id")) if isinstance(output, dict) else None

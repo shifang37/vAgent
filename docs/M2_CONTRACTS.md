@@ -6,6 +6,8 @@
 
 M1-C 已冻结语义继续有效且不被改写：单次提交、按原 task ID 查询、完整媒体落盘才 succeeded、来源允许集与下载策略、错误码与脱敏边界、`supportsIdempotentSubmit=false`、`supportsResultUrlRefresh=false`、`supportsCancel=false`。M2 只在其上扩展。
 
+**D2 实现补记（2026-10-17）**：D2 已按本文实现多镜头生成、重做与费用护栏，验收见 [M2 D2 验收](./M2_D2_ACCEPTANCE.md)。实现中对本文的细化解释如下（不改写任何冻结数值与版本号）：(1) mock Job 仍为 `contractVersion=1` 且不携带 `shotRef`，镜头与 Job 的关联由 `ShotVersion.jobId` 唯一承载；`contractVersion=3` 只用于 M2 live Job。(2) live 当前能力表只发布 `wan27-shot-beijing-v2` 的两个条目（t2v 与 i2v/flf2v 各自的模型）；冻结的 `wan27-t2v-beijing-v1` 继续注册在适配器上，使历史 Job 与新 `video_generate` 兼容路径可用，但不出现在当前能力表中。(3) `video_generate` 语义不变，仍是 M1-C 单镜头路径；M2 的多镜头一律经 `shot_generate`（`confirm=true` 必填）。(4) 逐镜头请求由服务端从已保存镜头推导：`prompt` 取 `description`（去首尾空白），`mode`/`durationSeconds` 取镜头字段，参考图取 `referenceAssetIds`（顺序即 `first_frame`、`last_frame`）。(5) 去重按 `(storyboardId, storyboardVersion, shotId)` 加冻结请求指纹，命中则复用最近一条匹配 `ShotVersion` 的 Job。(6) 重做由 `JobService.redo_shot` 实现：为当前分镜版本的目标镜头追加新 `ShotVersion` 与新 Job，其他镜头不动；日志键即该次调用的 `operation_key`，重复触发重放原结果，`expectedRevision` 过期返回 `VERSION_CONFLICT`；CLI/Web 需为一次用户重做提供 Run 上下文。(7) `await_job` 的单元素列表走 M1-C 原路径（`kind="job"` 绑定、同形返回体），多元素使用 `WaitBindingV3`（`kind="jobset"`、成员稳定排序）；等待到期返回已完成部分，运行时仅在解析器未给出结果时套用已保存的 `JOB_WAIT_TIMEOUT`。(8) 能力条目把 2–15 整数秒与 720P 全部列为已核实规格（t2v 固定 16:9，图片模式画幅由输入决定），实际可提交范围由 `videoMaxJobCost` 等上限决定。(9) 批量登记的参考图取证在同一个 Store 事务内完成（只有本地文件读取，不含任何供应商调用）。(10) M2 Run 的新真实 Job 数硬上限为 4（`LIVE_JOBS_PER_RUN`），`video` 工具版本 < 4 的 Run 仍只允许一个 Job。
+
 ## 1. 版本冻结
 
 | 维度 | 冻结规则 |

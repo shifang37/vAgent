@@ -77,7 +77,7 @@ async def main():
                         content="",
                         tool_calls=[
                             save("before"),
-                            {"id": "await", "name": "await_job", "args": {"jobId": job_id}},
+                            {"id": "await", "name": "await_job", "args": {"jobIds": [job_id]}},
                             save("after"),
                         ],
                     )

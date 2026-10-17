@@ -19,7 +19,7 @@ def context(call="generate", *, project="coffee", run="video-run"):
 
 
 def adapter(service):
-    return service._adapters[("mock", "mock-t2v")]
+    return service.default_adapter("mock", "mock-t2v")
 
 
 def test_registration_and_both_dedupe_layers_survive_restart(video_service):

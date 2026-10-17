@@ -5,7 +5,7 @@ from typing import Annotated, Literal
 
 from pydantic import Field, JsonValue, model_validator
 
-from vagent.contracts import Contract, Fingerprint, Identifier, Name, UtcTimestamp
+from vagent.contracts import Contract, Fingerprint, Identifier, JsonTuple, Name, UtcTimestamp
 from vagent.errors import AppError
 
 WAIT_EXECUTION_VERSION = 3
@@ -129,3 +129,32 @@ class WaitBinding(Contract):
         if self.status not in {"ready", "claimed", "delivered"} or self.result is None:
             raise AppError("WAIT_NOT_READY", "等待尚无可交付结果，或已停止。")
         return self.result
+
+
+class WaitBindingV3(WaitBinding):
+    """M2 set wait: one registration covering several Jobs of the same project."""
+
+    job_ids: JsonTuple[Identifier] = Field(min_length=2, max_length=16)
+
+    @model_validator(mode="after")
+    def jobset_members(self):
+        if self.resource.kind != "jobset" or len(set(self.job_ids)) != len(self.job_ids):
+            raise ValueError("A set wait requires unique Job members under a jobset resource")
+        if list(self.job_ids) != sorted(self.job_ids):
+            raise ValueError("Set wait members keep one stable sorted order")
+        return self
+
+
+StoredWait = WaitBinding | WaitBindingV3
+
+
+def parse_wait(value) -> StoredWait:
+    """Dispatch one stored wait by its resource kind; only Job sets use version 3."""
+    if isinstance(value, WaitBinding):
+        return value
+    if not isinstance(value, dict):
+        raise ValueError("Wait must be an object")
+    resource = value.get("resource")
+    if isinstance(resource, dict) and resource.get("kind") == "jobset":
+        return WaitBindingV3.model_validate(value)
+    return WaitBinding.model_validate(value)

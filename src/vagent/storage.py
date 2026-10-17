@@ -20,7 +20,7 @@ from vagent.config import assert_id
 from vagent.errors import AppError, failure
 from vagent.video.contracts import Job, MediaAsset, StoredJob
 from vagent.video.storyboards import Asset, Storyboard
-from vagent.waiting import WAIT_EXECUTION_VERSIONS, WaitBinding
+from vagent.waiting import WAIT_EXECUTION_VERSIONS, StoredWait, WaitBinding, parse_wait
 
 T = TypeVar("T")
 
@@ -214,6 +214,8 @@ class Database(DatabaseV3):
     schema_version: Literal[4]
     storyboards: dict[str, Storyboard]
     assets: dict[str, Asset]
+    # M2 adds the set wait next to the frozen single-Job binding.
+    waits: dict[str, StoredWait]
 
 
 def migrated_state(state: dict) -> dict:
@@ -317,7 +319,7 @@ class FileStore:
                                 call.update(status="interrupted", errorCode="INTERRUPTED")
                         if run.get("executionVersion") in WAIT_EXECUTION_VERSIONS:
                             bindings = [
-                                WaitBinding.model_validate(raw)
+                                parse_wait(raw)
                                 for raw in draft["waits"].values()
                                 if raw["context"]["runId"] == run["id"]
                                 and raw["autoResume"]

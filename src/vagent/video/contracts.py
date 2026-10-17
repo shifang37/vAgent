@@ -316,6 +316,25 @@ WAN_ENDPOINT_PROFILE = "beijing-workspace-v1"
 WAN_PRICE_VERSION = "wan27-beijing-720p-20261010"
 WAN_PRICE_SOURCE = "https://help.aliyun.com/zh/model-studio/model-pricing#ba6f7744d5e0o"
 WAN_PROMPT_PREFIX = "生成单镜头视频。\n"
+
+# M2 (D2) multi-shot generation keeps one shot per Job and one verified entry per
+# mode. The first-frame model is the only verified image input path; clip
+# extension stays cut, so `first_clip` never appears in a request.
+WAN_I2V_MODEL = "wan2.7-i2v-2026-04-25"
+WAN_SHOT_CAPABILITIES_VERSION = "wan27-shot-beijing-v2"
+WAN_SHOT_ADAPTER_VERSION = "wan-http-v2"
+WAN_I2V_PRICE_VERSION = "wan27-i2v-beijing-720p-20261016"
+SHOT_DURATION_MIN = 2
+SHOT_DURATION_MAX = 15
+SHOT_DURATIONS = tuple(range(SHOT_DURATION_MIN, SHOT_DURATION_MAX + 1))
+# Frozen ceiling: one generation Run registers at most this many real Jobs.
+LIVE_JOBS_PER_RUN = 4
+IMAGE_MIME_TYPES = ("image/png", "image/jpeg", "image/webp")
+IMAGE_MIN_SIDE = 240
+IMAGE_MAX_SIDE = 8000
+IMAGE_MAX_BYTES = 20 * 1024 * 1024
+IMAGE_ASPECT_BOUNDS = (1, 8)
+
 # v2 adds the documented Beijing result host; v1 stays valid for historical jobs.
 SOURCE_POLICY_VERSION = "wan-result-hosts-v2"
 MEDIA_VALIDATION_VERSION = "mp4-avc-v1"
@@ -513,6 +532,236 @@ def wan_capabilities() -> VideoCapabilitiesV2:
         model=WAN_MODEL,
         capabilities_version=WAN_CAPABILITIES_VERSION,
         specs=(VideoSpecV2(duration_seconds=5, resolution="720p", aspect_ratio="16:9"),),
+    )
+
+
+class ShotSpecV3(Contract):
+    """One shot's verified specification; image modes inherit the input frame size."""
+
+    mode: Literal["t2v", "i2v", "flf2v"] = "t2v"
+    duration_seconds: int = Field(ge=SHOT_DURATION_MIN, le=SHOT_DURATION_MAX)
+    resolution: Literal["720P"] = "720P"
+    aspect_ratio: Literal["16:9"] | None = "16:9"
+
+    @model_validator(mode="after")
+    def ratio_follows_mode(self):
+        if (self.mode == "t2v") != (self.aspect_ratio == "16:9"):
+            raise ValueError("Only text-to-video fixes a 16:9 output frame")
+        return self
+
+
+class ImageInputRule(Contract):
+    """Published reference-image bounds; the same bounds are enforced before submission."""
+
+    mime_types: JsonTuple[Literal["image/png", "image/jpeg", "image/webp"]] = IMAGE_MIME_TYPES
+    min_side: int = Field(default=IMAGE_MIN_SIDE, ge=1)
+    max_side: int = Field(default=IMAGE_MAX_SIDE, ge=1)
+    max_bytes: int = Field(default=IMAGE_MAX_BYTES, gt=0)
+    min_aspect: int = Field(default=IMAGE_ASPECT_BOUNDS[0], ge=1)
+    max_aspect: int = Field(default=IMAGE_ASPECT_BOUNDS[1], ge=1)
+    allows_alpha: bool = False
+
+    @model_validator(mode="after")
+    def ordered_bounds(self):
+        if self.min_side > self.max_side or self.min_aspect > self.max_aspect:
+            raise ValueError("Image bounds must be ordered")
+        return self
+
+
+class WanParametersV3(Contract):
+    # These aliases are the exact provider protocol, not the public camelCase API.
+    resolution: Literal["720P"] = "720P"
+    ratio: Literal["16:9"] | None = None
+    duration: int = Field(ge=SHOT_DURATION_MIN, le=SHOT_DURATION_MAX)
+    prompt_extend: bool = Field(default=False, alias="prompt_extend")
+    watermark: bool = True
+    seed: int = Field(default=0, ge=0, le=0)
+
+    @model_validator(mode="after")
+    def fixed_parameters(self):
+        if self.prompt_extend or not self.watermark:
+            raise ValueError("Shot requests require prompt_extend=false and watermark=true")
+        return self
+
+
+class ImageSize(Contract):
+    width: int = Field(ge=1)
+    height: int = Field(ge=1)
+
+
+class ShotGenerationArgs(Contract):
+    """Public arguments of one batch generation call; only shot IDs are caller-chosen."""
+
+    storyboard_id: Identifier
+    storyboard_version: int = Field(ge=1)
+    shot_ids: JsonTuple[Identifier] = Field(min_length=1, max_length=64)
+    confirm: bool = False
+
+    @model_validator(mode="after")
+    def unique_shots(self):
+        if len(set(self.shot_ids)) != len(self.shot_ids):
+            raise ValueError("Shot IDs must be unique inside one generation call")
+        return self
+
+
+class ShotRedoArgs(Contract):
+    """One explicit user redo: the target shot plus the revision the caller read."""
+
+    storyboard_id: Identifier
+    storyboard_version: int = Field(ge=1)
+    shot_id: Identifier
+    expected_revision: int = Field(ge=0)
+    client_request_id: Identifier
+
+
+class ShotMediaInput(Contract):
+    """A frozen reference to an imported asset; the bytes stay in the local asset store."""
+
+    frame: Literal["first_frame", "last_frame"]
+    asset_id: MediaId
+    mime_type: Literal["image/png", "image/jpeg", "image/webp"]
+    sha256: Fingerprint
+    size_bytes: int = Field(gt=0)
+    size: ImageSize
+
+
+MODE_FRAMES = {"t2v": (), "i2v": ("first_frame",), "flf2v": ("first_frame", "last_frame")}
+SHOT_MODES = ("t2v", "i2v", "flf2v")
+
+
+class VideoRequestV3(Contract):
+    """One frozen shot request: the shot's intent plus the server-selected execution."""
+
+    provider: Literal["wan"] = "wan"
+    model: Name
+    capabilities_version: Literal["wan27-shot-beijing-v2"]
+    prompt: str = Field(min_length=1, max_length=4991)
+    spec: ShotSpecV3
+    source_refs: JsonTuple[ArtifactRef] = Field(default=(), max_length=16)
+    region: Literal["cn-beijing"] = "cn-beijing"
+    workspace_id: WorkspaceId
+    endpoint_profile: Literal["beijing-workspace-v1"] = "beijing-workspace-v1"
+    adapter_version: Literal["wan-http-v2"] = "wan-http-v2"
+    provider_prompt: str = Field(min_length=10, max_length=5000)
+    parameters: WanParametersV3
+    media: JsonTuple[ShotMediaInput] = Field(default=(), max_length=2)
+
+    @model_validator(mode="after")
+    def complete_request(self):
+        if self.model != (WAN_MODEL if self.spec.mode == "t2v" else WAN_I2V_MODEL):
+            raise ValueError("The frozen shot request must use the verified model of its mode")
+        if self.provider_prompt != WAN_PROMPT_PREFIX + self.prompt:
+            raise ValueError("A shot prompt is the fixed prefix plus the shot description")
+        if (self.parameters.duration, self.parameters.resolution) != (
+            self.spec.duration_seconds,
+            self.spec.resolution,
+        ):
+            raise ValueError("Frozen parameters must match the shot specification")
+        if tuple(item.frame for item in self.media) != MODE_FRAMES[self.spec.mode]:
+            raise ValueError("A shot mode requires its exact ordered reference frames")
+        if len({item.asset_id for item in self.media}) != len(self.media):
+            raise ValueError("Reference assets must be unique per shot")
+        if self.spec.mode == "t2v":
+            if self.parameters.ratio != "16:9":
+                raise ValueError("Text-to-video sends the frozen 16:9 ratio")
+        elif self.parameters.ratio is not None:
+            raise ValueError("Image modes must not send a ratio; the input frame decides it")
+        return self
+
+    def intent_fingerprint(self) -> str:
+        return canonical_fingerprint(
+            {
+                "intentVersion": 3,
+                "prompt": self.prompt,
+                "spec": self.spec.model_dump(mode="json", by_alias=True),
+                "media": [
+                    {"frame": item.frame, "assetId": item.asset_id, "sha256": item.sha256}
+                    for item in self.media
+                ],
+            }
+        )
+
+    def fingerprint(self) -> str:
+        return canonical_fingerprint(
+            {"requestVersion": 3, "request": self.model_dump(mode="json", by_alias=True)}
+        )
+
+
+class VideoCapabilitiesV3(VideoCapabilitiesV2):
+    """One verified M2 entry: text-to-video or first-frame/first-and-last-frame."""
+
+    mode: Literal["live"] = "live"
+    capabilities_version: Literal["wan27-shot-beijing-v2"] = WAN_SHOT_CAPABILITIES_VERSION
+    shot_modes: JsonTuple[Literal["t2v", "i2v", "flf2v"]] = Field(min_length=1, max_length=3)
+    specs: JsonTuple[ShotSpecV3] = Field(min_length=1, max_length=128)
+    input_types: JsonTuple[Literal["text", "image"]] = ("text",)
+    image_input: ImageInputRule | None = None
+
+    @model_validator(mode="after")
+    def unique_capabilities(self):
+        if not self.input_types or len(set(self.input_types)) != len(self.input_types):
+            raise ValueError("Input types must be unique and non-empty")
+        if len(set(self.specs)) != len(self.specs) or len(set(self.shot_modes)) != len(self.shot_modes):
+            raise ValueError("Complete specification combinations and modes must be unique")
+        if {item.mode for item in self.specs} != set(self.shot_modes):
+            raise ValueError("Every declared mode needs at least one verified specification")
+        if ("image" in self.input_types) != (self.image_input is not None):
+            raise ValueError("Image input modes publish their exact image constraints")
+        return self
+
+
+def shot_price(rate: VideoPrice, duration: int) -> VideoPrice:
+    """The per-second rate applied to one shot's verified duration."""
+    return VideoPrice(
+        currency=rate.currency,
+        unit=rate.unit,
+        unit_price=rate.unit_price,
+        quantity=str(duration),
+        amount=_money(Decimal(rate.unit_price) * duration),
+        price_version=rate.price_version,
+        checked_at=rate.checked_at,
+        source_url=rate.source_url,
+    )
+
+
+def _shot_rate(price_version: str) -> VideoPrice:
+    return VideoPrice(
+        unit_price="0.60",
+        quantity="1",
+        amount="0.60",
+        price_version=price_version,
+        checked_at="2026-10-16",
+        source_url=WAN_PRICE_SOURCE,
+    )
+
+
+def wan_shot_capabilities() -> tuple[VideoCapabilitiesV3, VideoCapabilitiesV3]:
+    """Two verified live entries: text-to-video, and the image model for i2v/flf2v."""
+    text_specs = tuple(
+        ShotSpecV3(mode="t2v", duration_seconds=duration, aspect_ratio="16:9") for duration in SHOT_DURATIONS
+    )
+    image_specs = tuple(
+        ShotSpecV3(mode=mode, duration_seconds=duration, aspect_ratio=None)
+        for mode in ("i2v", "flf2v")
+        for duration in SHOT_DURATIONS
+    )
+    return (
+        VideoCapabilitiesV3(
+            provider="wan",
+            model=WAN_MODEL,
+            shot_modes=("t2v",),
+            specs=text_specs,
+            price=_shot_rate(WAN_PRICE_VERSION),
+        ),
+        VideoCapabilitiesV3(
+            provider="wan",
+            model=WAN_I2V_MODEL,
+            shot_modes=("i2v", "flf2v"),
+            specs=image_specs,
+            input_types=("text", "image"),
+            image_input=ImageInputRule(),
+            price=_shot_rate(WAN_I2V_PRICE_VERSION),
+        ),
     )
 
 
@@ -761,6 +1010,113 @@ LiveJobStatus = Literal[
 ]
 
 
+def _coherent_live_state(job: "JobV2 | JobV3") -> None:
+    if datetime.fromisoformat(job.updated_at) < datetime.fromisoformat(job.created_at):
+        raise ValueError("Job cannot be updated before creation")
+    if job.submit_attempts != (0 if job.status == "pending_submit" else 1):
+        raise ValueError("Only one durably recorded submission is allowed")
+    if job.submit_attempts:
+        if (
+            job.submission_started_at is None
+            or job.query_deadline_at is None
+            or (
+                datetime.fromisoformat(job.query_deadline_at)
+                - datetime.fromisoformat(job.submission_started_at)
+            )
+            != timedelta(hours=24)
+        ):
+            raise ValueError("Submission records a fixed 24-hour query window")
+    elif job.submission_started_at is not None or job.query_deadline_at is not None:
+        raise ValueError("Unsubmitted jobs have no submission/query window")
+    if job.status in {"pending_submit", "submitting", "unknown"} and job.provider_task_id is not None:
+        raise ValueError("Unconfirmed submission cannot have a confirmed task ID")
+    if (
+        job.status in {"queued", "running", "downloading", "download_failed", "succeeded"}
+        and job.provider_task_id is None
+    ):
+        raise ValueError("Accepted jobs require the original task ID")
+    if (job.status == "succeeded") != (job.result is not None):
+        raise ValueError("Only committed local success contains a result")
+    generated = job.status in {"downloading", "download_failed", "succeeded"}
+    if generated != (job.provider_output is not None) or generated != (job.download is not None):
+        raise ValueError("Cloud success must atomically register one output and download intent")
+    if generated:
+        if job.provider_output.task_id != job.provider_task_id or job.last_provider_status != "SUCCEEDED":
+            raise ValueError("Private output must belong to the confirmed successful task")
+        if job.download.relative_path != f"media/{job.context.project_id}/{job.download.media_id}.mp4":
+            raise ValueError("Download location must be derived from server IDs")
+        if job.download.window_attempts > job.download_policy.max_attempts_per_window:
+            raise ValueError("Download retries cannot exceed the saved window")
+        if job.download.prepared and job.download.prepared.size_bytes > job.download_policy.max_bytes:
+            raise ValueError("Prepared media cannot exceed the frozen resource limit")
+        if job.cost.provider_usage != job.provider_output.usage:
+            raise ValueError("Provider usage comes only from the original task output")
+    if job.result is not None and (
+        job.result.request_fingerprint != job.request_fingerprint
+        or job.result.spec != job.request.spec
+        or job.result.source_refs != job.request.source_refs
+        or job.result.media_refs[0].media_id != job.download.media_id
+        or (not job.download.repair and job.download.phase != "committed")
+    ):
+        raise ValueError("Local result and download must retain the Job's provenance")
+    if job.status != "succeeded" and (
+        job.media_availability.status == "available" or (job.download and job.download.repair)
+    ):
+        raise ValueError("Media is available or repairable only after its first local delivery")
+    if job.status in {"unknown", "failed", "download_failed"}:
+        if job.error is None or job.error.stage == "query":
+            raise ValueError("Terminal failure requires the correct error stage")
+        if job.status == "unknown" and (
+            job.error.stage != "submit" or job.error.code != "SUBMISSION_UNKNOWN"
+        ):
+            raise ValueError("Unknown means submission uncertainty")
+        if job.status == "failed" and (
+            job.error.stage not in {"submit", "generate"}
+            or (job.error.stage == "generate") != bool(job.provider_task_id)
+        ):
+            raise ValueError("Only a confirmed generation failure has a task ID")
+        if job.status == "download_failed" and (
+            job.error.stage != "download" or job.download.phase != "failed"
+        ):
+            raise ValueError("Download failure must retain its failed download intent")
+    elif job.error is not None and (
+        job.status not in {"queued", "running"}
+        or job.error.stage != "query"
+        or job.query_state not in {"retrying", "paused"}
+    ):
+        raise ValueError("Query errors preserve the last confirmed generation state")
+    active = job.status in {"queued", "running"}
+    if (job.query_state != "idle") != active:
+        raise ValueError("Only unfinished cloud tasks have a query lifecycle")
+    if (job.query_state in {"polling", "retrying"}) != (job.next_poll_at is not None):
+        raise ValueError("Only scheduled queries have a next poll time")
+    if (job.query_state == "paused") != (job.query_pause_reason is not None):
+        raise ValueError("A paused query must preserve its reason")
+    if job.query_started_at is not None and (
+        job.query_state not in {"polling", "retrying"}
+        or not job.query_attempts
+        or datetime.fromisoformat(job.query_started_at) > datetime.fromisoformat(job.updated_at)
+    ):
+        raise ValueError("In-flight queries need a persisted attempt")
+    if job.query_state in {"retrying", "paused"} and job.error is None:
+        raise ValueError("Unhealthy queries require a safe error")
+    if job.consecutive_query_errors > job.query_attempts or (not job.provider_task_id and job.query_attempts):
+        raise ValueError("Query counters require original task attempts")
+    retries = len(job.policy.retry_delays_seconds)
+    if job.query_state == "retrying" and not 1 <= job.consecutive_query_errors <= retries:
+        raise ValueError("Query retry window is bounded")
+    if job.query_pause_reason == "retry_exhausted" and job.consecutive_query_errors != retries + 1:
+        raise ValueError("Retry exhaustion consumes the saved retry window")
+    if job.query_state in {"idle", "polling"} and job.consecutive_query_errors:
+        raise ValueError("Healthy or completed queries have no consecutive errors")
+    if job.runtime_block is not None and (
+        (job.status == "pending_submit" and job.runtime_block.stage != "submit")
+        or (active and (job.runtime_block.stage != "query" or job.query_pause_reason != "configuration"))
+        or (job.status != "pending_submit" and not active)
+    ):
+        raise ValueError("Runtime blocks describe pending submission or paused query configuration")
+
+
 class JobV2(Job):
     contract_version: int = Field(default=2, ge=2, le=2)
     mode: Literal["live"] = "live"
@@ -815,132 +1171,104 @@ class JobV2(Job):
             or Decimal(estimate.quantity) != self.request.spec.duration_seconds
         ):
             raise ValueError("Job must retain an affordable quote for its original specification")
-        if datetime.fromisoformat(self.updated_at) < datetime.fromisoformat(self.created_at):
-            raise ValueError("Job cannot be updated before creation")
-        if self.submit_attempts != (0 if self.status == "pending_submit" else 1):
-            raise ValueError("Only one durably recorded submission is allowed")
-        if self.submit_attempts:
-            if (
-                self.submission_started_at is None
-                or self.query_deadline_at is None
-                or (
-                    datetime.fromisoformat(self.query_deadline_at)
-                    - datetime.fromisoformat(self.submission_started_at)
-                )
-                != timedelta(hours=24)
-            ):
-                raise ValueError("Submission records a fixed 24-hour query window")
-        elif self.submission_started_at is not None or self.query_deadline_at is not None:
-            raise ValueError("Unsubmitted jobs have no submission/query window")
-        if self.status in {"pending_submit", "submitting", "unknown"} and self.provider_task_id is not None:
-            raise ValueError("Unconfirmed submission cannot have a confirmed task ID")
-        if (
-            self.status in {"queued", "running", "downloading", "download_failed", "succeeded"}
-            and self.provider_task_id is None
-        ):
-            raise ValueError("Accepted jobs require the original task ID")
-        if (self.status == "succeeded") != (self.result is not None):
-            raise ValueError("Only committed local success contains a result")
-        generated = self.status in {"downloading", "download_failed", "succeeded"}
-        if generated != (self.provider_output is not None) or generated != (self.download is not None):
-            raise ValueError("Cloud success must atomically register one output and download intent")
-        if generated:
-            if (
-                self.provider_output.task_id != self.provider_task_id
-                or self.last_provider_status != "SUCCEEDED"
-            ):
-                raise ValueError("Private output must belong to the confirmed successful task")
-            if self.download.relative_path != f"media/{self.context.project_id}/{self.download.media_id}.mp4":
-                raise ValueError("Download location must be derived from server IDs")
-            if self.download.window_attempts > self.download_policy.max_attempts_per_window:
-                raise ValueError("Download retries cannot exceed the saved window")
-            if self.download.prepared and self.download.prepared.size_bytes > self.download_policy.max_bytes:
-                raise ValueError("Prepared media cannot exceed the frozen resource limit")
-            if self.cost.provider_usage != self.provider_output.usage:
-                raise ValueError("Provider usage comes only from the original task output")
-        if self.result is not None and (
-            self.result.request_fingerprint != self.request_fingerprint
-            or self.result.spec != self.request.spec
-            or self.result.source_refs != self.request.source_refs
-            or self.result.media_refs[0].media_id != self.download.media_id
-            or (not self.download.repair and self.download.phase != "committed")
-        ):
-            raise ValueError("Local result and download must retain the Job's provenance")
-        if self.status != "succeeded" and (
-            self.media_availability.status == "available" or (self.download and self.download.repair)
-        ):
-            raise ValueError("Media is available or repairable only after its first local delivery")
-        if self.status in {"unknown", "failed", "download_failed"}:
-            if self.error is None or self.error.stage == "query":
-                raise ValueError("Terminal failure requires the correct error stage")
-            if self.status == "unknown" and (
-                self.error.stage != "submit" or self.error.code != "SUBMISSION_UNKNOWN"
-            ):
-                raise ValueError("Unknown means submission uncertainty")
-            if self.status == "failed" and (
-                self.error.stage not in {"submit", "generate"}
-                or (self.error.stage == "generate") != bool(self.provider_task_id)
-            ):
-                raise ValueError("Only a confirmed generation failure has a task ID")
-            if self.status == "download_failed" and (
-                self.error.stage != "download" or self.download.phase != "failed"
-            ):
-                raise ValueError("Download failure must retain its failed download intent")
-        elif self.error is not None and (
-            self.status not in {"queued", "running"}
-            or self.error.stage != "query"
-            or self.query_state not in {"retrying", "paused"}
-        ):
-            raise ValueError("Query errors preserve the last confirmed generation state")
-        active = self.status in {"queued", "running"}
-        if (self.query_state != "idle") != active:
-            raise ValueError("Only unfinished cloud tasks have a query lifecycle")
-        if (self.query_state in {"polling", "retrying"}) != (self.next_poll_at is not None):
-            raise ValueError("Only scheduled queries have a next poll time")
-        if (self.query_state == "paused") != (self.query_pause_reason is not None):
-            raise ValueError("A paused query must preserve its reason")
-        if self.query_started_at is not None and (
-            self.query_state not in {"polling", "retrying"}
-            or not self.query_attempts
-            or datetime.fromisoformat(self.query_started_at) > datetime.fromisoformat(self.updated_at)
-        ):
-            raise ValueError("In-flight queries need a persisted attempt")
-        if self.query_state in {"retrying", "paused"} and self.error is None:
-            raise ValueError("Unhealthy queries require a safe error")
-        if self.consecutive_query_errors > self.query_attempts or (
-            not self.provider_task_id and self.query_attempts
-        ):
-            raise ValueError("Query counters require original task attempts")
-        retries = len(self.policy.retry_delays_seconds)
-        if self.query_state == "retrying" and not 1 <= self.consecutive_query_errors <= retries:
-            raise ValueError("Query retry window is bounded")
-        if self.query_pause_reason == "retry_exhausted" and self.consecutive_query_errors != retries + 1:
-            raise ValueError("Retry exhaustion consumes the saved retry window")
-        if self.query_state in {"idle", "polling"} and self.consecutive_query_errors:
-            raise ValueError("Healthy or completed queries have no consecutive errors")
-        if self.runtime_block is not None and (
-            (self.status == "pending_submit" and self.runtime_block.stage != "submit")
-            or (
-                active and (self.runtime_block.stage != "query" or self.query_pause_reason != "configuration")
-            )
-            or (self.status != "pending_submit" and not active)
-        ):
-            raise ValueError("Runtime blocks describe pending submission or paused query configuration")
+        _coherent_live_state(self)
         return self
 
 
-def parse_job(value) -> Job | JobV2:
+class ShotRef(Contract):
+    """The immutable link from a real Job back to one storyboard shot version."""
+
+    storyboard_id: Identifier
+    storyboard_version: int = Field(ge=1)
+    shot_id: Identifier
+    shot_version_id: Identifier
+
+
+class RunLimitsSnapshot(Contract):
+    """Registration-time snapshot of the per-Run ceilings and their usage."""
+
+    max_job_cost: Money
+    max_new_jobs_per_run: int = Field(ge=1, le=LIVE_JOBS_PER_RUN)
+    max_run_cost: Money
+    used_new_jobs: int = Field(ge=0, le=LIVE_JOBS_PER_RUN)
+    used_amount: Money
+    remaining_amount: Money
+
+    @model_validator(mode="after")
+    def consistent_usage(self):
+        if self.used_new_jobs > self.max_new_jobs_per_run:
+            raise ValueError("Recorded usage cannot exceed the frozen Job ceiling")
+        if Decimal(self.used_amount) > Decimal(self.max_run_cost) or Decimal(
+            self.remaining_amount
+        ) != Decimal(self.max_run_cost) - Decimal(self.used_amount):
+            raise ValueError("Remaining budget is the frozen ceiling minus recorded usage")
+        return self
+
+
+class CostRecordV3(CostRecord):
+    limits: RunLimitsSnapshot
+
+
+class JobV3(JobV2):
+    """One shot of a storyboard version as a real Job with its own frozen quote."""
+
+    contract_version: int = Field(default=3, ge=3, le=3)
+    request: VideoRequestV3
+    capabilities: VideoCapabilitiesV3
+    shot_ref: ShotRef
+    cost: CostRecordV3
+
+    @model_validator(mode="after")
+    def coherent_state(self):
+        if self.operation_key != self.context.operation_key:
+            raise ValueError("Job operation key must match its server execution context")
+        if (
+            self.request_fingerprint != self.request.fingerprint()
+            or self.intent_fingerprint != self.request.intent_fingerprint()
+        ):
+            raise ValueError("Job fingerprints must match the complete frozen request and intent")
+        if (
+            self.request.provider,
+            self.request.model,
+            self.request.capabilities_version,
+            self.request.region,
+        ) != (
+            self.capabilities.provider,
+            self.capabilities.model,
+            self.capabilities.capabilities_version,
+            self.capabilities.region,
+        ):
+            raise ValueError("Frozen request does not match the capability snapshot")
+        if (
+            self.request.spec not in self.capabilities.specs
+            or self.request.spec.mode not in self.capabilities.shot_modes
+        ):
+            raise ValueError("Frozen shot specification is not a verified combination")
+        estimate = self.cost.estimate
+        if estimate.model_dump(exclude={"max_job_cost"}) != shot_price(
+            self.capabilities.price, self.request.spec.duration_seconds
+        ).model_dump() or Decimal(estimate.amount) > Decimal(estimate.max_job_cost):
+            raise ValueError("Job must retain an affordable quote for its original shot")
+        _coherent_live_state(self)
+        return self
+
+
+# Both live contract versions share one lifecycle; only their frozen request differs.
+LiveJob = (JobV2, JobV3)
+
+
+def parse_job(value) -> Job | JobV2 | JobV3:
     if isinstance(value, Job):
         value = value.model_dump(mode="json", by_alias=True)
     if not isinstance(value, dict):
         raise ValueError("Job must be an object")
     version = value.get("contractVersion", value.get("contract_version", 1))
-    if type(version) is not int or version not in {1, 2}:
+    if type(version) is not int or version not in {1, 2, 3}:
         raise ValueError("Unsupported Job contract version")
-    return (Job if version == 1 else JobV2).model_validate(value)
+    return {1: Job, 2: JobV2, 3: JobV3}[version].model_validate(value)
 
 
-StoredJob = Annotated[Job | JobV2, BeforeValidator(parse_job)]
+StoredJob = Annotated[Job | JobV2 | JobV3, BeforeValidator(parse_job)]
 
 
 _LIVE_JOB_TRANSITIONS = {

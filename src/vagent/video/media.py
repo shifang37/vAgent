@@ -20,7 +20,7 @@ from vagent.video.contracts import (
     SOURCE_POLICY_VERSION,
     JobErrorV2,
     JobResultV2,
-    JobV2,
+    LiveJob,
     MediaAsset,
     PreparedMedia,
     parse_job,
@@ -379,7 +379,7 @@ class MediaService:
             return "unavailable", disk_error(error).code.removeprefix("MEDIA_").lower()
 
     def refresh(self, job):
-        if not isinstance(job, JobV2) or job.status != "succeeded":
+        if not isinstance(job, LiveJob) or job.status != "succeeded":
             return job
         asset = self.asset(job.result.media_refs[0].media_id, project_id=job.context.project_id)
         for _ in range(3):
@@ -467,7 +467,7 @@ class MediaService:
             job = parse_job(raw)
             if job.revision != request.expected_revision:
                 raise AppError("JOB_REVISION_CONFLICT", "Job 版本已变化，请重新读取。")
-            if not isinstance(job, JobV2) or job.download is None:
+            if not isinstance(job, LiveJob) or job.download is None:
                 raise AppError("JOB_DOWNLOAD_RETRY_UNAVAILABLE", "这个任务没有可恢复的媒体下载。")
             if job.download.phase in {"pending", "writing", "prepared"}:
                 return job_view(job)

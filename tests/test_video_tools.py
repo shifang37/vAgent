@@ -192,9 +192,12 @@ async def test_reads_are_scoped_bounded_and_replay_original_snapshot(store, vide
     current = execute(registry, store, next_call(context, "fresh-read"), "job_get", {"jobId": job_id})
     assert current["data"]["status"] == "queued" and current["data"]["revision"] > initial["data"]["revision"]
     other = video_run(store, "other-run", project_id="other")
-    for name in ("job_get", "await_job"):
-        not_found = execute(registry, store, next_call(other, name), name, {"jobId": job_id})
-        missing = execute(registry, store, next_call(other, name + "-missing"), name, {"jobId": "missing"})
+    for name, lookup, absent in (
+        ("job_get", {"jobId": job_id}, {"jobId": "missing"}),
+        ("await_job", {"jobIds": [job_id]}, {"jobIds": ["missing"]}),
+    ):
+        not_found = execute(registry, store, next_call(other, name), name, lookup)
+        missing = execute(registry, store, next_call(other, name + "-missing"), name, absent)
         assert not_found == missing and not_found["error"]["code"] == "JOB_NOT_FOUND"
     assert adapter.ledger_snapshot() == ledger and not store.snapshot()["waits"]
 
@@ -214,7 +217,7 @@ async def test_read_only_hides_generation_and_allows_wait_bookkeeping(store, vid
     assert execute(registry, store, reader, "video_generate", args)["error"]["code"] == "READ_ONLY"
     assert execute(readonly, store, next_call(reader, "caps"), "video_capabilities", {})["ok"]
     assert execute(readonly, store, next_call(reader, "get"), "job_get", {"jobId": job_id})["ok"]
-    waiting = execute(readonly, store, next_call(reader, "wait"), "await_job", {"jobId": job_id})
+    waiting = execute(readonly, store, next_call(reader, "wait"), "await_job", {"jobIds": [job_id]})
     assert isinstance(waiting, DeferredToolResult)
     after = store.snapshot()
     for field in ("jobs", "projects", "artifacts", "runs"):
@@ -242,7 +245,7 @@ async def test_await_immediate_outcomes_are_stable_without_a_binding(store, vide
         video_clock.due(job)
         job = await worker.run_once()
     waiting = next_call(context, "await")
-    outcome = execute(registry, store, waiting, "await_job", {"jobId": job_id})
+    outcome = execute(registry, store, waiting, "await_job", {"jobIds": [job_id]})
     assert outcome["ok"] == (code is None)
     if code:
         assert outcome["error"]["code"] == code and job_id in outcome["error"]["message"]
@@ -252,7 +255,7 @@ async def test_await_immediate_outcomes_are_stable_without_a_binding(store, vide
     assert store.snapshot()["operations"][waiting.operation_key]["result"] == outcome
     if code == "JOB_QUERY_PAUSED":
         service.retry_query(job_id, project_id="coffee")
-    assert execute(registry, store, waiting, "await_job", {"jobId": job_id}) == outcome
+    assert execute(registry, store, waiting, "await_job", {"jobIds": [job_id]}) == outcome
 
 
 async def test_pending_wait_replays_same_marker_after_restart_job_and_operation_completion(
@@ -263,7 +266,7 @@ async def test_pending_wait_replays_same_marker_after_restart_job_and_operation_
     )
     job_id = execute(registry, store, context, "video_generate", video_request(adapter))["data"]["jobId"]
     waiting = next_call(context, "await")
-    args = {"jobId": job_id}
+    args = {"jobIds": [job_id]}
     marker = execute(registry, store, waiting, "await_job", args)
     binding = WaitBinding.model_validate(store.snapshot()["waits"][marker.wait_id])
     assert isinstance(marker, DeferredToolResult) and marker.resource.id == job_id
@@ -273,7 +276,7 @@ async def test_pending_wait_replays_same_marker_after_restart_job_and_operation_
     ).total_seconds() == 600
     assert waiting.operation_key not in store.snapshot()["operations"]
     assert (
-        execute(registry, store, waiting, "await_job", {"jobId": "different"})["error"]["code"]
+        execute(registry, store, waiting, "await_job", {"jobIds": ["different"]})["error"]["code"]
         == "OPERATION_CONFLICT"
     )
     assert (await JobWorker(service).run_once()).status == "succeeded"
@@ -296,7 +299,7 @@ async def test_pending_wait_key_cannot_be_reused_by_local_or_mcp_tool(store, vid
     registry, _, adapter, context = setup_tools(store, video_clock)
     job_id = execute(registry, store, context, "video_generate", video_request(adapter))["data"]["jobId"]
     waiting = next_call(context, "await")
-    execute(registry, store, waiting, "await_job", {"jobId": job_id})
+    execute(registry, store, waiting, "await_job", {"jobIds": [job_id]})
     before = store.snapshot()
     assert (
         execute(registry, store, waiting, "project_update", {"expectedRevision": 0, "style": "changed"})[
@@ -328,7 +331,7 @@ def test_failed_wait_commit_does_not_leave_success_or_partial_binding(store, vid
         raise OSError("private-write-error")
 
     monkeypatch.setattr("vagent.storage.atomic_write_json", fail_write)
-    result = execute(registry, store, waiting, "await_job", {"jobId": job_id})
+    result = execute(registry, store, waiting, "await_job", {"jobIds": [job_id]})
     assert result["ok"] is False and "private-write-error" not in json.dumps(result)
     assert store.snapshot() == before
 

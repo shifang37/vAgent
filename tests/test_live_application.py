@@ -229,7 +229,14 @@ async def test_live_application_model_tools_replay_http_views_and_client_closure
         previous = json.loads(messages[-1].content)
         if step == 1:
             assert previous["data"]["mode"] == "live" and not previous["data"]["simulated"]
-            assert [model["provider"] for model in previous["data"]["models"]] == ["wan"]
+            # M2 publishes the verified shot entries; the frozen M1-C single-shot
+            # version stays registered for this compatibility path but is not advertised.
+            published = previous["data"]["models"]
+            assert {item["provider"] for item in published} == {"wan"}
+            assert sorted(item["capabilitiesVersion"] for item in published) == [
+                "wan27-shot-beijing-v2",
+                "wan27-shot-beijing-v2",
+            ]
             assert previous["data"]["configuration"]["configured"]
             return tool_call("video_generate", live_arguments(), call_id="generate")
         if step == 2:
@@ -257,8 +264,8 @@ async def test_live_application_model_tools_replay_http_views_and_client_closure
             and record["executionVersion"] == 3
             and record["contextVersion"] == 2
         )
-        assert record["toolFeatures"]["video"]["toolsVersion"] == 3
-        assert record["toolFeatures"]["video"]["rulesVersion"] == 3
+        assert record["toolFeatures"]["video"]["toolsVersion"] == 4
+        assert record["toolFeatures"]["video"]["rulesVersion"] == 4
         await eventually(lambda: service.job(remembered["jobId"])["status"] == "downloading")
         job = service.job(remembered["jobId"])
         assert job["providerTaskId"] == "wan-original" and job["submitAttempts"] == 1
@@ -349,8 +356,12 @@ async def test_legacy_run_resumes_under_live_startup_with_original_tools_and_bud
     model = ScriptedModel(lambda *_: AIMessage(content="原产物已保存。"))
     async with ApplicationService.open(replace(config, video_mode="live"), model=model) as service:
         assert service.runner().video_mode == "live"
-        assert [cap["provider"] for cap in service.runner().tools.features["video"]["capabilities"]] == [
-            "wan"
+        published = service.runner().tools.features["video"]["capabilities"]
+        assert [cap["provider"] for cap in published] == ["wan", "wan"]
+        assert {cap["capabilitiesVersion"] for cap in published} == {"wan27-shot-beijing-v2"}
+        assert sorted(cap["model"] for cap in published) == [
+            "wan2.7-i2v-2026-04-25",
+            "wan2.7-t2v-2026-06-12",
         ]
         await service.resume(run["id"])
         after = await service.wait_for_run(run["id"])
@@ -374,7 +385,7 @@ async def test_live_wait_survives_restart_until_local_delivery_and_stop_never_re
             return tool_call("video_generate", live_arguments(), call_id="generate")
         if step == 1:
             remembered["jobId"] = json.loads(messages[-1].content)["data"]["jobId"]
-            return tool_call("await_job", {"jobId": remembered["jobId"]}, call_id="original-await")
+            return tool_call("await_job", {"jobIds": [remembered["jobId"]]}, call_id="original-await")
         raise AssertionError("Cloud success must not wake a model before local media delivery")
 
     model = ScriptedModel(respond)

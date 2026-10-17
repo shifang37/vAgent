@@ -6,11 +6,13 @@ import httpx
 from conftest import video_run
 
 from vagent.config import Config
+from vagent.video.assets import asset_reference_loader
 from vagent.video.contracts import (
     WAN_ADAPTER_VERSION,
     WAN_ENDPOINT_PROFILE,
     WAN_PROMPT_PREFIX,
     WAN_REGION,
+    ImageInputRule,
     VideoIntentV2,
     VideoRequestV2,
     WanParameters,
@@ -80,6 +82,7 @@ async def live_service(store, clock, handler, **config_changes):
         workspace_id=config.video_workspace_id,
         transport=httpx.MockTransport(handler),
         clock=clock,
+        reference_loader=asset_reference_loader(store, ImageInputRule()),
     ) as provider:
         service = JobService(
             store, [MockVideoAdapter(store, clock=clock), provider], clock=clock, config=config

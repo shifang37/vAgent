@@ -22,7 +22,7 @@ def wait_model(remembered, *, expected_error=None):
             )
         if step == 1:
             remembered["jobId"] = json.loads(messages[-1].content)["data"]["jobId"]
-            return tool_call("await_job", {"jobId": remembered["jobId"]}, call_id="original-media-wait")
+            return tool_call("await_job", {"jobIds": [remembered["jobId"]]}, call_id="original-media-wait")
         assert step == 2 and isinstance(messages[-1], ToolMessage)
         assert messages[-1].tool_call_id == "original-media-wait"
         result = json.loads(messages[-1].content)

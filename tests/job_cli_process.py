@@ -20,7 +20,7 @@ class Model:
     name = "cli-process-fixture"
 
     async def generate(self, messages, tools):
-        return tool_call("await_job", {"jobId": job_id}, call_id="wait")
+        return tool_call("await_job", {"jobIds": [job_id]}, call_id="wait")
 
 
 @asynccontextmanager

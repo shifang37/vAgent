@@ -122,23 +122,30 @@ class ToolRegistry:
         self._resolver_features[kind] = feature
         return self
 
-    def register_execution_variant(self, version: int, *, features, descriptions, exclude=()) -> None:
+    def register_execution_variant(
+        self, version: int, *, features, descriptions, exclude=(), definitions=()
+    ) -> None:
         """Keep historical prompts/specs without teaching the Runner domain rules.
 
         `exclude` hides tool names added after this execution version so a restored
-        Run sees exactly the tool set it was recorded with.
+        Run sees exactly the tool set it was recorded with. `definitions` replaces
+        a tool whose published schema changed after this version, so a restored Run
+        keeps the argument shape it was recorded with.
         """
-        old_features, old_descriptions, old_exclude = self._execution_variants.get(
-            version, ([], {}, frozenset())
+        old_features, old_descriptions, old_exclude, old_definitions = self._execution_variants.get(
+            version, ([], {}, frozenset(), {})
         )
         self._execution_variants[version] = (
             [*old_features, *copy.deepcopy(features)],
             {**old_descriptions, **descriptions},
             old_exclude | frozenset(exclude),
+            {**old_definitions, **copy.deepcopy(dict(definitions))},
         )
 
     def for_execution_version(self, version: int) -> "ToolRegistry":
-        features, descriptions, excluded = self._execution_variants.get(version, ([], {}, frozenset()))
+        features, descriptions, excluded, definitions = self._execution_variants.get(
+            version, ([], {}, frozenset(), {})
+        )
         registry = self._filtered(lambda definition: definition.name not in excluded)
         for feature in features:
             if feature.name in registry._features:
@@ -146,6 +153,9 @@ class ToolRegistry:
         for name, description in descriptions.items():
             if name in registry._definitions:
                 registry._definitions[name] = replace(registry._definitions[name], description=description)
+        for name, definition in definitions.items():
+            if name in registry._definitions:
+                registry._definitions[name] = copy.deepcopy(definition)
         return registry
 
     def register(self, definition: ToolDefinition) -> "ToolRegistry":

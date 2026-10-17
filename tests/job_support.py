@@ -56,7 +56,7 @@ class JobModel:
         assert result["ok"], result
         self.job_id = result["data"]["jobId"]
         if self.calls == 2 and self.wait:
-            return tool_call("await_job", {"jobId": self.job_id}, call_id="original-wait")
+            return tool_call("await_job", {"jobIds": [self.job_id]}, call_id="original-wait")
         if self.wait:
             assert self.calls == 3 and result["data"]["status"] == "succeeded"
         return AIMessage(content=f"模拟任务 {self.job_id}，无真实媒体。")

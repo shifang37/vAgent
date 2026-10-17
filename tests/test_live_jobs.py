@@ -11,7 +11,7 @@ from wan_support import VIDEO_URL, live_arguments, live_config, live_run, live_s
 from vagent.errors import AppError
 from vagent.storage import Database, FileStore
 from vagent.tools import create_project_tools
-from vagent.video.contracts import JobV2, ProviderTaskSnapshotV2, VideoPrice, parse_job
+from vagent.video.contracts import JobV2, ProviderTaskSnapshotV2, VideoPrice, parse_job, wan_price
 from vagent.video.jobs import JobService
 from vagent.video.providers.mock import MockVideoAdapter
 from vagent.video.tools import completed_job_data, register_video_tools, resolve_job_wait
@@ -240,7 +240,7 @@ async def test_read_only_mode_scope_sources_and_unknown_quote_are_enforced(store
             )["error"]["code"]
             == "VIDEO_PRICE_UNKNOWN"
         )
-        service.price = service.capabilities("live")[0].price
+        service.price = wan_price()
         tools = create_project_tools()
         args = {"kind": "script", "title": "来源", "content": "第一版正文"}
         source = tools.execute(
@@ -436,7 +436,7 @@ async def test_download_state_waits_without_delivering_a_cloud_url(store, video_
         wait_context = context.model_copy(update={"model_step": 2, "tool_call_id": "wait"})
         deferred = tools.execute(
             "await_job",
-            {"jobId": job.id},
+            {"jobIds": [job.id]},
             store=store,
             project_id="coffee",
             operation_key=wait_context.operation_key,
@@ -448,7 +448,7 @@ async def test_download_state_waits_without_delivering_a_cloud_url(store, video_
         assert (
             tools.execute(
                 "await_job",
-                {"jobId": job.id},
+                {"jobIds": [job.id]},
                 store=store,
                 project_id="coffee",
                 operation_key=wait_context.operation_key,

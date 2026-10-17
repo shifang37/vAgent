@@ -11,34 +11,64 @@ from uuid import uuid4
 from pydantic import ValidationError
 
 from vagent.errors import AppError, failure
+from vagent.video.assets import verified_reference_data
 from vagent.video.contracts import (
+    LIVE_JOBS_PER_RUN,
+    MODE_FRAMES,
     WAN_ADAPTER_VERSION,
     WAN_ENDPOINT_PROFILE,
+    WAN_I2V_MODEL,
+    WAN_MODEL,
     WAN_PROMPT_PREFIX,
     CostEstimate,
     CostRecord,
+    CostRecordV3,
     DownloadPolicy,
+    ImageSize,
     Job,
     JobError,
     JobErrorV2,
     JobV2,
+    JobV3,
+    LiveJob,
     MediaAsset,
     PollingPolicy,
+    RunLimitsSnapshot,
+    ShotGenerationArgs,
+    ShotMediaInput,
+    ShotRedoArgs,
+    ShotRef,
+    ShotSpecV3,
     VideoCapabilities,
     VideoIntentV2,
     VideoPrice,
     VideoProviderAdapter,
     VideoRequest,
     VideoRequestV2,
+    VideoRequestV3,
     WanParameters,
+    WanParametersV3,
     job_transition_allowed,
     live_job_transition_allowed,
     live_polling_policy,
     parse_job,
+    shot_price,
     validate_video_request,
     wan_price,
 )
+from vagent.video.storyboards import (
+    Asset,
+    ShotVersion,
+    latest_shot_version,
+    shot_of,
+    stored_request_fingerprint,
+    storyboard_in_state,
+    with_shot_versions,
+)
 from vagent.waiting import ToolExecutionContext
+
+# The first tool set that may register more than one Job inside a single Run.
+M2_TOOLS_VERSION = 4
 
 if TYPE_CHECKING:
     from vagent.config import Config
@@ -82,7 +112,7 @@ def query_failed(
     if next_poll and retry_after_at:
         next_poll = max(datetime.fromisoformat(next_poll), datetime.fromisoformat(retry_after_at)).isoformat()
     extra = {}
-    if isinstance(job, JobV2):
+    if isinstance(job, LiveJob):
         extra = {
             "queryPauseReason": None if retrying else pause_reason or "retry_exhausted",
             "lastQueryRequestId": getattr(error, "request_id", None),
@@ -109,6 +139,56 @@ def query_failed(
     )
 
 
+def _operation_registers(operation, job_id: str) -> bool:
+    """A single-shot or batch result is the only thing that may register one Job."""
+    if not operation or operation["result"].get("ok") is not True:
+        return False
+    data = operation["result"].get("data")
+    if not isinstance(data, dict):
+        return False
+    if data.get("jobId") == job_id:
+        return True
+    shots = data.get("shots")
+    return isinstance(shots, list) and any(
+        isinstance(item, dict) and item.get("jobId") == job_id for item in shots
+    )
+
+
+def _adapter_capabilities(adapter) -> tuple[tuple, tuple]:
+    """Split one adapter's published M2 entries from its frozen legacy entry."""
+    declared = getattr(adapter, "shot_capabilities", None)
+    if declared is None:
+        return (adapter.capabilities(),), ()
+    return tuple(declared()), (adapter.capabilities(),)
+
+
+def _generation_tools_version(run: dict | None) -> int:
+    feature = ((run or {}).get("toolFeatures") or {}).get("video") or {}
+    version = feature.get("toolsVersion")
+    return version if type(version) is int else 0
+
+
+def _validate_wait_members(state: dict) -> None:
+    """A jobset wait must cite existing Jobs of its own project, once each."""
+    from vagent.waiting import parse_wait
+
+    for raw in state["waits"].values():
+        binding = parse_wait(raw)
+        job_ids = getattr(binding, "job_ids", ())
+        if not job_ids:
+            continue
+        if binding.resource.kind != "jobset" or len(set(job_ids)) != len(job_ids):
+            raise AppError("WAIT_CONFLICT", "集合等待的成员定义不合法。")
+        for job_id in job_ids:
+            job = state["jobs"].get(job_id)
+            if job is None or job["context"]["projectId"] != binding.context.project_id:
+                raise AppError("WAIT_CONFLICT", "集合等待只能等待本项目的视频任务。")
+
+
+def money(value) -> str:
+    return format(Decimal(value), ".2f")
+
+
 def recover_interrupted_jobs(state: dict, timestamp: str) -> None:
     """Only the Store opener calls this, after acquiring the exclusive instance lock."""
     for job_id, raw in state["jobs"].items():
@@ -132,7 +212,7 @@ def recover_interrupted_jobs(state: dict, timestamp: str) -> None:
                 timestamp,
                 failure_at=job.next_poll_at,
             )
-        elif isinstance(job, JobV2) and job.download and job.download.phase == "writing":
+        elif isinstance(job, LiveJob) and job.download and job.download.phase == "writing":
             from vagent.video.media import MediaError, failed_download
 
             recovered = failed_download(
@@ -163,7 +243,7 @@ def validate_job_changes(previous: dict[str, dict], state: dict) -> None:
     jobs = state["jobs"]
     if previous.keys() - jobs.keys():
         raise AppError("JOB_IMMUTABLE", "已登记的视频任务不能删除。")
-    run_ids = set()
+    owned: dict[str, list[Job]] = {}
     immutable = (
         "contract_version",
         "id",
@@ -179,21 +259,15 @@ def validate_job_changes(previous: dict[str, dict], state: dict) -> None:
     for job_id, raw in jobs.items():
         job = parse_job(raw)
         _check_context(state, job.context)
-        if job.id != job_id or job.context.run_id in run_ids:
-            raise AppError("JOB_CONFLICT", "Job ID 不匹配，或同一 Run 登记了多个视频任务。")
-        run_ids.add(job.context.run_id)
+        if job.id != job_id:
+            raise AppError("JOB_CONFLICT", "Job ID 不匹配。")
+        owned.setdefault(job.context.run_id, []).append(job)
         validate_video_request(
             job.request, job.capabilities, project_id=job.context.project_id, artifacts=state["artifacts"]
         )
-        if isinstance(job, JobV2) and state["runs"][job.context.run_id].get("videoMode") != "live":
+        if isinstance(job, LiveJob) and state["runs"][job.context.run_id].get("videoMode") != "live":
             raise AppError("JOB_CONTEXT_INVALID", "真实视频 Job 必须归属原 live Run。")
-        operation = state["operations"].get(job.operation_key)
-        if (
-            not operation
-            or operation["result"].get("ok") is not True
-            or not isinstance(operation["result"].get("data"), dict)
-            or operation["result"]["data"].get("jobId") != job_id
-        ):
+        if not _operation_registers(state["operations"].get(job.operation_key), job_id):
             raise AppError("JOB_OPERATION_MISSING", "Job 必须与原生成调用的成功结果一起保存。")
         old_raw = previous.get(job_id)
         if old_raw is None:
@@ -207,8 +281,8 @@ def validate_job_changes(previous: dict[str, dict], state: dict) -> None:
             raise AppError("JOB_IMMUTABLE", "Job 的请求、来源、执行上下文和策略快照不可修改。")
         if job.revision != old.revision + 1:
             raise AppError("JOB_REVISION_CONFLICT", "Job 版本已变化，请重新读取。")
-        transition = live_job_transition_allowed if isinstance(job, JobV2) else job_transition_allowed
-        terminal = {"failed", "unknown"} if isinstance(job, JobV2) else {"succeeded", "failed", "unknown"}
+        transition = live_job_transition_allowed if isinstance(job, LiveJob) else job_transition_allowed
+        terminal = {"failed", "unknown"} if isinstance(job, LiveJob) else {"succeeded", "failed", "unknown"}
         if old.status in terminal or not transition(old.status, job.status):
             raise AppError("JOB_INVALID_TRANSITION", "不允许回退或重新提交这个视频任务。")
         if old.provider_task_id is not None and job.provider_task_id != old.provider_task_id:
@@ -219,7 +293,7 @@ def validate_job_changes(previous: dict[str, dict], state: dict) -> None:
             or datetime.fromisoformat(job.updated_at) < datetime.fromisoformat(old.updated_at)
         ):
             raise AppError("JOB_CONFLICT", "Job 的累计调用次数和更新时间不能回退。")
-        if isinstance(job, JobV2):
+        if isinstance(job, LiveJob):
             if (
                 job.intent_fingerprint != old.intent_fingerprint
                 or job.cost.estimate != old.cost.estimate
@@ -267,8 +341,17 @@ def validate_job_changes(previous: dict[str, dict], state: dict) -> None:
                     raise AppError("JOB_CONFLICT", "下载窗口和累计尝试次数不能重置或跳过。")
                 if before.repair and not after.repair:
                     raise AppError("JOB_IMMUTABLE", "已交付媒体的修复记录不能变回初次交付。")
+    for run_id, jobs_of_run in owned.items():
+        # Pre-M2 Runs keep the frozen single-Job rule; only M2 generation Runs may
+        # register a bounded batch. The ceiling is re-checked here so a service-level
+        # regression cannot commit an over-budget batch.
+        if len(jobs_of_run) > 1 and _generation_tools_version(state["runs"].get(run_id)) < M2_TOOLS_VERSION:
+            raise AppError("JOB_CONFLICT", "非 M2 的 Run 每个最多登记一个视频任务。")
+        if len([job for job in jobs_of_run if job.mode == "live"]) > LIVE_JOBS_PER_RUN:
+            raise AppError("JOB_CONFLICT", "同一 Run 登记的新真实视频任务超过冻结上限。")
     if any(key != value["id"] for key, value in state["waits"].items()):
         raise AppError("WAIT_CONFLICT", "等待记录 ID 不匹配。")
+    _validate_wait_members(state)
     validate_media_changes(state.get("media", {}), state)
 
 
@@ -284,7 +367,7 @@ def validate_media_changes(previous: dict[str, dict], state: dict) -> None:
         if (
             asset.id != media_id
             or asset.job_id in seen_jobs
-            or not isinstance(job, JobV2)
+            or not isinstance(job, LiveJob)
             or job.status != "succeeded"
             or asset.project_id != job.context.project_id
             or asset.source_refs != job.request.source_refs
@@ -328,13 +411,19 @@ class JobService:
         self.media = MediaService(self)
         self._adapters = {}
         self._capabilities = {}
+        self._published = []
         for adapter in adapters:
-            capabilities = adapter.capabilities()
-            key = (capabilities.provider, capabilities.model)
-            if key in self._adapters:
-                raise ValueError("A provider/model pair can only be registered once")
-            self._adapters[key] = adapter
-            self._capabilities[key] = capabilities
+            published, legacy = _adapter_capabilities(adapter)
+            self._published.extend(
+                (capabilities.provider, capabilities.model, capabilities.capabilities_version)
+                for capabilities in published
+            )
+            for capabilities in (*published, *legacy):
+                key = (capabilities.provider, capabilities.model, capabilities.capabilities_version)
+                if key in self._adapters:
+                    raise ValueError("A provider/model/capabilities version can only be registered once")
+                self._adapters[key] = adapter
+                self._capabilities[key] = capabilities
 
     def timestamp(self) -> str:
         value = self.clock()
@@ -343,10 +432,26 @@ class JobService:
         return value.astimezone(UTC).isoformat()
 
     def capabilities(self, mode: str | None = None) -> tuple[VideoCapabilities, ...]:
+        """Only the entries this build publishes; legacy ones stay registered for old Jobs."""
         return tuple(
             self._capabilities[key]
-            for key in sorted(self._capabilities)
+            for key in sorted(self._published)
             if mode is None or self._capabilities[key].mode == mode
+        )
+
+    def _capability_for(self, provider: str, model: str, capabilities_version: str):
+        """Resolve one frozen capability snapshot, or report a changed or missing model."""
+        entry = self._capabilities.get((provider, model, capabilities_version))
+        if entry is not None:
+            return entry
+        # A known model at another version is a capability change, not a missing model.
+        return next(
+            (
+                capabilities
+                for (known_provider, known_model, _), capabilities in self._capabilities.items()
+                if (known_provider, known_model) == (provider, model)
+            ),
+            None,
         )
 
     def check_live_configuration(self) -> None:
@@ -370,29 +475,50 @@ class JobService:
                 "error": {"code": error.code, "message": str(error)},
             }
 
+    def default_adapter(self, provider: str, model: str) -> VideoProviderAdapter:
+        """The adapter serving one provider/model pair, whatever its entry version."""
+        entry = next(
+            (
+                adapter
+                for (known, known_model, _), adapter in self._adapters.items()
+                if (known, known_model) == (provider, model)
+            ),
+            None,
+        )
+        if entry is None:
+            raise AppError("VIDEO_PROVIDER_UNAVAILABLE", "缺少这个模型对应的视频适配器。")
+        return entry
+
     def adapter_for(self, job: Job) -> VideoProviderAdapter:
-        key = (job.request.provider, job.request.model)
+        key = (job.request.provider, job.request.model, job.request.capabilities_version)
         if self._capabilities.get(key) != job.capabilities:
             raise AppError("VIDEO_PROVIDER_UNAVAILABLE", "缺少任务原有模式和能力版本的视频适配器。")
         return self._adapters[key]
 
     def check_runtime(self, job: Job, *, submit=False) -> VideoProviderAdapter:
         adapter = self.adapter_for(job)
-        if isinstance(job, JobV2):
+        if isinstance(job, LiveJob):
             self.check_live_configuration()
-            if (job.request.workspace_id, job.request.region, job.request.provider, job.request.model) != (
+            models = (WAN_MODEL, WAN_I2V_MODEL) if isinstance(job, JobV3) else (self.config.video_model,)
+            if (job.request.workspace_id, job.request.region, job.request.provider) != (
                 self.config.video_workspace_id,
                 self.config.video_region,
                 self.config.video_provider,
-                self.config.video_model,
-            ):
+            ) or job.request.model not in models:
                 raise AppError("VIDEO_PROVIDER_UNAVAILABLE", "缺少原任务业务空间、地域和模型的匹配配置。")
             if hasattr(adapter, "check_configuration"):
                 adapter.check_configuration(job.request)
             if submit:
-                if self.price is None:
+                # M2 shot Jobs freeze their quote with their capability entry, so a
+                # changed rate surfaces as a missing capability/adapter instead.
+                expected = (
+                    shot_price(job.capabilities.price, job.request.spec.duration_seconds)
+                    if isinstance(job, JobV3)
+                    else self.price
+                )
+                if expected is None:
                     raise AppError("VIDEO_PRICE_UNKNOWN", "缺少已核实的视频价格，原任务保持待提交。")
-                if self.price.model_dump() != job.cost.estimate.model_dump(exclude={"max_job_cost"}):
+                if expected.model_dump() != job.cost.estimate.model_dump(exclude={"max_job_cost"}):
                     raise AppError("VIDEO_PRICE_CHANGED", "视频价格版本已变化，保留原报价并暂停提交。")
                 if Decimal(job.cost.estimate.amount) > min(
                     Decimal(job.cost.estimate.max_job_cost), Decimal(self.config.video_max_job_cost)
@@ -430,7 +556,7 @@ class JobService:
 
     def query_deadline_passed(self, job: Job) -> bool:
         return (
-            isinstance(job, JobV2)
+            isinstance(job, LiveJob)
             and job.query_deadline_at is not None
             and datetime.fromisoformat(self.timestamp()) >= datetime.fromisoformat(job.query_deadline_at)
         )
@@ -510,7 +636,7 @@ class JobService:
                         "JOB_ALREADY_EXISTS", f"本次 Run 已登记视频任务 {existing.id}，不能再创建不同请求。"
                     )
                 return self._registration(existing)
-            capabilities = self._capabilities.get((parsed.provider, parsed.model))
+            capabilities = self._capability_for(parsed.provider, parsed.model, parsed.capabilities_version)
             if capabilities is None:
                 raise AppError("VIDEO_MODEL_UNAVAILABLE", "所选视频模型不在当前能力表中。")
             mode = draft["runs"][context.run_id].get("videoMode")
@@ -575,6 +701,315 @@ class JobService:
         except AppError as error:
             return failure(error.code, str(error))
 
+    def shot_generate(self, args: dict, *, context: ToolExecutionContext) -> dict:
+        """Register one real Job per confirmed shot; any failure registers nothing.
+
+        The per-shot request, the reference-image proof and the quota snapshot are
+        all derived inside a single Store transaction, so one call either matches
+        one frozen storyboard version completely or writes nothing at all.
+        """
+        parsed = self._generation_args(ShotGenerationArgs, args)
+        if isinstance(parsed, dict):
+            return parsed
+        return self._register_batch(context, parsed, "shot_generate", context.operation_key, redo=False)
+
+    def redo_shot(self, args: dict, *, context: ToolExecutionContext) -> dict:
+        """Explicit user redo: a new ShotVersion plus one new Job, nothing else moves."""
+        parsed = self._generation_args(ShotRedoArgs, args)
+        if isinstance(parsed, dict):
+            return parsed
+        # The journal key must be the Job's own operation key, so the Store can prove
+        # every Job came from one recorded successful call. A caller expresses
+        # idempotency with one context per client request: repeating it replays that
+        # call's original result instead of registering a second Job.
+        return self._register_batch(context, parsed, "shot_redo", context.operation_key, redo=True)
+
+    @staticmethod
+    def _generation_args(model, args):
+        if not isinstance(args, dict):
+            return failure("INVALID_ARGUMENTS", "生成参数不符合 Schema，未创建任务。")
+        try:
+            return model.model_validate(args)
+        except (ValidationError, ValueError, TypeError):
+            return failure("INVALID_ARGUMENTS", "生成参数不符合 Schema，未创建任务。")
+
+    def _register_batch(self, context, parsed, name, key, *, redo: bool) -> dict:
+        raw = parsed.model_dump(mode="json", by_alias=True)
+
+        def register(draft):
+            return self._register_generation(draft, context, parsed, redo=redo)
+
+        try:
+            with self.store.locked():
+                # Scope is checked even for a replay, whose mutation callback is skipped.
+                _check_context(self.store.snapshot(), context)
+                result = self.store.operation(key, name, raw, register)
+            if result.get("ok"):
+                for entry in result["data"]["shots"]:
+                    self.publish(self.get(entry["jobId"], project_id=context.project_id))
+            return result
+        except AppError as error:
+            return failure(error.code, str(error))
+
+    def _register_generation(self, draft, context, parsed, *, redo: bool) -> dict:
+        _check_context(draft, context)
+        run = draft["runs"][context.run_id]
+        if run.get("readOnly", False):
+            raise AppError("READ_ONLY", "只读 Run 不能创建视频任务。")
+        mode = run.get("videoMode")
+        if mode not in {"mock", "live"}:
+            raise AppError("VIDEO_MODEL_UNAVAILABLE", "原 Run 的视频模式不开放镜头生成。")
+        record = storyboard_in_state(draft, context.project_id, parsed.storyboard_id)
+        version = parsed.storyboard_version
+        if record.current_version != version:
+            raise AppError("VERSION_CONFLICT", "分镜版本已变化，请重新读取后再生成。")
+        if redo:
+            if record.revision != parsed.expected_revision:
+                raise AppError("VERSION_CONFLICT", "分镜记录已变化，请重新读取后再重做。")
+            order = [parsed.shot_id]
+        else:
+            if not parsed.confirm:
+                raise AppError(
+                    "CONFIRMATION_REQUIRED", "批量生成需要显式确认：先展示逐镜头与合计估算，再提交。"
+                )
+            order = list(parsed.shot_ids)
+        live = mode == "live"
+        if live:
+            self.check_live_configuration()
+        plan, reused = [], {}
+        for shot_id in order:
+            shot = shot_of(record, version, shot_id)
+            capabilities, request = self._derive_shot(draft, record, shot, live=live)
+            previous = None if redo else latest_shot_version(record, version, shot_id)
+            if previous is not None and stored_request_fingerprint(previous.request) == request.fingerprint():
+                reused[shot_id] = previous
+            else:
+                plan.append((shot, capabilities, request))
+        limits = self._batch_limits(draft, context, plan) if live else None
+        return self._commit_generation(draft, context, record, version, order, plan, reused, limits)
+
+    def _shot_capability(self, mode: str, *, live: bool):
+        """The published entry that verifies this shot mode for the Run's provider."""
+        expected = "live" if live else "mock"
+        for capabilities in self.capabilities():
+            if capabilities.mode != expected:
+                continue
+            if mode in tuple(getattr(capabilities, "shot_modes", None) or ("t2v",)):
+                return capabilities
+        raise AppError("VIDEO_UNSUPPORTED_MODE", "当前能力表不支持这个镜头的生成模式，未创建任务。")
+
+    def _derive_shot(self, draft, record, shot, *, live: bool):
+        """Derive the frozen request of one shot without changing any state."""
+        prompt = shot.description.strip()
+        if not prompt:
+            raise AppError("SHOT_DESCRIPTION_EMPTY", "镜头描述为空，未创建任务。")
+        capabilities = self._shot_capability(shot.mode, live=live)
+        if live:
+            spec = ShotSpecV3(
+                mode=shot.mode,
+                duration_seconds=shot.duration_seconds,
+                aspect_ratio="16:9" if shot.mode == "t2v" else None,
+            )
+            if spec not in capabilities.specs:
+                raise AppError("VIDEO_UNSUPPORTED_SPEC", "镜头的时长不在已核实的规格组合中，未创建任务。")
+            request = VideoRequestV3(
+                provider="wan",
+                model=capabilities.model,
+                capabilities_version=capabilities.capabilities_version,
+                prompt=prompt,
+                spec=spec,
+                source_refs=record.source_refs,
+                workspace_id=self.config.video_workspace_id,
+                provider_prompt=WAN_PROMPT_PREFIX + prompt,
+                parameters=WanParametersV3(
+                    duration=spec.duration_seconds, ratio="16:9" if shot.mode == "t2v" else None
+                ),
+                media=self._shot_media(draft, shot, capabilities),
+            )
+            return capabilities, request
+        if shot.mode != "t2v":
+            raise AppError("VIDEO_UNSUPPORTED_MODE", "当前模拟能力不支持图生视频，未创建任务。")
+        spec = next(
+            (
+                item
+                for item in capabilities.specs
+                if float(item.duration_seconds) == shot.duration_seconds
+                and item.resolution == "720p"
+                and item.aspect_ratio == "16:9"
+            ),
+            None,
+        )
+        if spec is None:
+            raise AppError("VIDEO_UNSUPPORTED_SPEC", "镜头的时长不在当前模拟规格组合中，未创建任务。")
+        return capabilities, VideoRequest(
+            provider=capabilities.provider,
+            model=capabilities.model,
+            capabilities_version=capabilities.capabilities_version,
+            prompt=prompt,
+            spec=spec,
+            source_refs=record.source_refs,
+        )
+
+    def _shot_media(self, draft, shot, capabilities):
+        """Prove every reference image before it becomes part of a frozen request."""
+        frames = MODE_FRAMES[shot.mode]
+        if not frames:
+            return ()
+        rule = capabilities.image_input
+        if rule is None:
+            raise AppError("VIDEO_UNSUPPORTED_MODE", "当前能力不支持图生视频参考图，未创建任务。")
+        media = []
+        for frame, asset_id in zip(frames, shot.reference_asset_ids, strict=True):
+            raw = draft["assets"].get(asset_id)
+            if raw is None:
+                raise AppError("ASSET_NOT_FOUND", "镜头参考图不存在，未创建任务。")
+            asset = Asset.model_validate(raw)
+            _, facts = verified_reference_data(self.store.home, asset, rule)
+            media.append(
+                ShotMediaInput(
+                    frame=frame,
+                    asset_id=asset.id,
+                    mime_type=asset.mime_type,
+                    sha256=asset.sha256,
+                    size_bytes=asset.size_bytes,
+                    size=ImageSize(width=facts.size.width, height=facts.size.height),
+                )
+            )
+        return tuple(media)
+
+    def _batch_limits(self, draft, context, plan):
+        """Enforce the three frozen ceilings before anything is registered."""
+        owned = [
+            parse_job(raw)
+            for raw in draft["jobs"].values()
+            if raw["context"]["runId"] == context.run_id and raw.get("mode") == "live"
+        ]
+        used_jobs = len(owned)
+        used_amount = sum((Decimal(job.cost.estimate.amount) for job in owned), Decimal(0))
+        ceiling_jobs = min(int(self.config.video_max_new_jobs_per_run), LIVE_JOBS_PER_RUN)
+        ceiling_cost = Decimal(self.config.video_max_run_cost)
+        estimates = [
+            shot_price(capabilities.price, request.spec.duration_seconds) for _, capabilities, request in plan
+        ]
+        for estimate in estimates:
+            if Decimal(estimate.amount) > Decimal(self.config.video_max_job_cost):
+                raise AppError("VIDEO_COST_LIMIT", "有镜头的估算超过单 Job 金额上限，整批未登记。")
+        if used_jobs + len(plan) > ceiling_jobs:
+            raise AppError(
+                "VIDEO_RUN_JOB_LIMIT",
+                f"本次 Run 最多新建 {ceiling_jobs} 个真实视频任务，整批未登记。",
+            )
+        total = used_amount + sum((Decimal(estimate.amount) for estimate in estimates), Decimal(0))
+        if total > ceiling_cost:
+            raise AppError("VIDEO_RUN_COST_LIMIT", "本次 Run 的累计估算超过金额上限，整批未登记。")
+        return RunLimitsSnapshot(
+            max_job_cost=self.config.video_max_job_cost,
+            max_new_jobs_per_run=ceiling_jobs,
+            max_run_cost=self.config.video_max_run_cost,
+            used_new_jobs=used_jobs + len(plan),
+            used_amount=money(total),
+            remaining_amount=money(ceiling_cost - total),
+        )
+
+    def _commit_generation(self, draft, context, record, version, order, plan, reused, limits) -> dict:
+        live = limits is not None
+        timestamp = self.timestamp()
+        entries, created = [], {}
+        for shot, capabilities, request in plan:
+            shot_version_id, job_id = str(uuid4()), str(uuid4())
+            estimate = None
+            if live:
+                estimate = CostEstimate(
+                    **shot_price(capabilities.price, request.spec.duration_seconds).model_dump(),
+                    max_job_cost=self.config.video_max_job_cost,
+                )
+                job = JobV3(
+                    id=job_id,
+                    context=context,
+                    operation_key=context.operation_key,
+                    request=request,
+                    request_fingerprint=request.fingerprint(),
+                    intent_fingerprint=request.intent_fingerprint(),
+                    capabilities=capabilities,
+                    policy=live_polling_policy(),
+                    created_at=timestamp,
+                    updated_at=timestamp,
+                    shot_ref=ShotRef(
+                        storyboard_id=record.id,
+                        storyboard_version=version,
+                        shot_id=shot.id,
+                        shot_version_id=shot_version_id,
+                    ),
+                    cost=CostRecordV3(estimate=estimate, limits=limits),
+                )
+            else:
+                job = Job(
+                    id=job_id,
+                    context=context,
+                    operation_key=context.operation_key,
+                    request=request,
+                    request_fingerprint=request.fingerprint(),
+                    capabilities=capabilities,
+                    policy=self.policy,
+                    created_at=timestamp,
+                    updated_at=timestamp,
+                )
+            draft["jobs"][job.id] = job.model_dump(mode="json", by_alias=True)
+            entries.append(
+                ShotVersion(
+                    id=shot_version_id,
+                    shot_id=shot.id,
+                    storyboard_version=version,
+                    job_id=job.id,
+                    request=request.model_dump(mode="json", by_alias=True),
+                    estimate=estimate,
+                    created_at=timestamp,
+                )
+            )
+            created[shot.id] = {
+                "shotId": shot.id,
+                "shotVersionId": shot_version_id,
+                "jobId": job.id,
+                "status": job.status,
+                "reused": False,
+                "estimate": estimate.model_dump(mode="json", by_alias=True) if estimate else None,
+            }
+        if entries:
+            # Same transaction as the Jobs: a crash cannot leave a half-registered batch.
+            draft["storyboards"][record.id] = with_shot_versions(record, entries).model_dump(
+                mode="json", by_alias=True
+            )
+        shots = []
+        for shot_id in order:
+            shot = shot_of(record, version, shot_id)
+            entry = created.get(shot_id)
+            if entry is None:
+                previous = reused[shot_id]
+                if previous.job_id not in draft["jobs"]:
+                    raise AppError("JOB_NOT_FOUND", "原镜头任务已不存在，请重新生成。")
+                job = parse_job(draft["jobs"][previous.job_id])
+                entry = {
+                    "shotId": shot_id,
+                    "shotVersionId": previous.id,
+                    "jobId": previous.job_id,
+                    "status": job.status,
+                    "reused": True,
+                    "estimate": previous.estimate.model_dump(mode="json", by_alias=True)
+                    if previous.estimate
+                    else None,
+                }
+            shots.append({**entry, "mode": shot.mode, "durationSeconds": shot.duration_seconds})
+        total = sum((Decimal(item["estimate"]["amount"]) for item in shots if item["estimate"]), Decimal(0))
+        return {
+            "storyboardId": record.id,
+            "storyboardVersion": version,
+            "simulated": not live,
+            "mediaAvailable": False,
+            "shots": shots,
+            "totalEstimate": {"currency": "CNY", "amount": money(total)} if live else None,
+            "limits": limits.model_dump(mode="json", by_alias=True) if live else None,
+        }
+
     def publish(self, job: Job) -> None:
         # Notifications are advisory and only follow a successful durable commit.
         # A display/notification failure must not turn an accepted write into an error.
@@ -627,7 +1062,7 @@ class JobService:
         if job.query_state != "paused" or not job.provider_task_id:
             raise AppError("JOB_QUERY_NOT_PAUSED", "只能恢复已有上游 ID 且查询已暂停的任务。")
         extra = {}
-        if isinstance(job, JobV2):
+        if isinstance(job, LiveJob):
             self.check_runtime(job)
             if self.query_deadline_passed(job):
                 raise AppError(

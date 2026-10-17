@@ -14,13 +14,19 @@ from pydantic import Field, JsonValue, model_validator
 
 from vagent.contracts import Contract, Fingerprint, Identifier, JsonTuple, UtcTimestamp
 from vagent.errors import AppError
-from vagent.video.contracts import ArtifactRef, CostEstimate, MediaId
+from vagent.video.contracts import (
+    SHOT_DURATION_MAX,
+    SHOT_DURATION_MIN,
+    ArtifactRef,
+    CostEstimate,
+    MediaId,
+    VideoRequest,
+    VideoRequestV3,
+)
 
 SHOT_LIMIT = 64
 SHOT_DESCRIPTION_MAX = 2000
 SOURCE_REF_LIMIT = 16
-SHOT_DURATION_MIN = 2
-SHOT_DURATION_MAX = 15
 ASSET_FORMAT_VERSION = "asset-image-v1"
 ASSET_EXTENSIONS = {"image/png": "png", "image/jpeg": "jpg", "image/webp": "webp"}
 
@@ -315,3 +321,63 @@ def read_storyboard(args: dict, state: dict, project_id: str) -> dict:
         "createdAt": record.created_at,
         "shots": shots,
     }
+
+
+def version_record(record: Storyboard, version: int) -> StoryboardVersion:
+    """The frozen snapshot of one saved storyboard version."""
+    for candidate in record.versions:
+        if candidate.version == version:
+            return candidate
+    raise AppError("NOT_FOUND", "这个分镜版本不存在。")
+
+
+def shot_of(record: Storyboard, version: int, shot_id: str) -> Shot:
+    """Locate one shot by its stable server-generated ID inside a saved version."""
+    for shot in version_record(record, version).shots:
+        if shot.id == shot_id:
+            return shot
+    raise AppError("SHOT_NOT_FOUND", "该镜头 ID 不属于这个分镜版本。")
+
+
+def stored_request_fingerprint(stored) -> str | None:
+    """Recompute the exact fingerprint a stored request would hash to today."""
+    if not isinstance(stored, dict):
+        return None
+    for model in (VideoRequestV3, VideoRequest):
+        try:
+            return model.model_validate(stored).fingerprint()
+        except ValueError:
+            continue
+    return None
+
+
+def latest_shot_version(record: Storyboard, storyboard_version: int, shot_id: str) -> ShotVersion | None:
+    """The most recent registration for one (version, shot) key, if any."""
+    return next(
+        (
+            item
+            for item in reversed(record.shot_versions)
+            if item.storyboard_version == storyboard_version and item.shot_id == shot_id
+        ),
+        None,
+    )
+
+
+def with_shot_versions(record: Storyboard, entries) -> Storyboard:
+    """Append registrations without touching saved versions or earlier deliveries."""
+    entries = tuple(entries)
+    if not entries:
+        return record
+    return record.model_copy(
+        update={"shot_versions": (*record.shot_versions, *entries), "revision": record.revision + 1}
+    )
+
+
+def storyboard_in_state(state: dict, project_id: str, storyboard_id) -> Storyboard:
+    """Load one storyboard limited to the current project."""
+    if not storyboard_id:
+        raise AppError("INVALID_ARGUMENTS", "缺少 storyboardId，未创建任务。")
+    raw = state["storyboards"].get(storyboard_id)
+    if raw is None or raw["projectId"] != project_id:
+        raise AppError("NOT_FOUND", "当前项目中没有这个分镜。")
+    return Storyboard.model_validate(raw)

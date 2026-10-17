@@ -12,7 +12,7 @@ from vagent.video.contracts import (
     DownloadRecord,
     Job,
     JobError,
-    JobV2,
+    LiveJob,
     ProviderCallError,
     ProviderTaskHandle,
     ProviderTaskHandleV2,
@@ -77,7 +77,7 @@ class JobWorker:
                 job = parse_job(raw)
                 scheduled = job.created_at if job.status == "pending_submit" else job.next_poll_at
                 if (
-                    isinstance(job, JobV2)
+                    isinstance(job, LiveJob)
                     and job.query_state in {"polling", "retrying"}
                     and self.service.query_deadline_passed(job)
                 ):
@@ -88,7 +88,7 @@ class JobWorker:
                         due.append((when, job.id, job))
             for _, _, job in sorted(due):
                 if (
-                    isinstance(job, JobV2)
+                    isinstance(job, LiveJob)
                     and self.service.query_deadline_passed(job)
                     and job.status in {"queued", "running"}
                 ):
@@ -98,14 +98,14 @@ class JobWorker:
                 except AppError as error:
                     # A missing old adapter must not block other queued jobs or
                     # silently replace the original request/capability snapshot.
-                    if isinstance(job, JobV2):
+                    if isinstance(job, LiveJob):
                         blocked = self.service.block(
                             job, error, stage="submit" if job.status == "pending_submit" else "query"
                         )
                         if blocked.revision != job.revision:
                             return blocked
                     continue
-                live = isinstance(job, JobV2)
+                live = isinstance(job, LiveJob)
                 if live and current_time < self._store_next_calls.get(self.service.store, current_time):
                     continue
                 try:
@@ -120,7 +120,7 @@ class JobWorker:
             return None
 
     def _snapshot(self, job: Job, snapshot: ProviderTaskSnapshot) -> Job:
-        if isinstance(job, JobV2):
+        if isinstance(job, LiveJob):
             return self._live_snapshot(job, snapshot)
         if job.provider_task_id is not None and snapshot.task_id != job.provider_task_id:
             raise ValueError("A query cannot replace the confirmed upstream ID")
@@ -142,7 +142,7 @@ class JobWorker:
             nextPollAt=after_seconds(timestamp, job.policy.interval_seconds) if active else None,
         )
 
-    def _live_snapshot(self, job: JobV2, snapshot: ProviderTaskSnapshotV2) -> JobV2:
+    def _live_snapshot(self, job: Job, snapshot: ProviderTaskSnapshotV2) -> Job:
         if snapshot.task_id != job.provider_task_id:
             raise ValueError("A snapshot cannot replace the confirmed task ID")
         if job.provider_output is not None:
@@ -190,7 +190,7 @@ class JobWorker:
 
     def _submit_error(self, job: Job, error: JobError | None = None, *, rejected: bool = False) -> Job:
         extra = {}
-        if isinstance(job, JobV2):
+        if isinstance(job, LiveJob):
             extra["providerSubmissionRequestId"] = getattr(error, "request_id", None)
         return self.service.update(
             job,
@@ -208,7 +208,7 @@ class JobWorker:
 
     async def _submit(self, job: Job, adapter: VideoProviderAdapter) -> Job:
         extra = {}
-        if isinstance(job, JobV2):
+        if isinstance(job, LiveJob):
             timestamp = self.service.timestamp()
             extra = {
                 "submissionStartedAt": timestamp,
@@ -220,7 +220,7 @@ class JobWorker:
             raw = await asyncio.wait_for(
                 adapter.submit(job.request, job.operation_key), timeout=job.policy.submit_timeout_seconds
             )
-            if isinstance(job, JobV2):
+            if isinstance(job, LiveJob):
                 value = (
                     raw.model_dump(mode="json", by_alias=True)
                     if isinstance(raw, ProviderTaskHandleV2)
@@ -258,7 +258,7 @@ class JobWorker:
             # failures. None prove that a paid upstream did not accept a request.
             return self._submit_error(job)
 
-        if isinstance(job, JobV2):
+        if isinstance(job, LiveJob):
             # Once committed, even a crash while interpreting the optional snapshot
             # can only query this ID. Never turn it back into an unconfirmed submit.
             accepted = self.service.update(
@@ -304,7 +304,7 @@ class JobWorker:
             raw = await asyncio.wait_for(
                 adapter.query(job.provider_task_id), timeout=job.policy.query_timeout_seconds
             )
-            snapshot_type = ProviderTaskSnapshotV2 if isinstance(job, JobV2) else ProviderTaskSnapshot
+            snapshot_type = ProviderTaskSnapshotV2 if isinstance(job, LiveJob) else ProviderTaskSnapshot
             snapshot = snapshot_type.model_validate(
                 raw.model_dump(mode="json", by_alias=True) if isinstance(raw, snapshot_type) else raw
             )
@@ -332,7 +332,7 @@ class JobWorker:
                 job,
                 JobError(
                     stage="query",
-                    code="QUERY_PROTOCOL_ERROR" if isinstance(job, JobV2) else "QUERY_INVALID_RESPONSE",
+                    code="QUERY_PROTOCOL_ERROR" if isinstance(job, LiveJob) else "QUERY_INVALID_RESPONSE",
                     message="上游查询返回了无效任务结果。",
                 ),
             )

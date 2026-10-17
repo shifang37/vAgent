@@ -184,7 +184,7 @@ async def test_download_does_not_hold_store_or_job_worker_and_cancel_closes_file
             worker.start()
             await asyncio.wait_for(entered.wait(), timeout=30)
             context = video_run(store, "parallel-job", project_id="second")
-            adapter = jobs._adapters[("mock", "mock-t2v")]
+            adapter = jobs.default_adapter("mock", "mock-t2v")
             second = jobs.generate(video_request(adapter), context=context)
             assert second["ok"]
             progressed = await asyncio.wait_for(JobWorker(jobs).run_once(), timeout=30)

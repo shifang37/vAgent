@@ -109,7 +109,7 @@ async def test_cli_retry_query_without_key_only_reopens_original_query_window(tm
 async def test_jobs_work_sigint_preserves_existing_agent_wait_intent(tmp_path):
     home = tmp_path / "state"
     job_id = None
-    model = ScriptedModel(lambda *_: tool_call("await_job", {"jobId": job_id}))
+    model = ScriptedModel(lambda *_: tool_call("await_job", {"jobIds": [job_id]}))
     async with ApplicationService.open(
         Config(home=home, api_key=None, video_mode="mock"), model=model
     ) as service:

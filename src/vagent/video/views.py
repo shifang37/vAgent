@@ -1,11 +1,11 @@
 """Bounded, shared Job representations for tools and local application clients."""
 
-from vagent.video.contracts import Job, JobV2
+from vagent.video.contracts import Job, JobV3, LiveJob
 
 
 def job_snapshot(job: Job) -> dict:
     """Keep the versioned Agent tool result free of execution and provider internals."""
-    if isinstance(job, JobV2):
+    if isinstance(job, LiveJob):
         return live_job_snapshot(job)
     return {
         "jobId": job.id,
@@ -26,7 +26,7 @@ def job_snapshot(job: Job) -> dict:
     }
 
 
-def live_job_snapshot(job: JobV2) -> dict:
+def live_job_snapshot(job: Job) -> dict:
     download = None
     if job.download:
         raw = job.download.model_dump(mode="json", by_alias=True)
@@ -45,7 +45,7 @@ def live_job_snapshot(job: JobV2) -> dict:
             )
         }
         download["error"] = job.download.error.public() if job.download.error else None
-    return {
+    view = {
         "jobId": job.id,
         "revision": job.revision,
         "mode": "live",
@@ -77,6 +77,9 @@ def live_job_snapshot(job: JobV2) -> dict:
         "error": job.error.public() if job.error else None,
         "result": job.result.model_dump(mode="json", by_alias=True) if job.result else None,
     }
+    if isinstance(job, JobV3):
+        view["shotRef"] = job.shot_ref.model_dump(mode="json", by_alias=True)
+    return view
 
 
 def job_view(job: Job) -> dict:
@@ -97,7 +100,7 @@ def job_view(job: Job) -> dict:
                     and job.download.phase in {"failed", "committed"}
                 )
             }
-            if isinstance(job, JobV2)
+            if isinstance(job, LiveJob)
             else {}
         ),
     }
@@ -105,6 +108,6 @@ def job_view(job: Job) -> dict:
 
 def cli_job_view(job: Job) -> dict:
     view = job_view(job)
-    if isinstance(job, JobV2) and job.download:
+    if isinstance(job, LiveJob) and job.download:
         view["localMediaPath"] = job.download.relative_path
     return view

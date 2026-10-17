@@ -22,6 +22,7 @@ from vagent.waiting import (
     ToolExecutionContext,
     ToolResult,
     WaitBinding,
+    parse_wait,
 )
 
 
@@ -89,15 +90,15 @@ class WaitService:
                     {"type": f"wait.{phase}", "runId": binding.context.run_id, "waitId": binding.id}
                 )
 
-    def get(self, wait_id: str) -> WaitBinding:
+    def get(self, wait_id: str):
         raw = self.store.snapshot()["waits"].get(wait_id)
         if raw is None:
             raise AppError("WAIT_NOT_FOUND", "没有此持久等待记录，未重新执行原调用。")
-        return WaitBinding.model_validate(raw)
+        return parse_wait(raw)
 
     def bindings(self, run_id: str) -> list[WaitBinding]:
         return [
-            WaitBinding.model_validate(raw)
+            parse_wait(raw)
             for raw in self.store.snapshot()["waits"].values()
             if raw["context"]["runId"] == run_id
         ]
@@ -107,7 +108,7 @@ class WaitService:
         current = draft["waits"][binding.id]
         if current["revision"] != binding.revision:
             raise AppError("STALE_WAIT", "等待记录已变化，请重新读取。")
-        updated = WaitBinding.model_validate({**current, **changes, "revision": binding.revision + 1})
+        updated = parse_wait({**current, **changes, "revision": binding.revision + 1})
         draft["waits"][binding.id] = updated.model_dump(mode="json", by_alias=True)
         return updated
 
@@ -228,13 +229,14 @@ class WaitService:
     def resolve(self, binding: WaitBinding, resolvers: Mapping[str, Callable]) -> WaitBinding:
         if binding.status != "armed" or not binding.auto_resume:
             return binding
-        if self.clock() >= datetime.fromisoformat(binding.deadline_at):
+        resolve = resolvers.get(binding.resource.kind)
+        if resolve is None:
+            raise AppError("WAIT_RESOLVER_UNAVAILABLE", "原外部资源的等待解析器不可用。")
+        # A resolver may summarize a partial result at its own deadline; the saved
+        # timeout error still applies whenever it reports that nothing changed.
+        result = resolve(binding)
+        if result is None and self.clock() >= datetime.fromisoformat(binding.deadline_at):
             result = failure(binding.timeout_error.code, binding.timeout_error.message)
-        else:
-            resolve = resolvers.get(binding.resource.kind)
-            if resolve is None:
-                raise AppError("WAIT_RESOLVER_UNAVAILABLE", "原外部资源的等待解析器不可用。")
-            result = resolve(binding)
         if result is None:
             return binding
         outcome = TypeAdapter(ToolResult).validate_python(result).model_dump(mode="json", by_alias=True)
@@ -247,7 +249,7 @@ class WaitService:
     def claim(self, binding: WaitBinding) -> WaitBinding:
         def claim(draft):
             record = draft["runs"][binding.context.run_id]
-            current = WaitBinding.model_validate(draft["waits"][binding.id])
+            current = parse_wait(draft["waits"][binding.id])
             if current.revision != binding.revision:
                 raise AppError("STALE_WAIT", "等待记录已变化，未领取恢复权。")
             if not current.auto_resume or current.status not in {"ready", "claimed"}:
@@ -278,7 +280,7 @@ class WaitService:
         confirmed = binding.confirmed_result(token)
 
         def commit(draft):
-            current = WaitBinding.model_validate(draft["waits"][binding.id])
+            current = parse_wait(draft["waits"][binding.id])
             current.confirmed_result(token)
             record = draft["runs"][context.run_id]
             if record["status"] == "cancelled" or not current.auto_resume:

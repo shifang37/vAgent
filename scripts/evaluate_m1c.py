@@ -352,7 +352,7 @@ class FixtureModel:
                 content=f"真实任务已登记：{job_id}；云端生成与本地媒体尚未完成，不能声称已有可播放视频。"
             )
         if "await_job" not in sequence:
-            return calls(("await_job", {"jobId": job_id}))
+            return calls(("await_job", {"jobIds": [job_id]}))
         result = latest["await_job"]
         source = f"来源 {source_id_from(prompt)} v1。" if case.source else ""
         if result.get("ok"):
@@ -765,7 +765,7 @@ def grade(case, item, *, offline):
         checks.update(
             await_original_job=bool(awaited)
             and all(
-                call["arguments"] == {"jobId": job["id"]} for call in trace if call["name"] == "await_job"
+                call["arguments"] == {"jobIds": [job["id"]]} for call in trace if call["name"] == "await_job"
             ),
             durable_deliveries_match=all(
                 binding["status"] == "delivered"
