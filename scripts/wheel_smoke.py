@@ -90,7 +90,7 @@ class WaitDemo:
                     {
                         "id": "await",
                         "name": "await_job",
-                        "args": {"jobId": self.job_id},
+                        "args": {"jobIds": [self.job_id]},
                     }
                 ],
             )
@@ -226,11 +226,14 @@ class LiveMediaDemo:
                 tool_calls=[{"id": "capabilities", "name": "video_capabilities", "args": {}}],
             )
         if "video_generate" not in seen:
-            capability = json.loads(messages[-1].content)["data"]["models"][0]
+            # The M2 live view publishes the shot entries (wan27-shot-beijing-v2);
+            # the frozen single-shot version stays registered for this path.
             args = {
-                **{key: capability[key] for key in ("provider", "model", "capabilitiesVersion")},
+                "provider": "wan",
+                "model": "wan2.7-t2v-2026-06-12",
+                "capabilitiesVersion": "wan27-t2v-beijing-v1",
                 "prompt": "wheel live fixture",
-                "spec": capability["specs"][0],
+                "spec": {"durationSeconds": 5, "resolution": "720p", "aspectRatio": "16:9"},
             }
             return AIMessage(
                 content="", tool_calls=[{"id": "generate", "name": "video_generate", "args": args}]
@@ -242,7 +245,7 @@ class LiveMediaDemo:
             self.job_id = data["jobId"]
             return AIMessage(
                 content="",
-                tool_calls=[{"id": "await", "name": "await_job", "args": {"jobId": self.job_id}}],
+                tool_calls=[{"id": "await", "name": "await_job", "args": {"jobIds": [self.job_id]}}],
             )
         data = json.loads(messages[-1].content)["data"]
         assert data["status"] == "succeeded" and data["mediaAvailable"] and len(data["mediaRefs"]) == 1
