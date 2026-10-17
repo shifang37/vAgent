@@ -12,7 +12,7 @@
 | `tests/test_m2_evaluation.py`：套件回归、评分器反例、显式续跑与预算边界 | 完成 |
 | wheel smoke 的 M2 扩展：离线套件、分镜/素材 CLI 与 HTTP 面 | 完成 |
 | 受控浏览器证据复跑（输出前缀 `m2-d4-browser`，不覆盖 D3 证据） | 完成 |
-| 四组 CI | <!-- FILL: CI --> |
+| 四组 CI | 完成（`fb3b6d4`，[运行 39015717826](https://github.com/shifang37/vAgent/actions/runs/39015717826)） |
 | `docs/M2_ACCEPTANCE.md`、README、M1_PLAN、Harness 设计与各验收文档同步 | 完成 |
 | 真实成本受控多镜头联调（2 镜头 + 1 次单镜头重做，submit≤3、估算≤9.00 CNY） | 待额度批准（第 7 节） |
 
@@ -27,7 +27,7 @@
 | `storyboard-draft` | 只保存分镜，不登记 | 3 个有序镜头、稳定 shotId、i2v/flf2v 参考图来自素材库、`sourceRefs` 保留 brief v1、逐镜头与合计估算回显、无 Job 无提交 |
 | `batch-delivered` | 一次登记 N 镜头并逐镜头本地交付 | 3 个 JobV3（`shotRef` 对齐）、每 Job 估算 3.00、额度快照（4 / 12.00 / 已用 3 / 剩余 3.00）、同参数重放复用原 Job、集合等待一次登记、3 个 MP4 与夹具哈希一致、媒体接口 GET/HEAD/206/416/附件名/ETag 全通过、i2v 提交体为 Base64 `first_frame` 且不发送 `ratio`、无签名或工作空间标识泄漏 |
 | `partial-failure` | 单镜头失败不扩散 | 上游第 2 个任务 FAILED（`PROVIDER_GENERATION_FAILED`），另外 2 个交付；集合等待摘要 `failed=1/succeeded=2`；回复引用失败 jobId 与错误码；该镜头由用户重做后交付 |
-| `redo-target` | 重做只影响目标镜头 | 目标镜头 +1 版本 +1 Job，其他镜头的版本、Job 身份（revision/任务 ID/提交次数/媒体）逐字段不变；同请求重放返回同一结果且不新增 Job；过期 revision 返回 `VERSION_CONFLICT` 且状态不变 |
+| `redo-target` | 重做只影响目标镜头 | 目标镜头 +1 版本 +1 Job，其他镜头的版本、Job 身份（revision、任务 ID、提交次数、媒体 ID）与已交付媒体的文件哈希逐一不变；同请求重放返回同一结果且不新增 Job；过期 revision 返回 `VERSION_CONFLICT` 且状态不变 |
 | `over-limit` | 三重上限整批拒绝 | 5 镜头 → `VIDEO_RUN_JOB_LIMIT`；6 秒镜头 → `VIDEO_COST_LIMIT`；两次都未登记任何 Job、未提交、未新增 ShotVersion；回复说明 3.00/4/12.00 上限 |
 | `unsupported` | 未核实能力明确拒绝 | 30 秒、4K、1:1 与镜头延长均被指出不可用并请求确认；无登记、无提交 |
 | `needs-confirmation` | 未确认不登记 | `confirm=false` 返回 `CONFIRMATION_REQUIRED`，无 Job、无提交、无 ShotVersion |
@@ -49,7 +49,7 @@ python scripts/evaluate_m2.py --output output/m2-d4-offline.json
 
 ## 4. 测试与门禁
 
-- 离线全量：在本机（Windows 11、工作环境 Python 3.11）运行完整 pytest 套件 **942 passed / 2 skipped**（D3 基线 917 passed / 2 skipped；D4 新增 25 项，全部来自 `tests/test_m2_evaluation.py`）。两项跳过仍为 Windows 账户无符号链接权限的既有跳过。
+- 离线全量：在本机（Windows 11、工作环境 Python 3.11）运行完整 pytest 套件 **943 passed / 2 skipped**（405 秒；D3 基线 917 passed / 2 skipped；D4 新增 26 项，全部来自 `tests/test_m2_evaluation.py`）。两项跳过仍为 Windows 账户无符号链接权限的既有跳过。
 - `ruff check` 与 `ruff format --check` 覆盖 `src/vagent tests scripts`；`node --check` 三个前端脚本；`node --test tests/test_job_state.mjs`（10 项）与 `tests/test_storyboard_state.mjs`（11 项）通过。
 - 兼容证据（D1–D3 冻结）：`tests/test_m2_compatibility.py` 的 pre-M2 签名逐字节用例、等待与恢复套件、媒体与评测套件全部通过；D4 未改动任何工具签名、版本号或冻结数值（仅新增脚本与测试）。
 
@@ -61,7 +61,17 @@ D4 复跑 D3 的受控浏览器夹具，输出前缀改为 `m2-d4-browser`，因
 
 ## 6. 四组 CI
 
-<!-- FILL: ci -->
+四组 CI（ubuntu/windows × Python 3.11/3.12，`.github/workflows/ci.yml`「Agent checks」）在 D4 收尾提交 **`fb3b6d4`** 上全部完成，结论均为 **success**（[运行 39015717826](https://github.com/shifang37/vAgent/actions/runs/39015717826)）：check runs `117347306230`（ubuntu 3.11）、`117347306335`（ubuntu 3.12）、`117347306428`（windows 3.11）、`117347306487`（windows 3.12）；汇总证据保存在 `output/m2-d4-ci-fb3b6d4-summary.json`。该提交的树包含全部 D4 代码与文档（`4cd8ddb` 新增套件与安装态面、`1079438` 文档、`fb3b6d4` 重做证据收紧）。
+
+该轮 CI 依次执行 ruff check、node 语法检查与 `node --test`（两个前端状态测试文件均为 0 跳过）、pytest、wheel 构建与安装态 `scripts/wheel_smoke.py`。安装态 smoke 输出：
+
+```text
+PASS: installed wheel, Web assets, config, streaming, text/quality, MCP, mock video tools, durable wait, original Run restart/automatic continuation, readonly delivery, unchanged budgets, CLI list/get/usage, five M1-B cases, live protocol with local media restart and CLI media evidence, seven M1-C cases, M2 storyboard/asset CLI and HTTP surface, seven M2 cases, cleanup.
+```
+
+套件结果：ubuntu 3.11 **942 passed / 3 skipped**（266.61 秒）、ubuntu 3.12 **942 passed / 3 skipped**（329.22 秒）、windows 3.11 **944 passed / 1 skipped**（851.29 秒）、windows 3.12 **944 passed / 1 skipped**（775.91 秒）。平台间差异（本机 Windows 2 跳过、CI Windows 1 跳过、ubuntu 3 跳过）与 D1–D3 同因，仍为既有的符号链接权限类跳过与 Windows 专用控制台夹具（`skipif(sys.platform != "win32")`），不是 D4 引入。
+
+D4 没有使用 CI 试错：离线全量套件、ruff、前端检查、安装态 wheel smoke 与受控浏览器验证都在推送前于本机完成（见第 4、5 节），首轮推送 `1079438` 的四组 CI 同样全部通过（ubuntu 941/3、windows 943/1，安装态 smoke PASS）。随后为「重做证据不再包含恒空字段」追加 `fb3b6d4`（第 8 节第 6 条），本节记录的是该提交上的最终四组结果。其后的文档提交（本条记录与 README、M1_PLAN、M2_PLAN、Harness 设计的同步）不改动代码。
 
 ## 7. 真实成本受控多镜头联调（`--live`）
 
@@ -80,6 +90,7 @@ D4 复跑 D3 的受控浏览器夹具，输出前缀改为 `m2-d4-browser`，因
 3. **i2v 与 t2v 的报价版本不同（评测脚本缺陷）**：逐镜头断言曾固定 t2v 的 `wan27-beijing-720p-20261010`，图片模式应为 `wan27-i2v-beijing-720p-20261016`。
 4. **确认用例未真正不确认（夹具缺陷）**：`needs-confirmation` 用例漏设 `confirm=false`，脚本模型在「未确认却被接受」时会因缺少 `error` 字段抛错，掩盖真实结论。已修正并用例断言 `confirm` 从未为真。
 5. **无分镜项目的读取（评测脚本缺陷）**：`capture_state` 曾以「整个数据目录存在分镜」为条件读取当前项目分镜，在拒绝类用例上抛 `NOT_FOUND`。改为按项目捕获并对 `NOT_FOUND` 记 `None`。
+6. **重做证据中的一个恒空字段（评测脚本缺陷，交付前自查发现）**：重做的「其他镜头不动」比较曾包含 `MediaRef.sha256`，但 `MediaRef` 只携带 `mediaId`，该键恒为 `None`，使这项比较看起来比实际更强。修正为只保留真实身份字段，并新增独立断言「重做前后已交付媒体文件哈希逐一相等」（`redo_left_other_media_untouched`），同时补一个对应的评分器反例用例。该修正以独立提交 `fb3b6d4` 追加，最终 CI 记录在该提交上。
 
 ## 9. 未做真实样本的模式与限制
 
