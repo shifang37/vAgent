@@ -66,7 +66,8 @@
 
 ## 7. 门禁与回归
 
-- 离线全量：**865 passed / 2 skipped**（D1 基线 839；新增 26 项：`tests/test_m2_generation.py` 16 项、`tests/test_wan_shot_provider.py` 10 项）。
+- 离线全量：**868 passed / 2 skipped**（D1 基线 839；新增 29 项：`tests/test_m2_generation.py` 19 项、`tests/test_wan_shot_provider.py` 10 项）。
+- 新增覆盖：同一调用标识下的**并发**批量登记与并发重做各一例（四个线程只登记一次，验证 Store 的按操作重放）；以及 **mock 端到端 N 镜头含一次重做**的 Agent 级轨迹（两镜头生成后，第二个 Run 只改并只重做其中一个镜头，另一镜头的 ShotVersion、Job 与描述不动，全程无供应商调用）。
 - `ruff check` 与 `ruff format --check` 全库通过。
 - 兼容证据：pre-M2 mock/live 签名与工具集恢复用例（`tests/test_m2_compatibility.py`）继续通过；`tests/test_video_jobs.py`、`tests/test_video_tools.py`、`tests/test_live_jobs.py`、`tests/test_live_application.py`、`tests/test_m1c_evaluation.py`、`tests/test_wait_runtime.py`、`tests/test_wait_compatibility.py` 全部通过。
 - 四组 CI：见第 9 节。
@@ -85,9 +86,13 @@
 8. **M2 提交前价格校验只认同一报价**：`JobV3` 的报价按自身能力条目的单价 × 时长冻结，因此提交前改为与该冻结报价比较（费率变化会以适配器/能力不可用呈现）。
 9. **测试侧适配**：`_adapters`/`_capabilities` 私有字典的键由 `(provider, model)` 变为三元组（新增公开 `default_adapter`）；`await_job` 的冻结调用形状（`jobId`）保留在 pre-M2 用例中，当前工具用例改用 `jobIds`；live 应用级用例的 `toolsVersion/rulesVersion` 断言更新为 4/4；`evaluate_m1b.py`/`evaluate_m1c.py` 的 `await_job` 调用与评分断言同步为集合形状。
 
+10. **安装态 wheel smoke 仍用旧形状**：`scripts/wheel_smoke.py` 的 mock 等待演示仍以 `jobId` 调用 `await_job`，live 演示又从 `video_capabilities` 返回的第一个条目构造 `video_generate`（M2 下该条目已是 shot 条目，`video_generate` 无法消费）。三处调用改为 `jobIds` 形状，live 演示显式钉住冻结的单镜头版本与规格。首轮 `1e28242` 与次轮 `247964e` 的四组 CI 因此都在安装态 smoke 上失败（`smoke_video_tools` 的等待断言），修复后自 `93784f4` 起全部通过；本次先在独立环境（`tmp/m2-d1-wheel-env`）安装自建轮子跑通 smoke 再推送，避免继续用 CI 试错。
+
 ## 9. 四组 CI
 
-本工作包的改动尚未推送，四组 CI 在提交推送后补录（格式沿用 D1：提交哈希 + check run ID + 结论）。D2 的完成门槛不包含 CI；四组 CI 与安装态 wheel smoke 的汇总属 [M2_PLAN](./M2_PLAN.md) 第 7 节的阶段完成项（D4）。
+四组 CI（ubuntu/windows × 3.11/3.12，`.github/workflows/ci.yml`「Agent checks」）在最终代码提交 **`34cf1aa`** 上全部通过（check runs `117304190739` / `117304190715` / `117304190659` / `117304190547`，结论均为 success）：该轮 ruff 与 node 检查通过，套件 ubuntu 3.11 为 **867 passed / 3 skipped**、windows 3.11 为 **869 passed / 1 skipped**，安装态 `scripts/wheel_smoke.py` 输出 PASS（含持久等待、原 Run 重启续接、M1-B 五例与 M1-C 七例）。平台间的跳过数差异（本机 Windows 2、ubuntu 3、CI windows 1）与 D1 同因，仍为既有的符号链接权限类跳过，不是 D2 引入。
+
+中间轮次：首轮 `1e28242` 与次轮 `247964e` 均在安装态 wheel smoke 上失败（原因与修复见第 8 节第 10 项）；`93784f4` 起四组全绿（`117303646485` / `117303646434` / `117303646417` / `117303646346`），该提交与 `34cf1aa` 的差别仅为新增的并发用例与端到端重做用例。本次文档提交不改动代码。
 
 ## 10. 留给 D3 的入口
 
