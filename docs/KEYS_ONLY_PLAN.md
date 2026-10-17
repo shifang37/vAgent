@@ -82,7 +82,7 @@
 ## 6. 阶段完成清单
 
 - [x] K0：设计冻结完成（2026-10-17；五项决议见第 5 节；submit=0）。
-- [ ] K1：契约与服务端完成（受控 HTTP 与全量回归；submit=0）。
+- [x] K1：契约与服务端完成（2026-10-17；受控 HTTP 全链路、V2/V3 逐字节回归与混合目录重启用例；离线全量 947 passed / 2 skipped；submit=0）。见 [K1 验收](./KEYS_ONLY_K1_ACCEPTANCE.md)。
 - [ ] K2：设置页最小表单、零费用探测与免重启生效完成。
 - [ ] K3：wheel smoke、四组 CI 与文档同步完成；共享域真实样本完成（submit=1、估算 3.00 CNY，执行前显式批准额度）。
 - [ ] 各工作包完成时同步 README、M3_PLAN 与 VIDEO_API_NOTES。
