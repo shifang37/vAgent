@@ -11,7 +11,7 @@ from uuid import uuid4
 from pydantic import ValidationError
 
 from vagent.errors import AppError, failure
-from vagent.video.assets import verified_reference_data
+from vagent.video.assets import AssetService, verified_reference_data
 from vagent.video.contracts import (
     LIVE_JOBS_PER_RUN,
     MODE_FRAMES,
@@ -187,6 +187,17 @@ def _validate_wait_members(state: dict) -> None:
 
 def money(value) -> str:
     return format(Decimal(value), ".2f")
+
+
+def _preview_context(project_id: str) -> ToolExecutionContext:
+    """A stand-in context for read-only previews: it owns no Jobs, so usage is zero."""
+    return ToolExecutionContext(
+        project_id=project_id,
+        session_id=project_id,
+        run_id=str(uuid4()),
+        model_step=1,
+        tool_call_id="preview",
+    )
 
 
 def recover_interrupted_jobs(state: dict, timestamp: str) -> None:
@@ -409,6 +420,7 @@ class JobService:
         from vagent.video.media import MediaService
 
         self.media = MediaService(self)
+        self.assets = AssetService(store)
         self._adapters = {}
         self._capabilities = {}
         self._published = []
@@ -724,6 +736,74 @@ class JobService:
         # call's original result instead of registering a second Job.
         return self._register_batch(context, parsed, "shot_redo", context.operation_key, redo=True)
 
+    def generation_mode(self) -> str:
+        """The active video mode; only mock and live can register shot Jobs."""
+        mode = getattr(self.config, "video_mode", "off")
+        if mode not in {"mock", "live"}:
+            raise AppError("VIDEO_MODEL_UNAVAILABLE", "当前视频模式不开放镜头生成。")
+        return mode
+
+    def _shot_estimate(self, capabilities, request) -> CostEstimate:
+        """The frozen quote of one shot: the verified rate times its own duration."""
+        return CostEstimate(
+            **shot_price(capabilities.price, request.spec.duration_seconds).model_dump(),
+            max_job_cost=self.config.video_max_job_cost,
+        )
+
+    def preview_shots(self, project_id: str, args: dict) -> dict:
+        """Read-only estimate preview for the local confirmation dialog.
+
+        It derives exactly the requests a registration would freeze and applies the
+        same ceilings, but assumes a fresh Run: nothing is registered, submitted or
+        written, and reused shots are reported as reused.
+        """
+        parsed = self._generation_args(ShotGenerationArgs, args)
+        if isinstance(parsed, dict):
+            raise AppError(parsed["error"]["code"], parsed["error"]["message"])
+        state = self.store.snapshot()
+        mode = self.generation_mode()
+        live = mode == "live"
+        if live:
+            self.check_live_configuration()
+        record = storyboard_in_state(state, project_id, parsed.storyboard_id)
+        version = parsed.storyboard_version
+        if record.current_version != version:
+            raise AppError("VERSION_CONFLICT", "分镜版本已变化，请重新读取后再生成。")
+        plan, rows = [], []
+        for shot_id in parsed.shot_ids:
+            shot = shot_of(record, version, shot_id)
+            capabilities, request = self._derive_shot(state, record, shot, live=live)
+            previous = latest_shot_version(record, version, shot_id)
+            reuse = (
+                previous is not None and stored_request_fingerprint(previous.request) == request.fingerprint()
+            )
+            estimate = self._shot_estimate(capabilities, request) if live else None
+            if not reuse:
+                plan.append((shot, capabilities, request))
+            rows.append(
+                {
+                    "shotId": shot.id,
+                    "order": shot.order,
+                    "mode": shot.mode,
+                    "durationSeconds": shot.duration_seconds,
+                    "reused": reuse,
+                    "jobId": previous.job_id if reuse else None,
+                    "estimate": estimate.model_dump(mode="json", by_alias=True) if estimate else None,
+                }
+            )
+        limits = self._batch_limits(state, _preview_context(project_id), plan) if live else None
+        total = sum((Decimal(row["estimate"]["amount"]) for row in rows if row["estimate"]), Decimal(0))
+        return {
+            "storyboardId": record.id,
+            "storyboardVersion": version,
+            "storyboardRevision": record.revision,
+            "mode": mode,
+            "simulated": not live,
+            "shots": rows,
+            "totalEstimate": {"currency": "CNY", "amount": money(total)} if live else None,
+            "limits": limits.model_dump(mode="json", by_alias=True) if limits else None,
+        }
+
     @staticmethod
     def _generation_args(model, args):
         if not isinstance(args, dict):
@@ -919,10 +999,7 @@ class JobService:
             shot_version_id, job_id = str(uuid4()), str(uuid4())
             estimate = None
             if live:
-                estimate = CostEstimate(
-                    **shot_price(capabilities.price, request.spec.duration_seconds).model_dump(),
-                    max_job_cost=self.config.video_max_job_cost,
-                )
+                estimate = self._shot_estimate(capabilities, request)
                 job = JobV3(
                     id=job_id,
                     context=context,

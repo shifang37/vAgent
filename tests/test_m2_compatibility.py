@@ -1,11 +1,14 @@
 """Pre-M2 signatures captured at 92a4a87 restore byte-identically under M2 code."""
 
+import hashlib
+
 import httpx
 import pytest
 from conftest import ScriptedModel, tool_call
 from langchain_core.messages import AIMessage
 
 from vagent.context import ContextBuilder
+from vagent.errors import AppError
 from vagent.runner import AgentRunner
 from vagent.storage import FileStore
 from vagent.tools import create_project_tools
@@ -199,3 +202,87 @@ async def test_recorded_mock_v2_run_resumes_under_m2_with_original_tools(store):
         system_prompt = resumed_model.inputs[0][0].content
         assert "不能自动降低规格" in system_prompt
         assert "storyboard_save" not in system_prompt
+
+
+# Captured from the D2 build (34cf1aa) with tmp/m2-d3-capture/capture_signatures.py,
+# before D3 added the read-only asset tool and extended the M2 rules text inside the
+# frozen 4/4 version. Pre-M2 (execution v2) stays byte-frozen above; an M2 Run
+# recorded by the D2 build is refused with RESUME_CONFIG_CHANGED instead of silently
+# resuming with a different tool set — the same pre-release boundary D1 recorded for
+# D1-era Runs, and the reason these hashes are kept here as evidence.
+D2_M2_SIGNATURES = {
+    "mock-v3-ctx1-ro0": "0d93e06bb445b62295338d8f094f44c3ffc2db9a8118098f35bca89cc7d1920b",
+    "mock-v3-ctx2-ro0": "e38edf7947f3e097271ecaea817e1733456a34c5a5e822079af090c9605da6b5",
+    "live-v3-ctx1-ro0": "82e9891b5052d82b9a8f0d03d1f4fc0ac686a30cf25145d74c9eced256deb61b",
+    "live-v3-ctx2-ro0": "68feeb058b6ea912d20e0e215c6ab70d9958eaa7ad24ab29565156180158e6b2",
+}
+D2_M2_TOOL_NAMES = [
+    "artifact_read",
+    "artifact_save",
+    "await_job",
+    "job_get",
+    "plan_update",
+    "project_read",
+    "project_update",
+    "shot_generate",
+    "storyboard_read",
+    "storyboard_save",
+    "video_capabilities",
+    "video_generate",
+]
+D2_M2_INSTRUCTIONS = {
+    "mock": "b41fa1a68bf4d333ad721104229d91a49a7c830fdd8dd97fb90528a5704e3eb1",
+    "live": "756a9346fe6827924932d67909d05a126929fd2e25cd8ae4fa5743a2791b1d2a",
+}
+
+
+def test_the_m2_view_adds_one_read_only_asset_tool_without_moving_its_version(store):
+    tools = mock_tools(store)
+    names = sorted(spec["function"]["name"] for spec in tools.specs())
+    assert names == sorted([*D2_M2_TOOL_NAMES, "asset_read"])
+    features = tools.features["video"]
+    assert (features["mode"], features["toolsVersion"], features["rulesVersion"]) == ("mock", 4, 4)
+    assert hashlib.sha256(tools.instructions.encode("utf-8")).hexdigest() != D2_M2_INSTRUCTIONS["mock"]
+    assert "asset_read" in tools.instructions
+
+
+async def test_the_live_m2_view_extends_its_rules_at_the_same_version(store):
+    async with WanAdapter(
+        api_key="capture-fixture",
+        workspace_id="capture-workspace",
+        transport=httpx.MockTransport(lambda _: httpx.Response(500)),
+    ) as wan:
+        tools = register_video_tools(
+            create_project_tools(), JobService(store, [MockVideoAdapter(store), wan]), mode="live"
+        )
+        features = tools.features["video"]
+        assert (features["toolsVersion"], features["rulesVersion"], features["mode"]) == (4, 4, "live")
+        assert len(features["capabilities"]) == 2
+        assert "asset_read" in {spec["function"]["name"] for spec in tools.specs()}
+        assert hashlib.sha256(tools.instructions.encode("utf-8")).hexdigest() != D2_M2_INSTRUCTIONS["live"]
+        # The frozen M1-C view still hides every M2 tool.
+        assert sorted(spec["function"]["name"] for spec in tools.for_execution_version(2).specs()) == (
+            PRE_M2_TOOL_NAMES
+        )
+
+
+async def test_a_d2_era_m2_run_is_refused_instead_of_resuming_differently(store):
+    def interrupted(*_):
+        raise RuntimeError("offline interruption")
+
+    model = ScriptedModel(interrupted)
+    model.name = "m2-restore-fixture"
+    runner = AgentRunner(store=store, model=model, tools=mock_tools(store), execution_version=3)
+    recorded = await runner.run("coffee", "确认模拟能力")
+    assert recorded["status"] == "failed" and recorded["resumable"]
+    assert recorded["toolFeatures"]["video"]["toolsVersion"] == 4
+    assert recorded["contextSignature"] != D2_M2_SIGNATURES["mock-v3-ctx2-ro0"]
+    store.transaction(
+        lambda draft: draft["runs"][recorded["id"]].update(
+            contextSignature=D2_M2_SIGNATURES["mock-v3-ctx2-ro0"]
+        )
+    )
+    current = AgentRunner(store=store, model=model, tools=mock_tools(store))
+    with pytest.raises(AppError) as caught:
+        await current.resume(recorded["id"])
+    assert caught.value.code == "RESUME_CONFIG_CHANGED"

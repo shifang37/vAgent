@@ -44,7 +44,7 @@ LIVE_VIDEO_RULES_VERSION = 4
 WAIT_TIMEOUT_SECONDS = 600
 WAIT_SET_LIMIT = 16
 # Every tool this file adds after the frozen pre-M2 versions 1/2/3.
-M2_TOOL_NAMES = ("storyboard_read", "storyboard_save", "shot_generate")
+M2_TOOL_NAMES = ("storyboard_read", "storyboard_save", "shot_generate", "asset_read")
 M2_STORYBOARD_TOOL_NAMES = ("storyboard_read", "storyboard_save")
 
 LEGACY_VIDEO_RULES = """当前启用 mock 视频模式，只能登记模拟任务；所有结果均为 simulated=true、mediaAvailable=false。
@@ -67,6 +67,7 @@ VIDEO_RULES_V4 = """当前启用 mock 视频模式，只能登记模拟任务；
 多镜头需求先用 storyboard_save 保存结构化分镜：按顺序给出每个镜头的 description、framing、durationSeconds 与 mode；
 镜头 id 由服务端生成并跨版本稳定，修改时带 storyboardId 与 expectedVersion，产生新版本并保留旧版本。
 storyboard_read 读取当前分镜与各镜头版本摘要。保存分镜不创建视频任务。
+asset_read 列出素材库中已导入的参考图（assetId、格式、尺寸、来源项目）；引用素材只用 assetId，不展示或索取本地路径。
 shot_generate 为选定镜头批量登记模拟任务，必须显式确认并回显逐镜头估算；同一分镜版本同一镜头的相同请求复用原任务。
 重做只由用户显式发起且只影响目标镜头；其他镜头的版本、任务与媒体必须保持不动。
 需要生成时先调用 video_capabilities，根据返回的模型、能力版本和完整规格组合构造 video_generate。
@@ -122,6 +123,7 @@ AWAIT_DESCRIPTION_M2 = (
 LIVE_VIDEO_RULES_V4 = """当前启用 live 视频模式，可为分镜的每个镜头登记真实万相视频任务。
 多镜头需求先用 storyboard_save 保存结构化分镜：按顺序给出每个镜头的 description、framing、durationSeconds 与 mode；
 镜头 id 由服务端生成并跨版本稳定，修改时带 storyboardId 与 expectedVersion，产生新版本并保留旧版本。storyboard_read 读取当前分镜与各镜头版本摘要。
+asset_read 列出素材库中已导入的参考图（assetId、格式、尺寸、来源项目）；i2v/首尾帧的 referenceAssetIds 只能引用其返回的 assetId，不展示或索取本地路径。
 生成前调用 video_capabilities，按返回的每个模式条目选择精确模型、能力版本和完整规格组合；图生视频/首尾帧只引用素材库中已导入的参考图，不猜测或替换模型、时长与画幅。
 shot_generate 必须显式确认，一次登记全部选中镜头；结果固定回显逐镜头与合计估算、已用与剩余额度，服务端强制每 Job 金额、每 Run 数量与累计金额三重上限，超出即整批拒绝且不部分执行。
 一次调用只登记用户确认的镜头；不得自动降规格、拆分多次调用绕过上限或重复提交同一镜头；同一分镜版本同一镜头的相同请求复用原任务。
@@ -192,6 +194,35 @@ class StoryboardSave(Arguments):
 
 class StoryboardRead(Arguments):
     storyboard_id: CanonicalId | None = None
+
+
+class AssetLookup(Arguments):
+    """Read-only asset discovery: one asset by ID, or the bounded newest listing."""
+
+    asset_id: CanonicalId | None = None
+    project_id: Identifier | None = None
+
+
+def _asset_listing(args: dict, state: dict, project_id: str) -> dict:
+    """Local metadata only: no filesystem path, private URL or content bytes."""
+    from vagent.video.assets import ASSET_LIST_LIMIT, asset_public_metadata
+    from vagent.video.storyboards import Asset
+
+    assets = [Asset.model_validate(raw) for raw in state["assets"].values()]
+    if args.get("assetId"):
+        asset = next((item for item in assets if item.id == args["assetId"]), None)
+        if asset is None:
+            raise AppError("ASSET_NOT_FOUND", "素材库中没有这个素材。")
+        return {"asset": asset_public_metadata(asset), "callerProject": project_id}
+    scope = args.get("projectId")
+    selected = [item for item in assets if scope is None or item.project_id == scope]
+    selected.sort(key=lambda item: (item.created_at, item.id), reverse=True)
+    return {
+        "assets": [asset_public_metadata(item) for item in selected[:ASSET_LIST_LIMIT]],
+        "total": len(selected),
+        "truncated": len(selected) > ASSET_LIST_LIMIT,
+        "callerProject": project_id,
+    }
 
 
 def completed_job_data(job: Job) -> dict:
@@ -590,6 +621,16 @@ def register_video_tools(registry: ToolRegistry, service: JobService, *, mode="m
             StoryboardRead,
             "read",
             read_storyboard,
+            feature="video",
+        ),
+        ToolDefinition(
+            "asset_read",
+            "读取素材库中已导入参考图的元数据（assetId、格式、尺寸、大小、来源项目）；"
+            "省略 assetId 时按导入时间倒序列出最近素材，可用 projectId 过滤。"
+            "只读，不返回本地路径或私有 URL，也不导入、删除或改写素材。",
+            AssetLookup,
+            "read",
+            _asset_listing,
             feature="video",
         ),
         ToolDefinition(

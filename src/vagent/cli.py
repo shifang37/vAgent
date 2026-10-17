@@ -17,10 +17,16 @@ from vagent.models import DemoModel
 from vagent.skills import SkillCatalog
 from vagent.storage import FileStore
 from vagent.usage import summarize_usage
+from vagent.video import clients
+from vagent.video.assets import asset_reference_loader
+from vagent.video.contracts import ImageInputRule
 from vagent.video.jobs import JobService
 from vagent.video.media import DownloadRetry
+from vagent.video.providers.mock import MockVideoAdapter
 from vagent.video.providers.wan import WanAdapter
-from vagent.video.views import cli_job_view
+from vagent.video.storyboards import find_shot, storyboard_in_state
+from vagent.video.usage import summarize_records
+from vagent.video.views import cli_job_view, current_storyboard_view, storyboard_view
 
 
 def print_json(value: object) -> None:
@@ -292,6 +298,82 @@ def show_usage(result: dict) -> None:
         print(f"[Redis 回答缓存] {json.dumps(usage['answerCache'], ensure_ascii=False)}")
 
 
+def local_storyboard(state, args) -> dict:
+    """Read one project's storyboard without starting a model, Worker or MCP server."""
+    assert_id(args.project)
+    if args.storyboard_id:
+        assert_id(args.storyboard_id)
+        return storyboard_view(state, storyboard_in_state(state, args.project, args.storyboard_id))
+    view = current_storyboard_view(state, args.project)
+    if view is None:
+        raise AppError("NOT_FOUND", "当前项目还没有结构化分镜，请先保存。")
+    return view
+
+
+def local_assets(config, store, args) -> int:
+    """Library access never needs an adapter, a model or a provider call."""
+    service = JobService(store, [], config=config)
+    if args.action == "list":
+        if args.project is not None:
+            assert_id(args.project)
+        print_json({"assets": service.assets.list(project_id=args.project)})
+        return 0
+    assert_id(args.project)
+    store.ensure_session(args.project)
+    imported, failed = [], []
+    for path in args.paths:
+        try:
+            imported.append(service.assets.import_path(path, project_id=args.project))
+        except AppError as error:
+            failed.append({"path": path, "error": {"code": error.code, "message": str(error)}})
+    print_json({"projectId": args.project, "imported": imported, "failed": failed})
+    return 1 if failed else 0
+
+
+def local_usage(state, selector: str) -> dict:
+    if selector == "all":
+        return summarize_records(state)
+    assert_id(selector)
+    if selector not in state["projects"]:
+        raise AppError("NOT_FOUND", "当前数据目录中没有这个项目。")
+    return summarize_records(state, project_id=selector)
+
+
+async def local_redo(config, store, args) -> int:
+    """Register one new ShotVersion and Job for a named shot; submits nothing."""
+    async with AsyncExitStack() as stack:
+        adapters = [MockVideoAdapter(store)]
+        if config.video_mode == "live":
+            adapters.append(
+                await stack.enter_async_context(
+                    WanAdapter(
+                        api_key=config.video_api_key,
+                        workspace_id=config.video_workspace_id,
+                        model=config.video_model,
+                        region=config.video_region,
+                        reference_loader=asset_reference_loader(store, ImageInputRule()),
+                    )
+                )
+            )
+        service = JobService(store, adapters, config=config)
+        record, shot = find_shot(store.snapshot(), args.shot_id)
+        if args.storyboard_id and record.id != args.storyboard_id:
+            raise AppError("NOT_FOUND", "这个镜头不属于指定的分镜。")
+        if args.project and record.project_id != args.project:
+            raise AppError("NOT_FOUND", "这个镜头不属于指定的项目。")
+        result = clients.redo_shot(
+            service,
+            session_id=record.project_id,
+            client_request_id=args.request_id or str(uuid4()),
+            storyboard_id=record.id,
+            storyboard_version=record.current_version,
+            shot_id=shot.id,
+            expected_revision=None,
+        )
+    print_json(result)
+    return 0
+
+
 def parser() -> argparse.ArgumentParser:
     root = argparse.ArgumentParser(prog="vagent", description="DeepSeek + LangGraph 视频创作 Agent 原型")
     root.add_argument("--version", action="version", version=__version__)
@@ -312,6 +394,14 @@ def parser() -> argparse.ArgumentParser:
     selection = usage.add_mutually_exclusive_group()
     selection.add_argument("-s", "--session")
     selection.add_argument("--run", dest="run_id")
+    selection.add_argument(
+        "--project",
+        nargs="?",
+        const="all",
+        default=None,
+        metavar="PROJECT",
+        help="按项目（省略取值时汇总整个数据目录）聚合 Job、估算与 Token 用量",
+    )
     for command in (run, chat, inspect):
         command.add_argument("-s", "--session", default="default")
     demo.add_argument("-s", "--session", default="demo")
@@ -325,6 +415,25 @@ def parser() -> argparse.ArgumentParser:
     actions.add_parser("retry-query", help="恢复已暂停的原任务查询，不重新提交").add_argument("job_id")
     actions.add_parser("retry-download", help="恢复原媒体下载，复用任务和媒体 ID").add_argument("job_id")
     actions.add_parser("work", help="持续推进任务和有效等待；Ctrl+C 退出并保留状态")
+    storyboard = commands.add_parser("storyboard", help="查看结构化分镜，不调用模型")
+    storyboard_actions = storyboard.add_subparsers(dest="action", required=True)
+    show = storyboard_actions.add_parser("show", help="读取当前项目的分镜、镜头与各镜头版本摘要")
+    show.add_argument("-s", "--project", default="default")
+    show.add_argument("--storyboard", dest="storyboard_id", help="指定分镜；省略时读取最新分镜")
+    shots = commands.add_parser("shots", help="逐镜头操作；只登记本地任务，不提交上游")
+    shot_actions = shots.add_subparsers(dest="action", required=True)
+    redo = shot_actions.add_parser("redo", help="重做一个镜头：新增 ShotVersion 并登记一个新任务")
+    redo.add_argument("shot_id")
+    redo.add_argument("-s", "--project", help="核对镜头所属项目；省略时按镜头 ID 解析")
+    redo.add_argument("--storyboard", dest="storyboard_id", help="核对镜头所属分镜")
+    redo.add_argument("--request-id", dest="request_id", help="同一请求 ID 重放原结果，不重复登记")
+    assets = commands.add_parser("assets", help="素材库：列出或导入参考图，不调用模型")
+    asset_actions = assets.add_subparsers(dest="action", required=True)
+    asset_listing = asset_actions.add_parser("list", help="列出素材元数据；省略项目时列出整个素材库")
+    asset_listing.add_argument("-s", "--project")
+    importer = asset_actions.add_parser("import", help="导入一张或多张本地图片，按哈希去重")
+    importer.add_argument("paths", nargs="+")
+    importer.add_argument("-s", "--project", default="default")
     web = commands.add_parser("web", help="启动本地 Web 与真实 Agent 编排")
     web.add_argument("--port", type=int, default=3210)
     web.add_argument("--no-open", action="store_true")
@@ -376,6 +485,18 @@ def main() -> None:
             if args.action == "work":
                 raise SystemExit(asyncio.run(work_jobs(config)))
             local_jobs(config, args)
+        elif args.command == "storyboard":
+            with FileStore.open(config.home) as store:
+                print_json(local_storyboard(store.snapshot(), args))
+        elif args.command == "shots":
+            with FileStore.open(config.home) as store:
+                raise SystemExit(asyncio.run(local_redo(config, store, args)))
+        elif args.command == "assets":
+            with FileStore.open(config.home) as store:
+                raise SystemExit(local_assets(config, store, args))
+        elif args.command == "usage" and args.project is not None:
+            with FileStore.open(config.home) as store:
+                print_json(local_usage(store.snapshot(), args.project))
         elif args.command == "usage":
             with FileStore.open(config.home) as store:
                 runs = store.snapshot()["runs"]

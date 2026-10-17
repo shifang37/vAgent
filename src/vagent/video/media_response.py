@@ -55,15 +55,25 @@ class LocalMediaResponse(StreamingResponse):
             self.lease.close()
 
 
-def media_response(asset, lease, *, method, request_headers, download=False):
+def media_response(
+    asset,
+    lease,
+    *,
+    method,
+    request_headers,
+    download=False,
+    content_type="video/mp4",
+    extension="mp4",
+):
+    """Deliver one verified local file; asset delivery reuses this exact Range path."""
     etag = f'"{asset.sha256}"'
     headers = {
-        "Content-Type": "video/mp4",
+        "Content-Type": content_type,
         "Accept-Ranges": "bytes",
         "ETag": etag,
         "Content-Length": str(asset.size_bytes),
         "X-Content-Type-Options": "nosniff",
-        "Content-Disposition": f'{"attachment" if download else "inline"}; filename="{asset.id}.mp4"',
+        "Content-Disposition": f'{"attachment" if download else "inline"}; filename="{asset.id}.{extension}"',
     }
     if method == "HEAD":
         lease.close()

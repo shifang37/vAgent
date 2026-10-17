@@ -26,6 +26,7 @@ from vagent.skills import SkillCatalog, register_skill_tool
 from vagent.storage import FileStore, now
 from vagent.tools import create_project_tools
 from vagent.usage import summarize_usage
+from vagent.video import clients
 from vagent.video.assets import asset_reference_loader
 from vagent.video.contracts import ImageInputRule
 from vagent.video.jobs import JobService
@@ -34,8 +35,10 @@ from vagent.video.media_http import MediaHttpClient
 from vagent.video.media_worker import MediaWorker
 from vagent.video.providers.mock import MockVideoAdapter
 from vagent.video.providers.wan import WanAdapter
+from vagent.video.storyboards import storyboard_in_state
 from vagent.video.tools import register_video_tools, resolve_job_wait, resolve_jobset_wait
-from vagent.video.views import job_view
+from vagent.video.usage import summarize_records
+from vagent.video.views import current_storyboard_view, job_view, storyboard_summaries, storyboard_view
 from vagent.video.worker import JobWorker
 from vagent.wait_runtime import WaitCoordinator, execution_control
 from vagent.waiting import WAIT_EXECUTION_VERSIONS
@@ -214,6 +217,86 @@ class ApplicationService:
         assert_id(job_id)
         job = self.video_jobs.get(job_id)
         return job_view(self.video_jobs.retry_query(job_id, project_id=job.context.project_id))
+
+    def storyboards(self, session_id):
+        """Storyboard summaries of one project; never another project's records."""
+        assert_id(session_id)
+        return storyboard_summaries(self.store.snapshot(), session_id)
+
+    def storyboard(self, session_id, storyboard_id=None):
+        """The one storyboard view shared by the panel, the CLI and the tools."""
+        assert_id(session_id)
+        state = self.store.snapshot()
+        if storyboard_id is None:
+            view = current_storyboard_view(state, session_id)
+            if view is None:
+                raise AppError("NOT_FOUND", "当前项目还没有结构化分镜，请先保存。")
+            return view
+        assert_id(storyboard_id)
+        return storyboard_view(state, storyboard_in_state(state, session_id, storyboard_id))
+
+    def assets(self, project_id=None):
+        """Asset metadata in the whole library, or one project's own imports."""
+        if project_id is not None:
+            assert_id(project_id)
+        return self.video_jobs.assets.list(project_id=project_id)
+
+    def asset(self, asset_id, project_id=None):
+        if project_id is not None:
+            assert_id(project_id)
+        assert_id(asset_id)
+        return self.video_jobs.assets.view(asset_id, project_id=project_id)
+
+    def import_asset(self, project_id, data, filename=None):
+        """Trusted local import: validated, deduplicated and never an Agent tool."""
+        assert_id(project_id)
+        return self.video_jobs.assets.import_bytes(data, project_id=project_id, filename=filename)
+
+    def preview_shots(self, session_id, *, storyboard_id, storyboard_version, shot_ids):
+        """Per-shot estimates of one call, without registering or submitting anything."""
+        assert_id(session_id)
+        return self.video_jobs.preview_shots(
+            session_id,
+            {
+                "storyboardId": storyboard_id,
+                "storyboardVersion": storyboard_version,
+                "shotIds": list(shot_ids),
+                "confirm": False,
+            },
+        )
+
+    def generate_shots(self, session_id, request: dict) -> dict:
+        """Batch registration from the local UI, under its own client Run."""
+        assert_id(session_id)
+        return clients.generate_shots(
+            self.video_jobs,
+            session_id=session_id,
+            client_request_id=request["clientRequestId"],
+            storyboard_id=request["storyboardId"],
+            storyboard_version=request["storyboardVersion"],
+            shot_ids=request["shotIds"],
+            confirm=request["confirm"],
+        )
+
+    def redo_shot(self, session_id, shot_id, request: dict) -> dict:
+        """Explicit per-shot redo from the local UI or CLI, never a model turn."""
+        assert_id(session_id)
+        assert_id(shot_id)
+        return clients.redo_shot(
+            self.video_jobs,
+            session_id=session_id,
+            client_request_id=request["clientRequestId"],
+            storyboard_id=request["storyboardId"],
+            storyboard_version=request["storyboardVersion"],
+            shot_id=shot_id,
+            expected_revision=request["expectedRevision"],
+        )
+
+    def usage(self, project_id=None):
+        """Local aggregation of Jobs, estimates, tokens and the asset library."""
+        if project_id is not None:
+            assert_id(project_id)
+        return summarize_records(self.store.snapshot(), project_id=project_id)
 
     async def work(self):
         """Keep the shared background services alive without creating a new Run."""
@@ -481,6 +564,7 @@ class ApplicationService:
             "run": self.run_view(run) if run else None,
             "artifacts": [a for a in state["artifacts"].values() if a["projectId"] == session_id],
             "jobs": self.jobs(session_id),
+            "storyboard": current_storyboard_view(state, session_id),
             "wait": self._wait_view(state["waits"].get((run or {}).get("activeWaitId"))),
             "draft": copy.deepcopy(self.drafts.get(session_id)),
         }

@@ -13,11 +13,17 @@ from pydantic import BaseModel, ConfigDict, Field
 
 from vagent import __version__
 from vagent.application import ApplicationService
-from vagent.config import ConfigUpdate
+from vagent.config import ConfigUpdate, assert_id
 from vagent.contracts import Identifier
 from vagent.errors import AppError, public_error
+from vagent.video.contracts import IMAGE_MAX_BYTES
 from vagent.video.media import DownloadRetry, file_io
 from vagent.video.media_response import media_response
+from vagent.video.storyboards import ASSET_EXTENSIONS
+
+# One JSON document, or one bounded image upload plus multipart framing.
+MAX_JSON_BYTES = 131072
+MAX_UPLOAD_BYTES = IMAGE_MAX_BYTES + 65536
 
 
 class MessageInput(BaseModel):
@@ -30,6 +36,23 @@ class MessageInput(BaseModel):
 class DownloadRetryInput(BaseModel):
     model_config = ConfigDict(extra="forbid", strict=True)
     clientRequestId: Identifier
+    expectedRevision: int = Field(ge=0)
+
+
+class ShotGenerationInput(BaseModel):
+    model_config = ConfigDict(extra="forbid", strict=True)
+    clientRequestId: str = Field(pattern=r"^[a-zA-Z0-9_-]{1,64}$")
+    storyboardId: Identifier
+    storyboardVersion: int = Field(ge=1)
+    shotIds: list[Identifier] = Field(min_length=1, max_length=64)
+    confirm: bool = True
+
+
+class ShotRedoInput(BaseModel):
+    model_config = ConfigDict(extra="forbid", strict=True)
+    clientRequestId: str = Field(pattern=r"^[a-zA-Z0-9_-]{1,64}$")
+    storyboardId: Identifier
+    storyboardVersion: int = Field(ge=1)
     expectedRevision: int = Field(ge=0)
 
 
@@ -61,13 +84,17 @@ def create_app(config, *, port=3210, model=None, policy=None):
         if request.method not in {"GET", "HEAD"}:
             if not secrets.compare_digest(request.headers.get("x-csrf-token", ""), token):
                 return JSONResponse({"error": {"code": "CSRF_DENIED", "message": "请刷新页面后重试。"}}, 403)
-            if request.headers.get("content-type", "").split(";")[0] != "application/json":
+            content_type = request.headers.get("content-type", "").split(";")[0].strip()
+            upload = request.method == "POST" and request.url.path == "/api/assets"
+            expected = "multipart/form-data" if upload else "application/json"
+            if content_type != expected:
                 return JSONResponse({"error": {"code": "CONTENT_TYPE", "message": "需要 JSON 请求。"}}, 415)
+            limit = MAX_UPLOAD_BYTES if upload else MAX_JSON_BYTES
             size = 0
             chunks = []
             async for chunk in request.stream():
                 size += len(chunk)
-                if size > 131072:
+                if size > limit:
                     return JSONResponse({"error": {"code": "BODY_LIMIT", "message": "请求内容过大。"}}, 413)
                 chunks.append(chunk)
             request._body = b"".join(chunks)
@@ -86,9 +113,9 @@ def create_app(config, *, port=3210, model=None, policy=None):
     async def app_error(_request, error):
         status = (
             404
-            if error.code in {"NOT_FOUND", "JOB_NOT_FOUND", "MEDIA_NOT_FOUND"}
+            if error.code in {"NOT_FOUND", "JOB_NOT_FOUND", "MEDIA_NOT_FOUND", "ASSET_NOT_FOUND"}
             else 410
-            if error.code == "JOB_MEDIA_UNAVAILABLE"
+            if error.code in {"JOB_MEDIA_UNAVAILABLE", "ASSET_UNAVAILABLE"}
             else 409
             if error.code
             in {
@@ -103,6 +130,7 @@ def create_app(config, *, port=3210, model=None, policy=None):
                 "JOB_REVISION_CONFLICT",
                 "JOB_DOWNLOAD_RETRY_UNAVAILABLE",
                 "OPERATION_CONFLICT",
+                "VERSION_CONFLICT",
             }
             else 400
         )
@@ -193,6 +221,73 @@ def create_app(config, *, port=3210, model=None, policy=None):
             app.state.service.retry_download, job_id, DownloadRetry.model_validate(body.model_dump())
         )
 
+    @app.get("/api/usage")
+    async def usage(projectId: str | None = None):
+        return app.state.service.usage(projectId)
+
+    @app.get("/api/assets")
+    async def assets(projectId: str | None = None):
+        return {"assets": app.state.service.assets(projectId)}
+
+    @app.post("/api/assets", status_code=201)
+    async def import_asset(request: Request):
+        form = await request.form(max_files=1, max_fields=4)
+        upload, project_id = form.get("file"), form.get("projectId")
+        if isinstance(upload, str) or upload is None or not isinstance(project_id, str):
+            raise AppError("INVALID_REQUEST", "需要 projectId 与一个图片文件。")
+        assert_id(project_id)
+        data = await upload.read()
+        return await file_io(app.state.service.import_asset, project_id, data, upload.filename)
+
+    @app.get("/api/assets/{asset_id}")
+    async def asset_detail(asset_id: str, projectId: str | None = None):
+        return app.state.service.asset(asset_id, projectId)
+
+    @app.api_route("/api/assets/{asset_id}/content", methods=["GET", "HEAD"])
+    async def asset_content(asset_id: str, request: Request, download: str | None = None):
+        asset, lease = await file_io(
+            app.state.service.video_jobs.assets.open_content,
+            asset_id,
+            cancel_cleanup=lambda result: result[1].close(),
+        )
+        return media_response(
+            asset,
+            lease,
+            method=request.method,
+            request_headers=request.headers,
+            download=download == "1",
+            content_type=asset.mime_type,
+            extension=ASSET_EXTENSIONS[asset.mime_type],
+        )
+
+    @app.get("/api/storyboards")
+    async def storyboards(projectId: str):
+        return {"storyboards": app.state.service.storyboards(projectId)}
+
+    @app.get("/api/storyboards/{storyboard_id}")
+    async def storyboard_detail(storyboard_id: str, projectId: str):
+        return app.state.service.storyboard(projectId, storyboard_id)
+
+    @app.get("/api/storyboards/{storyboard_id}/estimate")
+    async def storyboard_estimate(storyboard_id: str, projectId: str, storyboardVersion: int, shotIds: str):
+        shot_ids = [item for item in shotIds.split(",") if item]
+        if not 1 <= len(shot_ids) <= 64 or len(set(shot_ids)) != len(shot_ids):
+            raise AppError("INVALID_REQUEST", "shotIds 必须是 1～64 个不重复的镜头 ID。")
+        return app.state.service.preview_shots(
+            projectId,
+            storyboard_id=storyboard_id,
+            storyboard_version=storyboardVersion,
+            shot_ids=shot_ids,
+        )
+
+    @app.post("/api/sessions/{session_id}/shots/generate", status_code=202)
+    async def shots_generate(session_id: str, body: ShotGenerationInput):
+        return await file_io(app.state.service.generate_shots, session_id, body.model_dump())
+
+    @app.post("/api/sessions/{session_id}/shots/{shot_id}/redo", status_code=202)
+    async def shots_redo(session_id: str, shot_id: str, body: ShotRedoInput):
+        return await file_io(app.state.service.redo_shot, session_id, shot_id, body.model_dump())
+
     @app.get("/api/media/{media_id}")
     async def media(media_id: str):
         return await file_io(app.state.service.media.view, media_id)
@@ -269,7 +364,8 @@ def create_app(config, *, port=3210, model=None, policy=None):
     async def asset(asset: str):
         name = asset or "index.html"
         if (
-            name not in {"index.html", "app.js", "job-state.js", "styles.css", "mark.svg"}
+            name
+            not in {"index.html", "app.js", "job-state.js", "storyboard-state.js", "styles.css", "mark.svg"}
             or not (root / name).is_file()
         ):
             raise AppError("NOT_FOUND", "页面不存在。")

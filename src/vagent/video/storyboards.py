@@ -381,3 +381,25 @@ def storyboard_in_state(state: dict, project_id: str, storyboard_id) -> Storyboa
     if raw is None or raw["projectId"] != project_id:
         raise AppError("NOT_FOUND", "当前项目中没有这个分镜。")
     return Storyboard.model_validate(raw)
+
+
+def find_shot(state: dict, shot_id: str) -> tuple[Storyboard, Shot]:
+    """Locate one shot by its stable ID across the data directory.
+
+    The CLI redo names only the shot, so the owning storyboard (and therefore the
+    project and current version) has to be resolved from the stored identity.
+    """
+    matches = []
+    for raw in state["storyboards"].values():
+        record = Storyboard.model_validate(raw)
+        shot = next(
+            (item for item in version_record(record, record.current_version).shots if item.id == shot_id),
+            None,
+        )
+        if shot is not None:
+            matches.append((record, shot))
+    if not matches:
+        raise AppError("SHOT_NOT_FOUND", "当前数据目录中没有这个镜头。")
+    if len(matches) > 1:
+        raise AppError("SHOT_AMBIGUOUS", "多个分镜包含这个镜头 ID，请指定分镜后再重做。")
+    return matches[0]

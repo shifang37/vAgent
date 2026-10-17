@@ -20,6 +20,8 @@ from vagent.video.contracts import (
     SOURCE_POLICY_VERSION,
     JobErrorV2,
     JobResultV2,
+    JobResultV3,
+    JobV3,
     LiveJob,
     MediaAsset,
     PreparedMedia,
@@ -517,7 +519,10 @@ class MediaService:
             metadata=prepared.metadata,
             created_at=timestamp,
         )
-        result = job.result or JobResultV2(
+        # A shot Job's delivered result carries its own shot specification; the
+        # frozen single-shot path keeps the V2 result.
+        result_model = JobResultV3 if isinstance(job, JobV3) else JobResultV2
+        result = job.result or result_model(
             request_fingerprint=job.request_fingerprint,
             spec=job.request.spec,
             source_refs=job.request.source_refs,

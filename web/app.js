@@ -1,4 +1,16 @@
 import { mediaContentPath, mergeJobs, upsertJob } from "./job-state.js";
+import {
+  assetContentPath,
+  batchSummary,
+  estimateQuery,
+  groupJobsByShot,
+  jobMediaUrl,
+  playList,
+  revisionToken,
+  shotState,
+  shotThumbnail,
+  shotVersions,
+} from "./storyboard-state.js";
 
 const $ = (selector) => document.querySelector(selector);
 const paths = {
@@ -26,6 +38,11 @@ const paths = {
   book: '<path d="M12 5C8 2 3 4 3 4v15s5-2 9 1c4-3 9-1 9-1V4s-5-2-9 1v15"/>',
   file: '<path d="M14 3H5v18h14V8l-5-5Zm0 0v5h5M8 12h8m-8 4h6"/>',
   download: '<path d="M12 3v12m-5-5 5 5 5-5M4 16v5h16v-5"/>',
+  clapper:
+    '<path d="M3 9h18v9a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V9Zm2-5h14a2 2 0 0 1 2 2v3H3V6a2 2 0 0 1 2-2Zm2.4 0 3 5m3.2-5 3 5"/>',
+  image:
+    '<rect x="3" y="4" width="18" height="16" rx="2"/><circle cx="8.5" cy="9" r="1.5"/><path d="m4 18 5-5 4 4 3-2.5 4 3.5"/>',
+  chart: '<path d="M5 20V10m5 10V4m5 16v-7m5 7V8"/>',
 };
 function icons(root = document) {
   root.querySelectorAll("[data-icon]").forEach((el) => {
@@ -86,6 +103,18 @@ let reference = null,
 let viewGeneration = 0;
 let dialogGeneration = 0,
   configSubmitting = false;
+let panelMode = null,
+  assets = [],
+  assetsLoaded = false,
+  usageReport = null,
+  assetsScopeOnly = false,
+  uploadingImage = false;
+let shotSelection = new Set(),
+  shotBusy = new Set(),
+  pendingBatch = null,
+  sequence = { items: null, index: -1 };
+const IMAGE_TYPES = ["image/png", "image/jpeg", "image/webp"];
+const MAX_IMAGE_BYTES = 20 * 1024 * 1024;
 const currentRun = () => snapshot?.run;
 const isRunning = () => ["running", "waiting_external"].includes(currentRun()?.status);
 function toast(message) {
@@ -94,17 +123,7 @@ function toast(message) {
   clearTimeout(toast.timer);
   toast.timer = setTimeout(() => ($("#toast").hidden = true), 4500);
 }
-async function api(path, options = {}) {
-  const response = await fetch(path, {
-    cache: "no-store",
-    ...options,
-    headers: {
-      ...(options.method
-        ? { "Content-Type": "application/json", "X-CSRF-Token": csrf || "" }
-        : {}),
-      ...options.headers,
-    },
-  });
+async function readJson(response) {
   let value;
   try {
     value = await response.json();
@@ -117,8 +136,29 @@ async function api(path, options = {}) {
     });
   return value;
 }
+async function api(path, options = {}) {
+  const response = await fetch(path, {
+    cache: "no-store",
+    ...options,
+    headers: {
+      ...(options.method
+        ? { "Content-Type": "application/json", "X-CSRF-Token": csrf || "" }
+        : {}),
+      ...options.headers,
+    },
+  });
+  return readJson(response);
+}
 const post = (path, body = {}) =>
   api(path, { method: "POST", body: JSON.stringify(body) });
+// An upload must not set Content-Type: the browser adds the multipart boundary.
+const upload = (path, form) =>
+  fetch(path, {
+    method: "POST",
+    cache: "no-store",
+    body: form,
+    headers: { "X-CSRF-Token": csrf || "" },
+  }).then(readJson);
 function rememberSelection() {
   try {
     if (activeId) sessionStorage.setItem("vagent.active-session", activeId);
@@ -168,6 +208,7 @@ function newChat() {
   snapshot = null;
   reference = null;
   pendingRequest = null;
+  resetStoryboardUi();
   $("#attachment").hidden = true;
   $("#prompt").value = "";
   $("#artifact-panel").hidden = true;
@@ -201,6 +242,9 @@ function connectEvents(id, generation) {
       if (jobs === snapshot.jobs) return;
       snapshot.jobs = jobs;
       renderJobs();
+      // The shot panel shows the same Jobs, so it has to follow live updates too.
+      // Playback keeps its player: it re-renders when the sequence stops instead.
+      if (sequence.index < 0) renderStoryboardPanel();
     } catch {
       connectEvents(id, generation);
     }
@@ -247,6 +291,20 @@ function connectEvents(id, generation) {
 function applySnapshot(next) {
   next.jobs = mergeJobs(snapshot?.id === next.id ? snapshot.jobs || [] : [], next.jobs || [], next.id);
   snapshot = next;
+  pruneShotSelection();
+}
+function pruneShotSelection() {
+  const known = new Set((snapshot?.storyboard?.shots || []).map((shot) => shot.id));
+  for (const id of [...shotSelection]) if (!known.has(id)) shotSelection.delete(id);
+}
+function resetStoryboardUi() {
+  shotSelection = new Set();
+  shotBusy = new Set();
+  pendingBatch = null;
+  sequence = { items: null, index: -1 };
+  panelMode = null;
+  $("#storyboard-panel").hidden = true;
+  $("#artifact-panel").hidden = true;
 }
 async function selectSession(id) {
   const generation = ++viewGeneration;
@@ -255,6 +313,9 @@ async function selectSession(id) {
   if (generation !== viewGeneration) return;
   activeId = id;
   applySnapshot(next);
+  resetStoryboardUi();
+  // A session that already has a storyboard opens its shot panel; the user can close it.
+  if (next.storyboard) panelMode = "storyboard";
   pendingRequest = null;
   reference = null;
   $("#attachment").hidden = true;
@@ -436,6 +497,7 @@ function render() {
   renderSessions();
   updateSend();
   renderObserve();
+  renderStoryboardPanel();
 }
 function metric(label, value) {
   return `<div class="metric"><small>${label}</small><strong>${value ?? "—"}</strong></div>`;
@@ -467,6 +529,419 @@ function renderObserve() {
     ${Array.isArray(run?.toolTrace) ? `<h3>工具输入与结果</h3>${run.toolTrace.map((t) => `<details class="trace-item"><summary>${escapeHTML(t.name)}</summary><small>输入</small><pre>${escapeHTML(JSON.stringify(t.arguments, null, 2))}</pre><small>结果</small><pre>${escapeHTML(t.result || "等待工具完成")}</pre></details>`).join("") || '<p class="meta">暂无工具调用</p>'}` : ""}
     <h3>执行事件</h3><div class="event-list">${(run?.events || []).map((e) => `<div><small>#${e.sequence}</small> ${escapeHTML(e.type)} ${escapeHTML(e.name || "")}${e.ok === false ? " ×" : ""}</div>`).join("") || "暂无事件"}</div>`;
   icons($("#observe-panel"));
+}
+const storyboard = () => snapshot?.storyboard || null;
+const shotIdOf = (event) => event.target.closest("[data-shot-id]")?.dataset.shotId || null;
+
+function selectedShots() {
+  return (storyboard()?.shots || []).filter((shot) => shotSelection.has(shot.id));
+}
+
+function toggleAllShots() {
+  const shots = storyboard()?.shots || [];
+  const all = shots.length > 0 && shotSelection.size === shots.length;
+  shotSelection = all ? new Set() : new Set(shots.map((shot) => shot.id));
+  renderStoryboardPanel();
+}
+
+async function loadAssets() {
+  assets = (await api("/api/assets")).assets;
+  assetsLoaded = true;
+  return assets;
+}
+
+function panelHeading(title, action) {
+  return `<div class="panel-heading"><strong>${title}</strong><button class="icon-button" data-action="${action}" aria-label="关闭面板" data-icon="close"></button></div>`;
+}
+
+async function refreshSession(id) {
+  if (!id) return null;
+  const next = await api(`/api/sessions/${encodeURIComponent(id)}`);
+  if (snapshot?.id === id) {
+    applySnapshot(next);
+    render();
+  }
+  return next;
+}
+
+function openStoryboardPanel() {
+  panelMode = "storyboard";
+  $("#artifact-panel").hidden = true;
+  $("#observe-panel").hidden = true;
+  $("#storyboard-panel").hidden = false;
+  renderStoryboardPanel();
+}
+
+function openInspector(mode) {
+  panelMode = mode;
+  $("#storyboard-panel").hidden = true;
+  $("#observe-panel").hidden = true;
+  $("#artifact-panel").hidden = false;
+}
+
+async function showAssets() {
+  openInspector("assets");
+  $("#artifact-panel").innerHTML = `${panelHeading("素材库", "close-artifact")}<p class="meta">正在读取素材库…</p>`;
+  try {
+    await loadAssets();
+  } catch (error) {
+    toast(error.message);
+  }
+  renderAssetPanel();
+  renderStoryboardPanel();
+}
+
+async function showUsage() {
+  const query = activeId ? `?projectId=${encodeURIComponent(activeId)}` : "";
+  let report;
+  try {
+    report = await api(`/api/usage${query}`);
+  } catch (error) {
+    toast(error.message);
+    return;
+  }
+  usageReport = report;
+  openInspector("usage");
+  renderUsagePanel();
+}
+
+function renderStoryboardPanel() {
+  const panel = $("#storyboard-panel");
+  if (panelMode !== "storyboard") {
+    panel.hidden = true;
+    return;
+  }
+  panel.hidden = false;
+  const board = storyboard();
+  if (!board) {
+    panel.innerHTML = `${panelHeading("分镜与镜头", "close-storyboard")}<p class="empty">当前项目还没有结构化分镜。Agent 保存分镜后，这里会按顺序显示镜头、版本与本地媒体。</p>`;
+    icons(panel);
+    return;
+  }
+  if (!assetsLoaded) {
+    loadAssets()
+      .then(() => renderStoryboardPanel())
+      .catch((error) => toast(error.message));
+  }
+  const grouped = groupJobsByShot(snapshot?.jobs || [], board.shots);
+  const playlist = playList(board.shots, snapshot?.jobs || []);
+  const playing = sequence.index >= 0 ? sequence.items?.[sequence.index] : null;
+  const chosen = selectedShots().length;
+  panel.innerHTML = `${panelHeading("分镜与镜头", "close-storyboard")}
+    <p class="meta">${escapeHTML(board.title)} · 当前版本 ${board.currentVersion} / 共 ${board.versionCount} 版 · revision ${board.revision} · ${board.shots.length} 个镜头</p>
+    <div class="storyboard-toolbar">
+      <button class="primary" data-action="batch-selected" ${chosen && !shotBusy.size ? "" : "disabled"}>生成选中镜头 · ${chosen}</button>
+      <button class="secondary" data-action="toggle-all-shots">${chosen === board.shots.length ? "清空选择" : "全选镜头"}</button>
+      <button class="secondary" data-action="refresh-storyboard">刷新</button>
+      ${playlist.items.length ? `<button class="secondary" data-action="${playing ? "stop-sequence" : "play-sequence"}">${playing ? "停止连播" : `连播 ${playlist.items.length} 个镜头`}</button>` : ""}
+    </div>
+    ${playing ? sequencePlayer(playing, playlist) : ""}
+    ${playlist.missing.length ? `<p class="meta">${playlist.missing.length} 个镜头还没有本地媒体，连播会跳过：${playlist.missing.map((item) => escapeHTML(item.label)).join("、")}</p>` : ""}
+    <div class="shot-list">${board.shots.map((shot) => shotCard(shot, grouped.byShot[shot.id] || [])).join("")}</div>
+    ${grouped.ungrouped.length ? `<h3>其他视频任务</h3>${grouped.ungrouped.map((job) => jobCard(job, false)).join("")}` : ""}`;
+  icons(panel);
+  const video = panel.querySelector("#sequence-video");
+  if (video) {
+    video.addEventListener("ended", () => advanceSequence());
+    video.addEventListener("error", () => {
+      toast("这个镜头暂时无法播放，已跳到下一个。");
+      advanceSequence();
+    });
+  }
+  bindPanelMedia(panel);
+  bindShotThumbnails(panel);
+}
+
+function shotCard(shot, jobs) {
+  const state = shotState(shot, jobs);
+  const thumb = shotThumbnail(shot, assets, jobs);
+  const versions = shotVersions(shot);
+  const selected = shotSelection.has(shot.id);
+  const busy = shotBusy.has(shot.id);
+  const thumbHTML =
+    thumb.kind === "image"
+      ? `<img class="shot-thumb" src="${escapeHTML(thumb.url)}" alt="" data-shot-thumb="${escapeHTML(shot.id)}">`
+      : `<span class="shot-thumb placeholder" data-icon="film"></span>`;
+  const reference = (shot.referenceAssetIds || []).length
+    ? `<small>参考图 ${shot.referenceAssetIds.map((id) => escapeHTML(String(id).slice(0, 8))).join("、")}</small>`
+    : "";
+  const history = versions.length
+    ? `<ul class="shot-versions">${versions
+        .map((version) => {
+          const versionState = shotState({ latest: version }, jobs);
+          const mediaUrl = version.mediaUrl || jobMediaUrl(jobs, version.jobId);
+          return `<li><span>${escapeHTML(version.label)} · 分镜 v${version.fromVersion}${version.current ? "" : "（历史）"}</span>
+            <span class="job-state ${escapeHTML(versionState.tone)}">${escapeHTML(versionState.label)}</span>
+            ${
+              mediaUrl
+                ? `<button data-action="play-shot" data-shot-id="${escapeHTML(shot.id)}" data-media-url="${escapeHTML(mediaUrl)}">播放</button><a class="secondary" href="${escapeHTML(mediaUrl)}?download=1" download="${escapeHTML(version.jobId)}.mp4">下载</a>`
+                : ""
+            }</li>`;
+        })
+        .join("")}</ul>`
+    : '<p class="meta">还没有登记过任务。</p>';
+  return `<article class="shot-card ${selected ? "selected" : ""}" data-shot-id="${escapeHTML(shot.id)}">
+    <div class="shot-head"><strong>镜头 ${shot.order} · ${escapeHTML(shot.framing)}</strong><span class="job-state ${escapeHTML(state.tone)}">${escapeHTML(state.label)}</span></div>
+    <div class="shot-body">${thumbHTML}<div class="shot-facts">
+      <span class="description">${escapeHTML(shot.description)}</span>
+      <small>${escapeHTML(shot.mode)} · ${shot.durationSeconds} 秒${shot.cameraMovement ? ` · ${escapeHTML(shot.cameraMovement)}` : ""}</small>
+      ${reference}
+      <small>shotId ${escapeHTML(shot.id.slice(0, 8))}</small>
+    </div></div>
+    ${history}
+    <div class="shot-actions">
+      <label><input type="checkbox" data-select-shot="${escapeHTML(shot.id)}" ${selected ? "checked" : ""}> 选中批量生成</label>
+      <button class="secondary" data-action="redo-shot" data-shot-id="${escapeHTML(shot.id)}" ${busy ? "disabled" : ""}>${busy ? "正在登记…" : "重做这个镜头"}</button>
+    </div>
+    ${jobs.length ? `<div class="shot-jobs">${jobs.map((job) => jobCard(job, false)).join("")}</div>` : ""}
+  </article>`;
+}
+
+function sequencePlayer(item, playlist) {
+  return `<div class="sequence-player">
+    <video id="sequence-video" src="${escapeHTML(item.url)}" controls autoplay muted playsinline aria-label="镜头连播"></video>
+    <div class="sequence-controls"><span>连播 ${sequence.index + 1}/${playlist.items?.length || 1} · ${escapeHTML(item.label || "镜头")}</span>
+      <span><button class="secondary" data-action="sequence-next">下一个</button><button class="secondary" data-action="stop-sequence">停止</button></span></div>
+  </div>`;
+}
+
+function startSequence(shotId = null, url = null) {
+  const playlist = playList(storyboard()?.shots || [], snapshot?.jobs || []);
+  if (url && url.startsWith("/api/media/")) {
+    const label = playlist.items.find((item) => item.shotId === shotId)?.label || "镜头版本";
+    sequence = { items: [{ shotId, order: 0, url, label }], index: 0 };
+  } else if (playlist.items.length) {
+    const first = shotId
+      ? playlist.items.find((item) => item.shotId === shotId) || playlist.items[0]
+      : playlist.items[0];
+    sequence = { items: playlist.items, index: playlist.items.indexOf(first) };
+  } else {
+    toast("还没有可播放的本地媒体。");
+    return;
+  }
+  panelMode = "storyboard";
+  $("#artifact-panel").hidden = true;
+  $("#storyboard-panel").hidden = false;
+  renderStoryboardPanel();
+}
+
+function advanceSequence() {
+  const list = sequence.items || [];
+  const index = sequence.index + 1;
+  if (index >= list.length) {
+    sequence = { items: null, index: -1 };
+    toast("连播结束。");
+    renderStoryboardPanel();
+    return;
+  }
+  sequence = { items: list, index };
+  renderStoryboardPanel();
+}
+
+function stopSequence() {
+  sequence = { items: null, index: -1 };
+  renderStoryboardPanel();
+}
+
+async function confirmBatch() {
+  const board = storyboard();
+  const chosen = selectedShots();
+  if (!board || !chosen.length || shotBusy.size) return;
+  const token = { ...revisionToken(board, chosen.map((shot) => shot.id)), projectId: activeId };
+  let preview;
+  try {
+    preview = await api(estimateQuery(token));
+  } catch (error) {
+    toast(error.message);
+    return;
+  }
+  const summary = batchSummary(preview);
+  const generation = openDialog(
+    "确认生成镜头",
+    `<p>${
+      preview.simulated
+        ? "当前为模拟视频模式：只登记本地任务，不产生费用，也没有真实媒体。"
+        : `当前为真实视频模式：将登记 ${summary.registered} 个新任务${summary.reused ? `，复用 ${summary.reused} 个已有任务` : ""}。总估算 ${escapeHTML(summary.total ?? "—")} ${escapeHTML(summary.currency)}（含复用镜头的历史估算）。`
+    }</p>
+    <table class="estimate-table"><thead><tr><th>镜头</th><th>模式</th><th>时长</th><th>估算</th></tr></thead><tbody>
+      ${summary.rows
+        .map(
+          (row) =>
+            `<tr><td>${escapeHTML(row.label)}</td><td>${escapeHTML(row.mode)}</td><td>${row.durationSeconds} 秒</td><td>${row.reused ? "复用原任务" : escapeHTML(row.amount ?? "—")}</td></tr>`,
+        )
+        .join("")}
+    </tbody></table>
+    ${
+      summary.limits
+        ? `<p class="meta">登记后本次 Run：新任务 ${summary.limits.usedNewJobs} / ${summary.limits.maxNewJobsPerRun}，已用估算 ${escapeHTML(summary.limits.usedAmount)} ${escapeHTML(summary.currency)}，剩余 ${escapeHTML(summary.limits.remainingAmount)}。服务端会再次校验上限，超出则整批不登记。</p>`
+        : ""
+    }
+    <p class="meta">确认后为该批镜头各登记一个任务；同一镜头同一请求复用原任务，不会重复登记。</p>
+    <div class="actions"><button class="secondary" data-action="close-dialog">取消</button><button class="primary" data-action="confirm-batch">确认生成 ${summary.registered} 个新任务</button></div>`,
+  );
+  pendingBatch = { token, generation };
+}
+
+async function submitBatch() {
+  const pending = pendingBatch;
+  if (!pending || pending.generation !== dialogGeneration || shotBusy.has("batch")) return;
+  const token = pending.token;
+  shotBusy.add("batch");
+  pendingBatch = null;
+  try {
+    const result = await post(`/api/sessions/${encodeURIComponent(activeId)}/shots/generate`, {
+      clientRequestId: crypto.randomUUID(),
+      storyboardId: token.storyboardId,
+      storyboardVersion: token.storyboardVersion,
+      shotIds: token.shotIds,
+      confirm: true,
+    });
+    $("#dialog").close();
+    shotSelection = new Set();
+    toast(`已登记 ${result.shots.length} 个镜头任务。`);
+    await refreshSession(activeId);
+  } catch (error) {
+    toast(error.message);
+  } finally {
+    shotBusy.delete("batch");
+    renderStoryboardPanel();
+  }
+}
+
+async function redoShot(shotId) {
+  const board = storyboard();
+  if (!board || !shotId || shotBusy.has(shotId)) return;
+  shotBusy.add(shotId);
+  renderStoryboardPanel();
+  try {
+    const result = await post(
+      `/api/sessions/${encodeURIComponent(activeId)}/shots/${encodeURIComponent(shotId)}/redo`,
+      {
+        clientRequestId: crypto.randomUUID(),
+        storyboardId: board.storyboardId,
+        storyboardVersion: board.currentVersion,
+        expectedRevision: board.revision,
+      },
+    );
+    toast(`镜头已重做：新任务 ${result.shots[0].jobId.slice(0, 8)}，其他镜头未受影响。`);
+    await refreshSession(activeId);
+  } catch (error) {
+    if (error.code === "VERSION_CONFLICT") {
+      toast("分镜已变化，已重新读取，请再次点击重做。");
+      await refreshSession(activeId).catch(() => {});
+    } else {
+      toast(error.message);
+    }
+  } finally {
+    shotBusy.delete(shotId);
+    renderStoryboardPanel();
+  }
+}
+
+function renderAssetPanel() {
+  if (panelMode !== "assets") return;
+  const panel = $("#artifact-panel");
+  const visible =
+    assetsScopeOnly && activeId ? assets.filter((asset) => asset.projectId === activeId) : assets;
+  panel.innerHTML = `${panelHeading("素材库", "close-artifact")}
+    <p class="meta">库中共 ${assets.length} 张参考图。镜头可以引用同一数据目录内其他项目的素材；导入按项目与 SHA-256 去重，M2 不提供删除。</p>
+    <div class="asset-actions">
+      <button class="primary" data-action="upload-image" ${uploadingImage || !activeId ? "disabled" : ""}>${uploadingImage ? "正在导入…" : "导入参考图"}</button>
+      <label class="chip"><input type="checkbox" id="assets-scope" ${assetsScopeOnly ? "checked" : ""} ${activeId ? "" : "disabled"}> 只看当前项目</label>
+    </div>
+    <div class="asset-grid">${
+      visible.length
+        ? visible.map(assetTile).join("")
+        : '<p class="empty">还没有素材。导入一张 PNG / JPEG / WebP 参考图后即可被镜头引用。</p>'
+    }</div>`;
+  icons(panel);
+  bindAssetTiles(panel);
+}
+
+function assetTile(asset) {
+  const url = assetContentPath(asset.assetId);
+  const size = `${(asset.sizeBytes / 1024).toFixed(1)} KB`;
+  return `<figure class="asset-tile" data-asset-id="${escapeHTML(asset.assetId)}">
+    ${url ? `<img src="${escapeHTML(url)}" alt="" loading="lazy" data-asset-image>` : ""}
+    <strong>${escapeHTML(asset.assetId.slice(0, 8))} · ${escapeHTML(asset.mimeType.replace("image/", "").toUpperCase())}</strong>
+    <span>${asset.dimensions.width}×${asset.dimensions.height} · ${escapeHTML(size)}</span>
+    <span>项目 ${escapeHTML(asset.projectId)}</span>
+    <span class="missing-note" hidden>本地文件缺失，重新导入同一张图片可恢复。</span>
+  </figure>`;
+}
+
+function bindAssetTiles(root) {
+  for (const image of root.querySelectorAll("[data-asset-image]")) {
+    image.addEventListener("error", () => {
+      const tile = image.closest(".asset-tile");
+      if (!tile) return;
+      tile.classList.add("missing");
+      const note = tile.querySelector(".missing-note");
+      if (note) note.hidden = false;
+    });
+  }
+}
+
+function renderUsagePanel() {
+  if (panelMode !== "usage") return;
+  const panel = $("#artifact-panel");
+  const report = usageReport;
+  if (!report) {
+    panel.innerHTML = `${panelHeading("用量统计", "close-artifact")}<p class="empty">正在读取本地记录…</p>`;
+    return;
+  }
+  const { jobs, cost, runs } = report;
+  const count = (value) => (value === null || value === undefined ? "未知" : value.toLocaleString());
+  panel.innerHTML = `${panelHeading("用量统计", "close-artifact")}
+    <p class="meta">范围：${report.projectId ? `项目 ${escapeHTML(report.projectId)}` : "整个数据目录"} · 读取于 ${escapeHTML(new Date(report.generatedAt).toLocaleString())}</p>
+    <h3>视频任务</h3><div class="metrics">${metric("任务总数", String(jobs.total))}${metric("未结束", String(jobs.open))}${metric("真实 Job", String(jobs.live))}${metric("模拟 Job", String(jobs.mock))}</div>
+    <p class="meta">状态：${Object.entries(jobs.byStatus).map(([key, total]) => `${escapeHTML(key)} ${total}`).join(" · ") || "暂无任务"}</p>
+    <h3>费用估算 <small>估算不是扣费</small></h3><div class="metrics">
+      ${metric("登记估算合计", `${escapeHTML(cost.estimateAmount)} ${escapeHTML(cost.currency)}`)}
+      ${metric("已取得账单", `${escapeHTML(cost.actual.reportedAmount)} ${escapeHTML(cost.currency)}`)}
+      ${metric("账单未知任务", String(cost.actual.unknownJobs))}
+      ${metric("报价版本", String(Object.keys(cost.byPriceVersion).length) || "0")}
+    </div>
+    <p class="meta">${cost.actual.status === "reported" ? "已按账单记录实际费用。" : "未取得账单的费用保持未知，不按估算冒充实际扣费。"}</p>
+    <h3>分镜与素材</h3><div class="metrics">
+      ${metric("分镜数", String(report.storyboards.total))}${metric("镜头版本", String(report.storyboards.shotVersions))}
+      ${metric("本项目素材", String(report.assets.total))}${metric("素材库总量", String(report.assets.libraryTotal))}
+    </div>
+    <h3>模型 Token</h3><div class="metrics">
+      ${metric("Run 数", String(runs.runs))}${metric("已记录调用", String(runs.recordedCallCount))}
+      ${metric("已知输入 Token", count(runs.observedInputTokens))}${metric("已知输出 Token", count(runs.observedOutputTokens))}
+      ${metric("缓存命中 Token", count(runs.cacheHitTokens))}${metric("缓存命中率", runs.cacheHitRate == null ? "未知" : `${(runs.cacheHitRate * 100).toFixed(1)}%`)}
+    </div>
+    <p class="meta">${runs.tokenUsageComplete ? "全部调用都有 Token 明细。" : `部分调用缺少明细${runs.untrackedModelSteps ? `，另有 ${runs.untrackedModelSteps} 个旧模型步未跟踪` : ""}；未知不计作零。`}</p>
+    <h3>按日记录</h3><div class="daily-list">${
+      report.daily.length
+        ? report.daily
+            .map(
+              (item) =>
+                `<div>${escapeHTML(item.date)} · ${item.jobs} 个任务（真实 ${item.live}） · 估算 ${escapeHTML(item.estimated)}</div>`,
+            )
+            .join("")
+        : "暂无记录"
+    }</div>`;
+  icons(panel);
+}
+
+function bindPanelMedia(root) {
+  for (const card of root.querySelectorAll(".job-card")) {
+    const job = (snapshot?.jobs || []).find((item) => item.jobId === card.dataset.jobId);
+    if (job) bindMedia(card, job);
+  }
+}
+
+function bindShotThumbnails(root) {
+  for (const image of root.querySelectorAll("[data-shot-thumb]")) {
+    if (image.dataset.bound) continue;
+    image.dataset.bound = "true";
+    image.addEventListener("error", () => {
+      image.classList.add("broken");
+      image.alt = "参考图不可用";
+    });
+  }
 }
 function openDialog(title, body) {
   dialogGeneration++;
@@ -694,6 +1169,56 @@ $("#artifact-panel").addEventListener("change", (event) => {
     showArtifact(selectedArtifact.id, Number(event.target.value)).catch(
       (error) => toast(error.message),
     );
+  if (event.target.id === "assets-scope") {
+    assetsScopeOnly = event.target.checked;
+    renderAssetPanel();
+  }
+});
+$("#storyboard-panel").addEventListener("change", (event) => {
+  const shotId = event.target.dataset?.selectShot;
+  if (!shotId) return;
+  if (event.target.checked) shotSelection.add(shotId);
+  else shotSelection.delete(shotId);
+  renderStoryboardPanel();
+});
+$("#image-input").addEventListener("change", async (event) => {
+  const file = event.target.files[0];
+  event.target.value = "";
+  if (!file) return;
+  if (!IMAGE_TYPES.includes(file.type)) {
+    toast("请选择 PNG、JPEG 或 WebP 图片。");
+    return;
+  }
+  if (file.size > MAX_IMAGE_BYTES) {
+    toast("参考图不能超过 20 MB。");
+    return;
+  }
+  if (!activeId) {
+    toast("请先选择或创建一个创作会话。");
+    return;
+  }
+  uploadingImage = true;
+  renderAssetPanel();
+  try {
+    const form = new FormData();
+    form.append("projectId", activeId);
+    form.append("file", file, file.name);
+    const created = await upload("/api/assets", form);
+    toast(
+      created.repaired
+        ? "素材文件已按原记录恢复。"
+        : created.deduplicated
+          ? "这张图片已在素材库中，已复用原素材。"
+          : "素材已导入。",
+    );
+    await loadAssets();
+    renderAssetPanel();
+  } catch (error) {
+    toast(error.message);
+  } finally {
+    uploadingImage = false;
+    renderAssetPanel();
+  }
 });
 $("#dialog").addEventListener("close", () => {
   $("#dialog").querySelectorAll('input[type="password"]').forEach((key) => { key.value = ""; });
@@ -756,13 +1281,36 @@ document.addEventListener("click", async (event) => {
     }
     if (action === "close-sidebar") $("#sidebar").hidden = true;
     if (action === "close-dialog") $("#dialog").close();
-    if (action === "close-artifact") $("#artifact-panel").hidden = true;
+    if (action === "close-artifact") {
+      panelMode = null;
+      $("#artifact-panel").hidden = true;
+    }
+    if (action === "close-storyboard") {
+      panelMode = null;
+      $("#storyboard-panel").hidden = true;
+    }
     if (action === "close-observe") $("#observe-panel").hidden = true;
     if (action === "observe") {
       $("#artifact-panel").hidden = true;
       $("#observe-panel").hidden = false;
+      panelMode = "observe";
       renderObserve();
     }
+    if (action === "storyboard") openStoryboardPanel();
+    if (action === "assets") await showAssets();
+    if (action === "usage") await showUsage();
+    if (action === "refresh-storyboard")
+      await refreshSession(activeId).catch((error) => toast(error.message));
+    if (action === "toggle-all-shots") toggleAllShots();
+    if (action === "batch-selected") await confirmBatch();
+    if (action === "confirm-batch") await submitBatch();
+    if (action === "redo-shot") await redoShot(shotIdOf(event));
+    if (action === "play-shot")
+      startSequence(shotIdOf(event), event.target.closest("[data-media-url]")?.dataset.mediaUrl);
+    if (action === "play-sequence") startSequence();
+    if (action === "stop-sequence") stopSequence();
+    if (action === "sequence-next") advanceSequence();
+    if (action === "upload-image") $("#image-input").click();
     if (action === "attach") $("#file-input").click();
     if (action === "remove-attachment") {
       reference = null;

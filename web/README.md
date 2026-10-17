@@ -27,6 +27,11 @@ $env:VAGENT_HOME = Join-Path $PWD '.vagent/web'
 - 视频任务卡片区分模拟与真实，显示 jobId、模型/规格、来源版本、结果与错误；live 另显示云端/下载状态、估价/实际费用与配置阻塞。完整媒体可用时支持播放、拖动进度和下载，Run 结束后 Job 仍持续更新。
 - 下载失败或媒体缺失时可重试原下载，沿用原 Job/mediaId；历史结果保持原样。视频设置页独立配置视频 Key、空间、模式、模型、地域与金额上限，显示来源、参考估价和重启提示。
 - 等待态可停止 Agent，Job 继续跟踪；查询暂停时可恢复原任务查询。刷新保留已保存的等待与任务状态。
+- 素材库（左栏「素材库」）：列出整个数据目录的参考图（含其他项目，便于复用）与本地预览、按当前项目过滤、上传导入（PNG/JPEG/WebP，≤20 MB，按项目与哈希去重）；文件缺失或损坏时可重新导入同一张图片按原记录恢复，M2 不提供删除。
+- 分镜面板（左栏「分镜与镜头」，会话已有分镜时自动打开；也可在对话里点「分镜」）：按 order 的镜头卡（景别、时长、模式、参考图缩略图、shotId）、逐镜头版本历史与状态、播放与下载本地 MP4、逐镜头重做、按镜头分组的 Job 卡；工具条提供全选、刷新、批量生成与序列连播。
+- 批量生成确认对话框：先请求只读估算，逐镜头列出模式/时长/估算与合计，并显示本 Run 已用与剩余额度；确认后整批登记，超出上限时服务端整批拒绝。
+- 序列连播：客户端按顺序播放各镜头本地 MP4（不做服务端拼接），可暂停、下一个或停止；尚无本地媒体的镜头在面板上明确标注并被跳过。
+- 用量面板（左栏「用量统计」）：按项目聚合任务计数与状态、登记估算与账单状态（未取得账单保持未知）、分镜与镜头版本数、素材数、模型 Token 覆盖率与按日记录；只读本地数据，不做外部调用。
 - 编排观测：上下文字节与裁剪数、项目事实与计划、Skills 版本、MCP 状态、工具目录和事件、已知/未知 Token 用量。
 - 新版 API 可提供当前轮工具参数和结果明细；旧运行实例缺少该字段时隐藏明细区，工具事件仍可见。
 
@@ -49,6 +54,20 @@ live Job 视图包含 `lastProviderStatus`、`queryPauseReason`、冻结费用�
 
 同一重试请求或正在执行的下载不会登记第二个执行；冲突文件保留，需备份移走后重试。媒体修复必须匹配原 SHA-256，过期链接不会通过新生成替换。CLI 的对应入口为 `vagent jobs retry-download JOB_ID`，随后由 `jobs work` 或 Web 推进。
 
+分镜、素材与用量入口：
+
+| 接口 | 行为 |
+|---|---|
+| `GET /api/storyboards?projectId=`、`GET /api/storyboards/{id}?projectId=` | 分镜摘要与完整视图（有序镜头、逐镜头版本、`status`、`mediaAvailable`、`mediaUrl`、`latest`）；跨项目 404 |
+| `GET /api/storyboards/{id}/estimate?projectId=&storyboardVersion=&shotIds=` | 只读逐镜头估算、合计与新 Run 的额度快照，供确认对话框使用；不登记、不提交 |
+| `POST /api/sessions/{id}/shots/generate` | CSRF + JSON `{clientRequestId, storyboardId, storyboardVersion, shotIds, confirm}`，202 登记；同一请求 ID 重放原结果，同一 ID 换镜头返回 409 |
+| `POST /api/sessions/{id}/shots/{shotId}/redo` | CSRF + JSON `{clientRequestId, storyboardId, storyboardVersion, expectedRevision}`，202 重做；过期 revision 返回 409 `VERSION_CONFLICT` |
+| `GET /api/assets?projectId=`、`POST /api/assets` | 素材元数据列表 / multipart 上传（CSRF、`projectId` + `file`，正文上限 20 MB + 64 KiB） |
+| `GET /api/assets/{id}`、`GET/HEAD /api/assets/{id}/content` | 元数据与可用性 / 单 Range 图片内容（`?download=1` 附件）；不存在 404、文件缺失或损坏 410 |
+| `GET /api/usage?projectId=` | 读取侧聚合（任务、估算与账单状态、分镜、素材、Token 覆盖率、按日）；不调用模型或供应商 |
+
+CLI/Web 的显式重做与批量登记各自创建一条“客户端 Run”（`model="local-client"`，不更新会话的 latest Run，也不占用对话 Run 的额度），因此对话 Run 的恢复路径不受影响；同一 `clientRequestId` 重放原结果，不会重复登记。素材只经本地受信入口写入，读取接口不返回本地路径或私有 URL，工具 `asset_read` 同样只返回元数据。
+
 发送消息使用 `clientRequestId`。响应丢失时前端复用该 ID，后端返回原 Run，避免重复付费执行。同一 ID 对应不同需求或只读模式会冲突。
 
 SSE 首先发送 `snapshot`，包含持久状态和可选的内存 `draft`；正文通过 `assistant.delta` 推送，携带 Run ID、模型步、序号和文字。客户端拒绝旧步和重复序号，发现缺口时重新连接获取快照。每个订阅队列最多 64 项，慢客户端溢出时回退到当前快照；15 秒心跳，不承诺永久事件重放。
@@ -59,7 +78,7 @@ Token 草稿不写入状态文件或事件日志。模型响应通过完成标�
 
 ## 本地访问边界
 
-仅监听 127.0.0.1，Host 限定 localhost/127.0.0.1 与指定端口；Origin 必须精确同源，拒绝 cross-site/same-site Fetch Metadata。写请求需要 CSRF Token 和 JSON，请求体最多 128 KiB。静态文件仅提供 `index.html`、`app.js`、`job-state.js`、`styles.css`、`mark.svg`，不提供 `.env` 或数据目录。Job 提示词、结果和来源标题均作为转义后的文本显示。
+仅监听 127.0.0.1，Host 限定 localhost/127.0.0.1 与指定端口；Origin 必须精确同源，拒绝 cross-site/same-site Fetch Metadata。写请求需要 CSRF Token 和 JSON，请求体最多 128 KiB。静态文件仅提供 `index.html`、`app.js`、`job-state.js`、`storyboard-state.js`、`styles.css`、`mark.svg`，不提供 `.env` 或数据目录。Job 提示词、结果和来源标题均作为转义后的文本显示。
 
 DeepSeek 与视频 Key 分开配置，来自数据目录 `config.yml`、服务端环境或本地 `.env`，读取接口只返回是否已配置。密码框提交后清空，关闭设置时也清空，不写入 localStorage/sessionStorage。环境和启动配置优先且不可被页面覆盖；文本配置保存对下一次运行生效，视频配置保存后重启生效，运行中的客户端和队列仍使用启动快照。运行或验证期间拒绝配置修改，验证期间拒绝新执行。受信任的本机进程仍可调用接口；本服务不是多用户鉴权系统，不支持局域网公开部署。
 

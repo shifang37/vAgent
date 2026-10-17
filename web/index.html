@@ -38,6 +38,27 @@
         ></button>
         <button
           class="icon-button"
+          data-action="storyboard"
+          aria-label="分镜与镜头"
+          title="分镜与镜头"
+          data-icon="clapper"
+        ></button>
+        <button
+          class="icon-button"
+          data-action="assets"
+          aria-label="素材库"
+          title="素材库"
+          data-icon="image"
+        ></button>
+        <button
+          class="icon-button"
+          data-action="usage"
+          aria-label="用量统计"
+          title="用量统计"
+          data-icon="chart"
+        ></button>
+        <button
+          class="icon-button"
           data-action="search"
           aria-label="搜索会话"
           title="搜索会话"
@@ -202,6 +223,12 @@
             accept=".txt,.md,text/plain,text/markdown"
             hidden
           />
+          <input
+            id="image-input"
+            type="file"
+            accept="image/png,image/jpeg,image/webp"
+            hidden
+          />
         </section>
         <section id="inspiration" class="inspiration">
           <div class="section-heading">
@@ -239,6 +266,12 @@
       <footer>vagent <span>·</span> 为创作留出更多空间</footer>
     </main>
     <aside id="artifact-panel" class="artifact-panel" hidden></aside>
+    <aside
+      id="storyboard-panel"
+      class="artifact-panel storyboard-panel"
+      aria-label="分镜与镜头"
+      hidden
+    ></aside>
     <aside
       id="observe-panel"
       class="artifact-panel observe-panel"

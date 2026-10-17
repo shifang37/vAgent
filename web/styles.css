@@ -1438,3 +1438,237 @@ footer {
   position: static;
   flex-shrink: 0;
 }
+
+/* M2 D3: 分镜侧栏、镜头卡、批量确认、序列连播、素材库与用量面板 */
+.storyboard-panel {
+  width: 420px;
+}
+.storyboard-toolbar {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  align-items: center;
+  margin: 14px 0 6px;
+}
+.storyboard-toolbar .primary,
+.storyboard-toolbar .secondary {
+  padding: 8px 12px;
+}
+.shot-list {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  margin-top: 14px;
+}
+.shot-card {
+  border: 1px solid #dfe7ef;
+  border-radius: 12px;
+  padding: 14px;
+  background: #fcfdff;
+  font-size: 12px;
+  line-height: 1.7;
+  overflow-wrap: anywhere;
+}
+.shot-card.selected {
+  border-color: #9fb6e4;
+  box-shadow: 0 0 0 2px #547cda1a;
+}
+.shot-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+}
+.shot-head strong {
+  font-size: 13px;
+  font-weight: 500;
+  color: #536c85;
+}
+.shot-body {
+  display: flex;
+  gap: 12px;
+  margin-top: 10px;
+}
+.shot-thumb {
+  width: 92px;
+  height: 56px;
+  flex-shrink: 0;
+  border-radius: 8px;
+  object-fit: cover;
+  background: #eef2f8;
+}
+.shot-thumb.placeholder {
+  display: grid;
+  place-items: center;
+  color: #a7b3c4;
+}
+.shot-thumb.placeholder svg {
+  width: 20px;
+  height: 20px;
+}
+.shot-thumb.broken {
+  border: 1px dashed #e0c3bc;
+  background: #fdf6f4;
+}
+.shot-facts {
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  color: #65758a;
+}
+.shot-facts .description {
+  color: #3b4350;
+}
+.shot-versions {
+  margin: 10px 0 0;
+  padding: 0;
+  list-style: none;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  font-size: 11px;
+  color: #7d8da3;
+}
+.shot-versions li {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+.shot-versions button {
+  color: #547db2;
+  font-size: 11px;
+  text-decoration: underline;
+  text-underline-offset: 3px;
+}
+.shot-actions {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-wrap: wrap;
+  margin-top: 12px;
+  border-top: 1px solid #e9edf3;
+  padding-top: 10px;
+  font-size: 11px;
+}
+.shot-actions label {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  color: #6f7d92;
+}
+.shot-jobs {
+  margin-top: 10px;
+}
+.shot-states {
+  display: flex;
+  gap: 6px;
+  align-items: center;
+  flex-wrap: wrap;
+}
+.sequence-player {
+  border: 1px solid #dbe4f1;
+  border-radius: 12px;
+  padding: 12px;
+  background: #f7f9fd;
+  margin: 12px 0;
+}
+.sequence-player video {
+  display: block;
+  width: 100%;
+  aspect-ratio: 16 / 9;
+  border-radius: 9px;
+  background: #101622;
+}
+.sequence-controls {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  margin-top: 10px;
+  font-size: 11px;
+  color: #6f7d92;
+}
+.estimate-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 12px;
+  margin: 14px 0;
+}
+.estimate-table th,
+.estimate-table td {
+  text-align: left;
+  padding: 7px 6px;
+  border-bottom: 1px solid var(--line);
+}
+.estimate-table th {
+  color: #98a4b5;
+  font-weight: 500;
+}
+.asset-actions {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  flex-wrap: wrap;
+  margin: 14px 0;
+}
+.asset-actions .chip {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 11px;
+  color: #6f7d92;
+}
+.asset-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 12px;
+}
+.asset-tile {
+  border: 1px solid #e2e8f2;
+  border-radius: 10px;
+  padding: 10px;
+  background: #fdfefe;
+  font-size: 11px;
+  color: #7d8da3;
+  line-height: 1.7;
+  overflow-wrap: anywhere;
+}
+.asset-tile img {
+  display: block;
+  width: 100%;
+  height: 92px;
+  object-fit: cover;
+  border-radius: 7px;
+  background: #eef2f8;
+}
+.asset-tile.missing img {
+  opacity: 0.35;
+}
+.asset-tile strong {
+  display: block;
+  margin-top: 8px;
+  font-size: 11px;
+  font-weight: 500;
+  color: #536c85;
+}
+.asset-tile .missing-note {
+  color: #b97068;
+}
+.daily-list {
+  font-size: 11px;
+  color: #7d8da3;
+  line-height: 2;
+}
+.daily-list small {
+  color: #a1aabd;
+}
+@media (max-width: 640px) {
+  .asset-grid {
+    grid-template-columns: 1fr;
+  }
+  .storyboard-panel {
+    width: calc(100% - 52px);
+  }
+}

@@ -668,6 +668,17 @@ class VideoRequestV3(Contract):
             raise ValueError("Image modes must not send a ratio; the input frame decides it")
         return self
 
+    def public_arguments(self) -> dict:
+        """The public camelCase arguments a shot Job may show; never private fields.
+
+        `live_job_snapshot` reads this for every live Job, so a shot request has to
+        publish the same public shape as the frozen single-shot request.
+        """
+        return {
+            name: self.model_dump(mode="json", by_alias=True)[name]
+            for name in ("provider", "model", "capabilitiesVersion", "prompt", "spec", "sourceRefs")
+        }
+
     def intent_fingerprint(self) -> str:
         return canonical_fingerprint(
             {
@@ -911,6 +922,17 @@ class JobResultV2(JobResult):
         if self.simulated or not self.media_available:
             raise ValueError("Live results represent committed local media")
         return self
+
+
+class JobResultV3(JobResultV2):
+    """An M2 shot result: the delivered local media belongs to one shot specification.
+
+    `JobResultV2.spec` is the frozen single-shot specification, so a shot Job needs
+    its own result type; `JobV3` coherence compares this spec with the frozen shot
+    request, which a V2 result could never equal.
+    """
+
+    spec: ShotSpecV3
 
 
 class DownloadPolicy(Contract):
@@ -1217,6 +1239,7 @@ class JobV3(JobV2):
     capabilities: VideoCapabilitiesV3
     shot_ref: ShotRef
     cost: CostRecordV3
+    result: JobResultV3 | None = None
 
     @model_validator(mode="after")
     def coherent_state(self):
