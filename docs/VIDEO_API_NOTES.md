@@ -245,6 +245,17 @@ S2 列出该模型北京免费额度 **50 秒**，有效期自开通百炼/模�
 
 当前账号对 i2v 的模型授权与 IP 权限；i2v 真实结果主机与重定向（沿用 `wan-result-hosts-v2` 允许集）；首帧真实输出画幅与音频表现；实际账单（保持 `unknown`）；免费额度是否抵扣。本次不把“文档支持”升级为“账号已验证”。
 
+## 10. M3 规划期预研：两 Key 直用与共享域名（2026-10-17）
+
+背景：M3 拟把视频配置收敛为「只输入编排模型 Key 与视频模型 Key」。**本次未创建任务、未提交生成、未产生费用；仅用现有北京 Key 执行只读任务查询（不存在任务 ID 与 M2 既有任务各一轮，共享域名与专属域名各一组，共 4 次 GET）。**
+
+| GET `/api/v1/tasks/{id}` | 共享域名 `dashscope.aliyuncs.com` | 专属域名 `{workspaceId}.cn-beijing.maas.aliyuncs.com` |
+|---|---|---|
+| 不存在的任务 ID | 200，`task_status=UNKNOWN` | 200，`task_status=UNKNOWN` |
+| M2 任务 `e971a41c-ea5c-41bd-9fd3-b4ef3815df0e` | 200，`SUCCEEDED`，含 `video_url` | 200，`SUCCEEDED`，含 `video_url` |
+
+结论（预研级，未冻结）：同一 Key 在共享域名可完成鉴权与任务读取，两个域名读取同一任务库（专属域名创建的任务在共享域名可见）。Key-only 配置因此可默认共享域名，无需用户填写地域或业务空间。保留为 M3 E0 核实项：共享域名「自 2026-09-30 起不再支持新特性」对**提交**路径的影响；是否存在无副作用的业务空间查询接口（如有，仅 Key 时也可解析专属域名）。探测原始结果存 `output/m3-keys-only-probe.json`。
+
 [D1]: https://help.aliyun.com/zh/model-studio/image-to-video-general-api-reference
 [D2]: https://help.aliyun.com/zh/model-studio/wan-image-to-video-guide
 [D3]: https://help.aliyun.com/zh/model-studio/use-video-generation
