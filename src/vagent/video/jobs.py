@@ -20,6 +20,7 @@ from vagent.video.contracts import (
     WAN_I2V_MODEL,
     WAN_MODEL,
     WAN_PROMPT_PREFIX,
+    WAN_SHARED_ENDPOINT_PROFILE,
     CostEstimate,
     CostRecord,
     CostRecordV3,
@@ -30,6 +31,8 @@ from vagent.video.contracts import (
     JobErrorV2,
     JobV2,
     JobV3,
+    JobV4,
+    JobV5,
     LiveJob,
     MediaAsset,
     PollingPolicy,
@@ -46,6 +49,8 @@ from vagent.video.contracts import (
     VideoRequest,
     VideoRequestV2,
     VideoRequestV3,
+    VideoRequestV4,
+    VideoRequestV5,
     WanParameters,
     WanParametersV3,
     job_transition_allowed,
@@ -395,7 +400,9 @@ def validate_media_changes(previous: dict[str, dict], state: dict) -> None:
             raise AppError("MEDIA_CONFLICT", "媒体索引必须与完整交付结果及原任务一起提交。")
         seen_jobs.add(asset.job_id)
     for raw in state["jobs"].values():
-        if raw.get("contractVersion", 1) == 2 and raw["status"] == "succeeded" and raw["id"] not in seen_jobs:
+        # Both single-shot live contract versions carry the frozen media-commit duty.
+        single_shot = raw.get("contractVersion", 1) in {2, 4}
+        if single_shot and raw["status"] == "succeeded" and raw["id"] not in seen_jobs:
             raise AppError("MEDIA_NOT_COMMITTED", "完整媒体索引提交前不能将真实任务标记为成功。")
 
 
@@ -467,10 +474,10 @@ class JobService:
         )
 
     def check_live_configuration(self) -> None:
+        # K1 keys-only track: the video Key alone is a complete live configuration;
+        # a workspace stays optional and selects the dedicated endpoint at registration.
         if self.config is None or not self.config.video_api_key:
             raise AppError("VIDEO_KEY_MISSING", "请配置视频服务 Key，文本模型 Key 不能代替视频 Key。")
-        if not self.config.video_workspace_id:
-            raise AppError("VIDEO_WORKSPACE_REQUIRED", "请配置北京视频 Key 对应的业务空间 ID。")
 
     def configuration_status(self) -> dict:
         try:
@@ -512,7 +519,15 @@ class JobService:
         if isinstance(job, LiveJob):
             self.check_live_configuration()
             models = (WAN_MODEL, WAN_I2V_MODEL) if isinstance(job, JobV3) else (self.config.video_model,)
-            if (job.request.workspace_id, job.request.region, job.request.provider) != (
+            if job.request.endpoint_profile == WAN_SHARED_ENDPOINT_PROFILE:
+                # Keys-only Jobs fix the shared endpoint by recorded form: recovery
+                # never depends on the workspace configuration.
+                if (job.request.region, job.request.provider) != (
+                    self.config.video_region,
+                    self.config.video_provider,
+                ) or job.request.model not in models:
+                    raise AppError("VIDEO_PROVIDER_UNAVAILABLE", "缺少原任务地域和模型的匹配配置。")
+            elif (job.request.workspace_id, job.request.region, job.request.provider) != (
                 self.config.video_workspace_id,
                 self.config.video_region,
                 self.config.video_provider,
@@ -668,15 +683,25 @@ class JobService:
                     raise AppError("VIDEO_PRICE_UNKNOWN", "缺少与当前视频能力匹配的已核实价格，未创建任务。")
                 if Decimal(self.price.amount) > Decimal(self.config.video_max_job_cost):
                     raise AppError("VIDEO_COST_LIMIT", "视频估算超过单 Job 金额上限，未创建任务。")
-                frozen = VideoRequestV2(
-                    **parsed.model_dump(mode="json", by_alias=True),
-                    region=self.config.video_region,
-                    workspace_id=self.config.video_workspace_id,
-                    adapter_version=WAN_ADAPTER_VERSION,
-                    endpoint_profile=WAN_ENDPOINT_PROFILE,
-                    provider_prompt=WAN_PROMPT_PREFIX + parsed.prompt,
-                    parameters=WanParameters(),
-                )
+                if self.config.video_workspace_id:
+                    frozen = VideoRequestV2(
+                        **parsed.model_dump(mode="json", by_alias=True),
+                        region=self.config.video_region,
+                        workspace_id=self.config.video_workspace_id,
+                        adapter_version=WAN_ADAPTER_VERSION,
+                        endpoint_profile=WAN_ENDPOINT_PROFILE,
+                        provider_prompt=WAN_PROMPT_PREFIX + parsed.prompt,
+                        parameters=WanParameters(),
+                    )
+                else:
+                    frozen = VideoRequestV4(
+                        **parsed.model_dump(mode="json", by_alias=True),
+                        region=self.config.video_region,
+                        adapter_version=WAN_ADAPTER_VERSION,
+                        endpoint_profile=WAN_SHARED_ENDPOINT_PROFILE,
+                        provider_prompt=WAN_PROMPT_PREFIX + parsed.prompt,
+                        parameters=WanParameters(),
+                    )
                 extra = {
                     "intent_fingerprint": frozen.intent_fingerprint(),
                     "download_policy": self.download_policy,
@@ -686,7 +711,8 @@ class JobService:
                         )
                     ),
                 }
-            job = (JobV2 if live else Job)(
+            job_class = (JobV4 if isinstance(frozen, VideoRequestV4) else JobV2) if live else Job
+            job = job_class(
                 id=str(uuid4()),
                 context=context,
                 operation_key=context.operation_key,
@@ -892,20 +918,23 @@ class JobService:
             )
             if spec not in capabilities.specs:
                 raise AppError("VIDEO_UNSUPPORTED_SPEC", "镜头的时长不在已核实的规格组合中，未创建任务。")
-            request = VideoRequestV3(
-                provider="wan",
-                model=capabilities.model,
-                capabilities_version=capabilities.capabilities_version,
-                prompt=prompt,
-                spec=spec,
-                source_refs=record.source_refs,
-                workspace_id=self.config.video_workspace_id,
-                provider_prompt=WAN_PROMPT_PREFIX + prompt,
-                parameters=WanParametersV3(
+            common = {
+                "provider": "wan",
+                "model": capabilities.model,
+                "capabilities_version": capabilities.capabilities_version,
+                "prompt": prompt,
+                "spec": spec,
+                "source_refs": record.source_refs,
+                "provider_prompt": WAN_PROMPT_PREFIX + prompt,
+                "parameters": WanParametersV3(
                     duration=spec.duration_seconds, ratio="16:9" if shot.mode == "t2v" else None
                 ),
-                media=self._shot_media(draft, shot, capabilities),
-            )
+                "media": self._shot_media(draft, shot, capabilities),
+            }
+            if self.config.video_workspace_id:
+                request = VideoRequestV3(**common, workspace_id=self.config.video_workspace_id)
+            else:
+                request = VideoRequestV5(**common)
             return capabilities, request
         if shot.mode != "t2v":
             raise AppError("VIDEO_UNSUPPORTED_MODE", "当前模拟能力不支持图生视频，未创建任务。")
@@ -1000,7 +1029,7 @@ class JobService:
             estimate = None
             if live:
                 estimate = self._shot_estimate(capabilities, request)
-                job = JobV3(
+                job = (JobV5 if isinstance(request, VideoRequestV5) else JobV3)(
                     id=job_id,
                     context=context,
                     operation_key=context.operation_key,

@@ -150,7 +150,6 @@ async def test_intent_and_operation_replay_precede_current_configuration_and_pri
     "changes,code",
     [
         ({"video_api_key": None}, "VIDEO_KEY_MISSING"),
-        ({"video_workspace_id": None}, "VIDEO_WORKSPACE_REQUIRED"),
         ({"video_max_job_cost": "2.99"}, "VIDEO_COST_LIMIT"),
         ({"video_max_job_cost": "0"}, "VIDEO_COST_LIMIT"),
     ],

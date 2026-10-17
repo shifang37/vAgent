@@ -183,7 +183,7 @@ class VideoProviderAdapter(Protocol):
 
     async def submit(self, request: VideoRequest, operation_key: str) -> ProviderTaskHandle: ...
 
-    async def query(self, task_id: str) -> ProviderTaskSnapshot: ...
+    async def query(self, task_id: str, *, endpoint_profile: str | None = None) -> ProviderTaskSnapshot: ...
 
 
 @runtime_checkable
@@ -313,6 +313,8 @@ WAN_REGION = "cn-beijing"
 WAN_CAPABILITIES_VERSION = "wan27-t2v-beijing-v1"
 WAN_ADAPTER_VERSION = "wan-http-v1"
 WAN_ENDPOINT_PROFILE = "beijing-workspace-v1"
+# K1 keys-only track: the shared Beijing host is selected by the recorded form alone.
+WAN_SHARED_ENDPOINT_PROFILE = "beijing-shared-v1"
 WAN_PRICE_VERSION = "wan27-beijing-720p-20261010"
 WAN_PRICE_SOURCE = "https://help.aliyun.com/zh/model-studio/model-pricing#ba6f7744d5e0o"
 WAN_PROMPT_PREFIX = "生成单镜头视频。\n"
@@ -433,6 +435,41 @@ class VideoRequestV2(VideoIntentV2):
     def fingerprint(self) -> str:
         return canonical_fingerprint(
             {"requestVersion": 2, "request": self.model_dump(mode="json", by_alias=True)}
+        )
+
+
+class VideoRequestV4(VideoIntentV2):
+    """The keys-only single-shot live request: identical intent, no workspace scope."""
+
+    region: Literal["cn-beijing"]
+    endpoint_profile: Literal["beijing-shared-v1"]
+    adapter_version: Literal["wan-http-v1"]
+    provider_prompt: str = Field(min_length=10, max_length=5000)
+    parameters: WanParameters
+
+    @model_validator(mode="after")
+    def complete_request(self):
+        if (
+            self.provider != "wan"
+            or self.model != WAN_MODEL
+            or self.provider_prompt != WAN_PROMPT_PREFIX + self.prompt
+            or self.spec != VideoSpecV2(duration_seconds=5, resolution="720p", aspect_ratio="16:9")
+        ):
+            raise ValueError("The frozen keys-only Wan request must match its public intent")
+        return self
+
+    def public_arguments(self) -> dict:
+        return {
+            name: self.model_dump(mode="json", by_alias=True)[name]
+            for name in ("provider", "model", "capabilitiesVersion", "prompt", "spec", "sourceRefs")
+        }
+
+    def intent_fingerprint(self) -> str:
+        return canonical_fingerprint({"intentVersion": 2, "arguments": self.public_arguments()})
+
+    def fingerprint(self) -> str:
+        return canonical_fingerprint(
+            {"requestVersion": 4, "request": self.model_dump(mode="json", by_alias=True)}
         )
 
 
@@ -695,6 +732,69 @@ class VideoRequestV3(Contract):
     def fingerprint(self) -> str:
         return canonical_fingerprint(
             {"requestVersion": 3, "request": self.model_dump(mode="json", by_alias=True)}
+        )
+
+
+class VideoRequestV5(Contract):
+    """One keys-only shot request: the M2 protocol minus the workspace scope."""
+
+    provider: Literal["wan"] = "wan"
+    model: Name
+    capabilities_version: Literal["wan27-shot-beijing-v2"]
+    prompt: str = Field(min_length=1, max_length=4991)
+    spec: ShotSpecV3
+    source_refs: JsonTuple[ArtifactRef] = Field(default=(), max_length=16)
+    region: Literal["cn-beijing"] = "cn-beijing"
+    endpoint_profile: Literal["beijing-shared-v1"] = "beijing-shared-v1"
+    adapter_version: Literal["wan-http-v2"] = "wan-http-v2"
+    provider_prompt: str = Field(min_length=10, max_length=5000)
+    parameters: WanParametersV3
+    media: JsonTuple[ShotMediaInput] = Field(default=(), max_length=2)
+
+    @model_validator(mode="after")
+    def complete_request(self):
+        if self.model != (WAN_MODEL if self.spec.mode == "t2v" else WAN_I2V_MODEL):
+            raise ValueError("The frozen shot request must use the verified model of its mode")
+        if self.provider_prompt != WAN_PROMPT_PREFIX + self.prompt:
+            raise ValueError("A shot prompt is the fixed prefix plus the shot description")
+        if (self.parameters.duration, self.parameters.resolution) != (
+            self.spec.duration_seconds,
+            self.spec.resolution,
+        ):
+            raise ValueError("Frozen parameters must match the shot specification")
+        if tuple(item.frame for item in self.media) != MODE_FRAMES[self.spec.mode]:
+            raise ValueError("A shot mode requires its exact ordered reference frames")
+        if len({item.asset_id for item in self.media}) != len(self.media):
+            raise ValueError("Reference assets must be unique per shot")
+        if self.spec.mode == "t2v":
+            if self.parameters.ratio != "16:9":
+                raise ValueError("Text-to-video sends the frozen 16:9 ratio")
+        elif self.parameters.ratio is not None:
+            raise ValueError("Image modes must not send a ratio; the input frame decides it")
+        return self
+
+    def public_arguments(self) -> dict:
+        return {
+            name: self.model_dump(mode="json", by_alias=True)[name]
+            for name in ("provider", "model", "capabilitiesVersion", "prompt", "spec", "sourceRefs")
+        }
+
+    def intent_fingerprint(self) -> str:
+        return canonical_fingerprint(
+            {
+                "intentVersion": 3,
+                "prompt": self.prompt,
+                "spec": self.spec.model_dump(mode="json", by_alias=True),
+                "media": [
+                    {"frame": item.frame, "assetId": item.asset_id, "sha256": item.sha256}
+                    for item in self.media
+                ],
+            }
+        )
+
+    def fingerprint(self) -> str:
+        return canonical_fingerprint(
+            {"requestVersion": 5, "request": self.model_dump(mode="json", by_alias=True)}
         )
 
 
@@ -1032,7 +1132,7 @@ LiveJobStatus = Literal[
 ]
 
 
-def _coherent_live_state(job: "JobV2 | JobV3") -> None:
+def _coherent_live_state(job: "JobV2 | JobV3 | JobV4 | JobV5") -> None:
     if datetime.fromisoformat(job.updated_at) < datetime.fromisoformat(job.created_at):
         raise ValueError("Job cannot be updated before creation")
     if job.submit_attempts != (0 if job.status == "pending_submit" else 1):
@@ -1276,22 +1376,38 @@ class JobV3(JobV2):
         return self
 
 
-# Both live contract versions share one lifecycle; only their frozen request differs.
-LiveJob = (JobV2, JobV3)
+class JobV4(JobV2):
+    """One keys-only single-shot live Job: the frozen V2 lifecycle, shared endpoint."""
+
+    contract_version: int = Field(default=4, ge=4, le=4)
+    request: VideoRequestV4
 
 
-def parse_job(value) -> Job | JobV2 | JobV3:
+class JobV5(JobV3):
+    """One keys-only shot live Job: the frozen V3 lifecycle, shared endpoint."""
+
+    contract_version: int = Field(default=5, ge=5, le=5)
+    request: VideoRequestV5
+
+
+# Every live contract version shares one lifecycle; only the frozen request differs.
+LiveJob = (JobV2, JobV3, JobV4, JobV5)
+
+JobDispatch = {1: Job, 2: JobV2, 3: JobV3, 4: JobV4, 5: JobV5}
+
+
+def parse_job(value) -> Job | JobV2 | JobV3 | JobV4 | JobV5:
     if isinstance(value, Job):
         value = value.model_dump(mode="json", by_alias=True)
     if not isinstance(value, dict):
         raise ValueError("Job must be an object")
     version = value.get("contractVersion", value.get("contract_version", 1))
-    if type(version) is not int or version not in {1, 2, 3}:
+    if type(version) is not int or version not in JobDispatch:
         raise ValueError("Unsupported Job contract version")
-    return {1: Job, 2: JobV2, 3: JobV3}[version].model_validate(value)
+    return JobDispatch[version].model_validate(value)
 
 
-StoredJob = Annotated[Job | JobV2 | JobV3, BeforeValidator(parse_job)]
+StoredJob = Annotated[Job | JobV2 | JobV3 | JobV4 | JobV5, BeforeValidator(parse_job)]
 
 
 _LIVE_JOB_TRANSITIONS = {

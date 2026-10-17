@@ -702,7 +702,7 @@ class ApplicationService:
         except AppError:
             raise AppError(
                 "RESUME_CONFIG_CHANGED",
-                "原 live Run 的视频配置不可用，任务与等待结果已保留；请补齐原业务空间配置。",
+                "原 live Run 的视频配置不可用，任务与等待结果已保留；请补齐原视频 Key 或业务空间配置。",
             ) from None
 
     def _event_sink(self, session_id, *, run_id=None, ready=None):

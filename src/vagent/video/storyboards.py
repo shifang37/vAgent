@@ -22,6 +22,7 @@ from vagent.video.contracts import (
     MediaId,
     VideoRequest,
     VideoRequestV3,
+    VideoRequestV5,
 )
 
 SHOT_LIMIT = 64
@@ -343,7 +344,7 @@ def stored_request_fingerprint(stored) -> str | None:
     """Recompute the exact fingerprint a stored request would hash to today."""
     if not isinstance(stored, dict):
         return None
-    for model in (VideoRequestV3, VideoRequest):
+    for model in (VideoRequestV5, VideoRequestV3, VideoRequest):
         try:
             return model.model_validate(stored).fingerprint()
         except ValueError:

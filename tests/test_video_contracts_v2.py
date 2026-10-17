@@ -93,7 +93,7 @@ def test_provider_parameters_are_exact_and_strict(changes):
         WanParameters.model_validate(changes)
 
 
-@pytest.mark.parametrize("version", [True, "2", 2.0, 0, 4, None])
+@pytest.mark.parametrize("version", [True, "2", 2.0, 0, 6, None])
 def test_job_dispatch_only_accepts_exact_version_integers(version):
     with pytest.raises(ValueError):
         parse_job({"contractVersion": version})

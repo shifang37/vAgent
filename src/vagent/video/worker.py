@@ -301,8 +301,11 @@ class JobWorker:
             nextPollAt=after_seconds(timestamp, job.policy.query_timeout_seconds),
         )
         try:
+            profile_args = (
+                {"endpoint_profile": job.request.endpoint_profile} if isinstance(job, LiveJob) else {}
+            )
             raw = await asyncio.wait_for(
-                adapter.query(job.provider_task_id), timeout=job.policy.query_timeout_seconds
+                adapter.query(job.provider_task_id, **profile_args), timeout=job.policy.query_timeout_seconds
             )
             snapshot_type = ProviderTaskSnapshotV2 if isinstance(job, LiveJob) else ProviderTaskSnapshot
             snapshot = snapshot_type.model_validate(

@@ -1,4 +1,4 @@
-"""Frozen Beijing workspace HTTP protocol. No implicit submission retries."""
+"""Frozen Beijing Wan HTTP protocol (workspace or shared host). No implicit submission retries."""
 
 import asyncio
 import json
@@ -18,6 +18,7 @@ from vagent.video.contracts import (
     WAN_I2V_MODEL,
     WAN_MODEL,
     WAN_REGION,
+    WAN_SHARED_ENDPOINT_PROFILE,
     WAN_SHOT_ADAPTER_VERSION,
     JobErrorV2,
     ProviderCallError,
@@ -29,6 +30,8 @@ from vagent.video.contracts import (
     ShotMediaInput,
     VideoRequestV2,
     VideoRequestV3,
+    VideoRequestV4,
+    VideoRequestV5,
     WorkspaceId,
     wan_capabilities,
     wan_shot_capabilities,
@@ -36,6 +39,8 @@ from vagent.video.contracts import (
 
 MAX_RESPONSE_BYTES = 1024 * 1024
 SUBMIT_PATH = "/api/v1/services/aigc/video-generation/video-synthesis"
+# K1 keys-only track: the shared Beijing host carries no workspace scope.
+SHARED_HOST = "dashscope.aliyuncs.com"
 _IDENTIFIER = re.compile(r"[A-Za-z0-9_-]{1,256}\Z", re.ASCII)
 _CODE = re.compile(r"[A-Za-z][A-Za-z0-9_.-]{0,127}\Z", re.ASCII)
 
@@ -86,8 +91,8 @@ _REJECTIONS.update(
 )
 _MESSAGES = {
     "PROVIDER_INVALID_REQUEST": "视频服务明确拒绝了请求参数，请检查原任务规格。",
-    "PROVIDER_AUTH_FAILED": "视频凭证无效，请检查北京地域与原业务空间的 Key。",
-    "PROVIDER_ACCESS_DENIED": "视频服务拒绝访问，请检查原业务空间、模型授权和 Key 权限。",
+    "PROVIDER_AUTH_FAILED": "视频凭证无效，请检查北京地域的视频 Key。",
+    "PROVIDER_ACCESS_DENIED": "视频服务拒绝访问，请检查模型授权和 Key 权限。",
     "PROVIDER_MODEL_UNAVAILABLE": "原视频模型或业务空间不可用，请核对配置。",
     "PROVIDER_BILLING_BLOCKED": "视频服务因余额、额度或账单上限拒绝请求，请检查账号费用设置。",
     "PROVIDER_RATE_LIMITED": "视频服务限流，保留原任务并按已保存的策略处理。",
@@ -199,13 +204,34 @@ class WanAdapter:
         """The M2 entries this adapter also serves; the legacy entry stays registered."""
         return wan_shot_capabilities()
 
-    def check_configuration(self, request: VideoRequestV2 | None = None):
+    def check_configuration(self, request=None):
         if not self._key:
             raise AppError("VIDEO_KEY_MISSING", "请配置视频服务 Key，文本模型 Key 不能代替视频 Key。")
+        if request is None:
+            # A caller without a recorded request must still name a usable host.
+            if not self.workspace_id:
+                raise AppError("VIDEO_WORKSPACE_REQUIRED", "请配置北京视频 Key 对应的业务空间 ID。")
+            return
+        if request.endpoint_profile == WAN_SHARED_ENDPOINT_PROFILE:
+            if isinstance(request, VideoRequestV5):
+                served = (
+                    request.region == self.region
+                    and request.model in {WAN_MODEL, WAN_I2V_MODEL}
+                    and request.adapter_version == WAN_SHOT_ADAPTER_VERSION
+                )
+                message = "缺少原镜头任务的地域、共享端点或适配器配置。"
+            else:
+                served = (
+                    request.region == self.region
+                    and request.model == self.model
+                    and request.adapter_version == self.adapter_version
+                )
+                message = "缺少原视频任务的地域、共享端点或适配器配置。"
+            if not served:
+                raise AppError("VIDEO_PROVIDER_UNAVAILABLE", message)
+            return
         if not self.workspace_id:
             raise AppError("VIDEO_WORKSPACE_REQUIRED", "请配置北京视频 Key 对应的业务空间 ID。")
-        if request is None:
-            return
         if isinstance(request, VideoRequestV3):
             if (
                 request.workspace_id != self.workspace_id
@@ -241,12 +267,21 @@ class WanAdapter:
             self._error(stage, code, **kwargs), submission_outcome="unknown" if stage == "submit" else None
         )
 
-    async def _request(self, method, path, *, stage, body=None):
-        self.check_configuration()
+    def _host(self, endpoint_profile: str) -> str:
+        """Route by the recorded endpoint form; the shared host carries no workspace."""
+        if endpoint_profile == WAN_SHARED_ENDPOINT_PROFILE:
+            return SHARED_HOST
+        if not self.workspace_id:
+            raise AppError("VIDEO_WORKSPACE_REQUIRED", "请配置北京视频 Key 对应的业务空间 ID。")
+        return f"{self.workspace_id}.cn-beijing.maas.aliyuncs.com"
+
+    async def _request(self, method, path, *, stage, host, body=None):
+        if not self._key:
+            raise AppError("VIDEO_KEY_MISSING", "请配置视频服务 Key，文本模型 Key 不能代替视频 Key。")
         headers = {"Authorization": f"Bearer {self._key}", "Accept": "application/json"}
         if stage == "submit":
             headers["X-DashScope-Async"] = "enable"
-        url = f"https://{self.workspace_id}.cn-beijing.maas.aliyuncs.com{path}"
+        url = f"https://{host}{path}"
         try:
             async with asyncio.timeout(30):
                 async with self.client.stream(
@@ -368,7 +403,7 @@ class WanAdapter:
     def _body(self, request) -> dict:
         """The exact provider body; a shot request adds only its proofed reference frames."""
         parameters = request.parameters.model_dump(mode="json", by_alias=True)
-        if isinstance(request, VideoRequestV3):
+        if isinstance(request, (VideoRequestV3, VideoRequestV5)):
             input_value = {"prompt": request.provider_prompt}
             if request.media:
                 if self._reference_loader is None:
@@ -386,14 +421,21 @@ class WanAdapter:
         }
 
     async def submit(self, request, operation_key: str) -> ProviderTaskHandleV2:
-        request = (
-            VideoRequestV3.model_validate(request)
-            if isinstance(request, VideoRequestV3)
-            else VideoRequestV2.model_validate(request)
-        )
+        if isinstance(request, VideoRequestV5):
+            request = VideoRequestV5.model_validate(request)
+        elif isinstance(request, VideoRequestV3):
+            request = VideoRequestV3.model_validate(request)
+        elif isinstance(request, VideoRequestV4):
+            request = VideoRequestV4.model_validate(request)
+        else:
+            request = VideoRequestV2.model_validate(request)
         self.check_configuration(request)
         status, payload, _ = await self._request(
-            "POST", SUBMIT_PATH, stage="submit", body=self._body(request)
+            "POST",
+            SUBMIT_PATH,
+            stage="submit",
+            host=self._host(request.endpoint_profile),
+            body=self._body(request),
         )
         output = payload.get("output")
         task_id = safe_identifier(output.get("task_id")) if isinstance(output, dict) else None
@@ -413,11 +455,16 @@ class WanAdapter:
             )
         raise self._call_error("submit", "SUBMISSION_UNKNOWN", status=status, payload=payload)
 
-    async def query(self, task_id: str) -> ProviderTaskSnapshotV2:
+    async def query(
+        self, task_id: str, *, endpoint_profile: str = WAN_ENDPOINT_PROFILE
+    ) -> ProviderTaskSnapshotV2:
         if safe_identifier(task_id) is None:
             raise self._call_error("query", "QUERY_PROTOCOL_ERROR")
         status, payload, retry_after_at = await self._request(
-            "GET", f"/api/v1/tasks/{quote(task_id, safe='')}", stage="query"
+            "GET",
+            f"/api/v1/tasks/{quote(task_id, safe='')}",
+            stage="query",
+            host=self._host(endpoint_profile),
         )
         if 200 <= status < 300 and "code" not in payload:
             try:
