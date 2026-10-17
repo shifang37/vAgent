@@ -1,6 +1,6 @@
 # M2 端到端验收：离线套件、受控联调与打包（D4）
 
-完成日期：**2026-10-17**。基线：D3 提交 `8213366`（codex/m2-d1；D4 延续该分支）。契约与范围见 [M2 契约](./M2_CONTRACTS.md) 与 [M2 任务规划](./M2_PLAN.md)；官方接口证据见 [VIDEO_API_NOTES](./VIDEO_API_NOTES.md) 第 9 节；前序验收见 [D1](./M2_D1_ACCEPTANCE.md)、[D2](./M2_D2_ACCEPTANCE.md) 与 [D3](./M2_D3_ACCEPTANCE.md) 验收。
+完成日期：**2026-10-17**。基线：D3 提交 `8213366`（codex/m2-d1；D4 延续该分支）；M2 于同日全部合入 master（`8776482`）。契约与范围见 [M2 契约](./M2_CONTRACTS.md) 与 [M2 任务规划](./M2_PLAN.md)；官方接口证据见 [VIDEO_API_NOTES](./VIDEO_API_NOTES.md) 第 9 节；前序验收见 [D1](./M2_D1_ACCEPTANCE.md)、[D2](./M2_D2_ACCEPTANCE.md) 与 [D3](./M2_D3_ACCEPTANCE.md) 验收。
 
 **离线部分全程零费用：视频 submit=0（上游为受控 HTTP），未发起真实模型或视频调用，未使用真实凭证或素材。** 受控上游由本地合成参考图与提交的测试 MP4 驱动，登记、集合等待、本地交付、逐镜头重做、费用护栏与拒绝路径都走真实应用代码路径。真实成本受控联调见第 7 节。
 
