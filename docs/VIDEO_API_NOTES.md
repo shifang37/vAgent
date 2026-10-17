@@ -254,7 +254,7 @@ S2 列出该模型北京免费额度 **50 秒**，有效期自开通百炼/模�
 | 不存在的任务 ID | 200，`task_status=UNKNOWN` | 200，`task_status=UNKNOWN` |
 | M2 任务 `e971a41c-ea5c-41bd-9fd3-b4ef3815df0e` | 200，`SUCCEEDED`，含 `video_url` | 200，`SUCCEEDED`，含 `video_url` |
 
-结论（预研级，未冻结）：同一 Key 在共享域名可完成鉴权与任务读取，两个域名读取同一任务库（专属域名创建的任务在共享域名可见）。Key-only 配置因此可默认共享域名，无需用户填写地域或业务空间。保留为 M3 E0 核实项：共享域名「自 2026-09-30 起不再支持新特性」对**提交**路径的影响；是否存在无副作用的业务空间查询接口（如有，仅 Key 时也可解析专属域名）。探测原始结果存 `output/m3-keys-only-probe.json`。
+结论（预研级，未冻结）：同一 Key 在共享域名可完成鉴权与任务读取，两个域名读取同一任务库（专属域名创建的任务在共享域名可见）。Key-only 配置因此可默认共享域名，无需用户填写地域或业务空间。保留为 M3 E0 核实项：共享域名「自 2026-09-30 起不再支持新特性」对**提交**路径的影响；是否存在无副作用的业务空间查询接口（如有，仅 Key 时也可解析专属域名）。探测原始结果存 `output/m3-keys-only-probe.json`。2026-10-17 补记：本节结论已在设计层按两 Key 直用方案（K 轨）冻结（[KEYS_ONLY_PLAN.md](./KEYS_ONLY_PLAN.md)，K0）；共享域名提交路径由 K3 的单样本实测最终验证。
 
 [D1]: https://help.aliyun.com/zh/model-studio/image-to-video-general-api-reference
 [D2]: https://help.aliyun.com/zh/model-studio/wan-image-to-video-guide
