@@ -5,10 +5,12 @@ import asyncio
 import hashlib
 import json
 import os
+import struct
 import subprocess
 import sys
 import sysconfig
 import tempfile
+import zlib
 from contextlib import chdir
 from datetime import datetime
 from pathlib import Path
@@ -502,6 +504,174 @@ def smoke_m1c_evaluation(directory):
     return report
 
 
+def solid_png(width, height, rgb):
+    """A real, decodable PNG so the installed asset surface carries genuine image bytes."""
+
+    def chunk(kind, payload):
+        return (
+            struct.pack(">I", len(payload))
+            + kind
+            + payload
+            + struct.pack(">I", zlib.crc32(kind + payload) & 0xFFFFFFFF)
+        )
+
+    rows = b"".join(b"\x00" + bytes(rgb) * width for _ in range(height))
+    header = struct.pack(">IIBBBBB", width, height, 8, 2, 0, 0, 0)
+    return (
+        b"\x89PNG\r\n\x1a\n"
+        + chunk(b"IHDR", header)
+        + chunk(b"IDAT", zlib.compress(rows, 6))
+        + chunk(b"IEND", b"")
+    )
+
+
+async def smoke_m2_workbench(directory):
+    """Installed M2 surface: storyboard tools, client batch registration, HTTP and CLI."""
+    home = Path(directory) / "m2-workbench"
+    reference = Path(directory) / "reference.png"
+    reference.write_bytes(solid_png(1280, 720, (32, 48, 72)))
+    config = load_config({"VAGENT_HOME": str(home), "VAGENT_VIDEO_MODE": "mock"})
+    async with ApplicationService.open(config) as service:
+        service.store.ensure_session("wheel")
+        asset = service.import_asset("wheel", reference.read_bytes(), "reference.png")
+        saved = service.tools.execute(
+            "storyboard_save",
+            {
+                "title": "wheel 分镜",
+                "shots": [
+                    {"description": "镜头一：雨夜街道", "framing": "wide", "durationSeconds": 5},
+                    {"description": "镜头二：推门入店", "framing": "close", "durationSeconds": 5},
+                ],
+            },
+            store=service.store,
+            project_id="wheel",
+            operation_key="wheel-storyboard",
+        )
+        assert saved["ok"], saved
+        storyboard_id, version, shots = (
+            saved["data"]["storyboardId"],
+            saved["data"]["version"],
+            saved["data"]["shotIds"],
+        )
+        registered = service.generate_shots(
+            "wheel",
+            {
+                "clientRequestId": "wheel-batch",
+                "storyboardId": storyboard_id,
+                "storyboardVersion": version,
+                "shotIds": shots,
+                "confirm": True,
+            },
+        )
+        assert registered["mode"] == "mock" and len(registered["shots"]) == 2
+        assert all(entry["reused"] is False for entry in registered["shots"])
+        app = create_app(config)
+        app.state.service = service
+        async with httpx.AsyncClient(
+            transport=httpx.ASGITransport(app=app), base_url="http://127.0.0.1:3210"
+        ) as client:
+            listing = (await client.get("/api/storyboards", params={"projectId": "wheel"})).json()
+            assert [item["storyboardId"] for item in listing["storyboards"]] == [storyboard_id]
+            assert (await client.get("/api/storyboards", params={"projectId": "other"})).json()[
+                "storyboards"
+            ] == []
+            view = (
+                await client.get(f"/api/storyboards/{storyboard_id}", params={"projectId": "wheel"})
+            ).json()
+            assert [item["id"] for item in view["shots"]] == shots
+            # A mock shot never delivers media, so the link is absent for every version.
+            assert all(
+                item["latest"]["mediaAvailable"] is False and item["latest"]["mediaUrl"] is None
+                for item in view["shots"]
+            )
+            estimate = (
+                await client.get(
+                    f"/api/storyboards/{storyboard_id}/estimate",
+                    params={
+                        "projectId": "wheel",
+                        "storyboardVersion": version,
+                        "shotIds": ",".join(shots),
+                    },
+                )
+            ).json()
+            assert estimate["mode"] == "mock" and estimate["simulated"] is True
+            assert [row["reused"] for row in estimate["shots"]] == [True, True]
+            assert estimate["totalEstimate"] is None and estimate["limits"] is None
+            library = (await client.get("/api/assets", params={"projectId": "wheel"})).json()
+            assert [entry["assetId"] for entry in library["assets"]] == [asset["assetId"]]
+            detail = (await client.get(f"/api/assets/{asset['assetId']}")).json()
+            assert detail["available"] is True and "relativePath" not in json.dumps(detail)
+            content = await client.get(detail["contentUrl"])
+            assert content.status_code == 200 and content.headers["content-type"] == "image/png"
+            ranged = await client.get(detail["contentUrl"], headers={"Range": "bytes=0-99"})
+            assert ranged.status_code == 206 and len(ranged.content) == 100
+            absent = await client.get("/api/assets/44444444-4444-4444-4444-444444444444")
+            assert absent.status_code == 404 and absent.json()["error"]["code"] == "ASSET_NOT_FOUND"
+            usage = (await client.get("/api/usage", params={"projectId": "wheel"})).json()
+            assert usage["jobs"]["total"] == 2 and usage["assets"]["total"] == 1
+            assert usage["storyboards"] == {"total": 1, "shotVersions": 2}
+    assert not (home / "instance.lock").exists()
+    cli = Path(sysconfig.get_path("scripts")) / ("vagent.exe" if os.name == "nt" else "vagent")
+    env = {**isolated_environment(home), "VAGENT_VIDEO_MODE": "mock"}
+    cli_view = json.loads(run_command([str(cli), "storyboard", "show", "-s", "wheel"], env=env))
+    assert cli_view["storyboardId"] == storyboard_id and cli_view["shotCount"] == 2
+    assert [item["latest"]["jobId"] for item in cli_view["shots"]] == [
+        entry["jobId"] for entry in registered["shots"]
+    ]
+    listing = json.loads(run_command([str(cli), "assets", "list"], env=env))
+    assert [entry["assetId"] for entry in listing["assets"]] == [asset["assetId"]]
+    imported = json.loads(run_command([str(cli), "assets", "import", str(reference), "-s", "wheel"], env=env))
+    assert imported["failed"] == [] and imported["imported"][0]["deduplicated"] is True
+    assert "relativePath" not in json.dumps(imported)
+    redone = json.loads(
+        run_command([str(cli), "shots", "redo", shots[0], "--request-id", "wheel-redo"], env=env)
+    )
+    assert redone["shots"][0]["shotId"] == shots[0] and redone["mode"] == "mock"
+    replay = json.loads(
+        run_command([str(cli), "shots", "redo", shots[0], "--request-id", "wheel-redo"], env=env)
+    )
+    assert replay == redone
+    usage = json.loads(run_command([str(cli), "usage", "--project", "wheel"], env=env))
+    assert usage["jobs"]["total"] == 3 and usage["jobs"]["mock"] == 3
+    assert usage["storyboards"]["shotVersions"] == 3
+    assert usage["assets"] == {"total": 1, "libraryTotal": 1}
+    assert usage["cost"]["estimateAmount"] == "0.00"
+    assert not (home / "instance.lock").exists()
+    return {
+        "storyboardId": storyboard_id,
+        "shotIds": shots,
+        "assetId": asset["assetId"],
+        "batchJobIds": [entry["jobId"] for entry in registered["shots"]],
+        "redoJobId": redone["shots"][0]["jobId"],
+        "storyboardViewAndEstimate": True,
+        "assetHttpAndContent": True,
+        "cliStoryboardRedoAssetsUsage": True,
+        "lockReleased": True,
+    }
+
+
+def smoke_m2_evaluation(directory):
+    output = Path(directory) / "m2-evaluation.json"
+    run_command(
+        [
+            sys.executable,
+            "-I",
+            str(Path(__file__).with_name("evaluate_m2.py").resolve()),
+            "--home",
+            str(Path(directory) / "m2-state"),
+            "--output",
+            str(output),
+        ],
+        env=isolated_environment(Path(directory) / "unused-config"),
+    )
+    report = json.loads(output.read_text(encoding="utf-8"))
+    assert report["status"] == "passed" and report["mode"] == "offline-fixture"
+    assert report["totals"]["passedCases"] == report["totals"]["plannedCases"] == 7
+    assert report["totals"]["submitCalls"] == 10 and report["totals"]["shotsDelivered"] == 9
+    assert not (Path(report["dataDirectory"]) / "instance.lock").exists()
+    return report
+
+
 async def main(output=None):
     assert Path(vagent.__file__).resolve().is_relative_to(Path(sys.prefix).resolve()), (
         "Use an installed-wheel environment"
@@ -584,6 +754,8 @@ async def main(output=None):
             live_report = await smoke_live_media(directory)
             evaluation_report = smoke_evaluation(directory)
             m1c_report = smoke_m1c_evaluation(directory)
+            m2_workbench = await smoke_m2_workbench(directory)
+            m2_report = smoke_m2_evaluation(directory)
             report = {
                 "status": "passed",
                 "packagePath": str(Path(vagent.__file__).resolve()),
@@ -600,18 +772,22 @@ async def main(output=None):
                     "liveMediaRestartAndCli": True,
                     "fiveCaseM1bSuite": True,
                     "sevenCaseM1cSuite": True,
+                    "m2WorkbenchCliAndHttp": True,
+                    "sevenCaseM2Suite": True,
                 },
                 "videoRestart": video_report,
                 "liveMedia": live_report,
                 "m1bEvaluation": evaluation_report,
                 "m1cEvaluation": m1c_report,
+                "m2Workbench": m2_workbench,
+                "m2Evaluation": m2_report,
             }
     report["temporaryDataCleaned"] = not Path(directory).exists()
     if output:
         output.parent.mkdir(parents=True, exist_ok=True)
         output.write_text(json.dumps(report, ensure_ascii=False, indent=2), encoding="utf-8")
     print(
-        "PASS: installed wheel, Web assets, config, streaming, text/quality, MCP, mock video tools, durable wait, original Run restart/automatic continuation, readonly delivery, unchanged budgets, CLI list/get/usage, five M1-B cases, live protocol with local media restart and CLI media evidence, seven M1-C cases, cleanup."
+        "PASS: installed wheel, Web assets, config, streaming, text/quality, MCP, mock video tools, durable wait, original Run restart/automatic continuation, readonly delivery, unchanged budgets, CLI list/get/usage, five M1-B cases, live protocol with local media restart and CLI media evidence, seven M1-C cases, M2 storyboard/asset CLI and HTTP surface, seven M2 cases, cleanup."
     )
     return report
 
