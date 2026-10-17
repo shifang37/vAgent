@@ -151,7 +151,7 @@ async def smoke_video_tools(directory):
         assert job.provider_task_id == original_handle
         marker = service.tools.execute(
             "await_job",
-            {"jobId": model.job_id},
+            {"jobIds": [model.job_id]},
             store=service.store,
             project_id="wheel",
             operation_key=binding.context.operation_key,

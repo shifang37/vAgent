@@ -499,6 +499,51 @@ def test_single_element_wait_uses_the_frozen_job_binding(store, video_clock):
     assert not job_settled(job)
 
 
+def race(call, count=4):
+    """Run one call from several threads at once and collect every outcome."""
+    import threading
+
+    results = []
+    threads = [threading.Thread(target=lambda: results.append(call())) for _ in range(count)]
+    for thread in threads:
+        thread.start()
+    for thread in threads:
+        thread.join()
+    return results
+
+
+def test_racing_batch_calls_register_one_set(store, video_clock):
+    registry, service, _, _ = mock_tools(store, clock=video_clock)
+    saved = save_storyboard(registry, store, [shot("镜头一"), shot("镜头二")])
+    m2_run(store, "shot-run", mode="mock")
+    context = shot_context(tool_call_id="race")
+    args = generation_args(saved)
+    results = race(lambda: service.shot_generate(args, context=context))
+    assert len(results) == 4 and all(result == results[0] for result in results), results[0]
+    assert results[0]["ok"], results[0]
+    assert len(store.snapshot()["jobs"]) == 2
+    assert len([key for key in store.snapshot()["operations"] if "race" in key]) == 1
+    record = storyboard_record(store, saved["storyboardId"])
+    assert len(record["shotVersions"]) == 2 and record["revision"] == 1
+
+
+def test_racing_redo_calls_register_one_version(store, video_clock):
+    registry, service, _, _ = mock_tools(store, clock=video_clock)
+    saved = save_storyboard(registry, store, [shot("镜头一")])
+    m2_run(store, "shot-run", mode="mock")
+    service.shot_generate(generation_args(saved), context=shot_context())
+    revision = storyboard_record(store, saved["storyboardId"])["revision"]
+    m2_run(store, "redo-run", mode="mock")
+    args = redo_args(saved, saved["shotIds"][0], revision=revision, client_request_id="race")
+    context = shot_context("redo-run", tool_call_id="race")
+    results = race(lambda: service.redo_shot(args, context=context))
+    assert len(results) == 4 and all(result == results[0] for result in results), results[0]
+    assert results[0]["ok"], results[0]
+    assert len(store.snapshot()["jobs"]) == 2
+    assert len([key for key in store.snapshot()["operations"] if "race" in key]) == 1
+    assert len(shot_versions(store, saved["storyboardId"], saved["shotIds"][0])) == 2
+
+
 def test_legacy_runs_still_hold_at_most_one_job(store, video_clock):
     registry, service, _, _ = mock_tools(store, clock=video_clock)
     saved = save_storyboard(registry, store, [shot("镜头一"), shot("镜头二")])
