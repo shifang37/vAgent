@@ -84,7 +84,7 @@
 - [x] K0：设计冻结完成（2026-10-17；五项决议见第 5 节；submit=0）。
 - [x] K1：契约与服务端完成（2026-10-17；受控 HTTP 全链路、V2/V3 逐字节回归与混合目录重启用例；离线全量 947 passed / 2 skipped；submit=0）。见 [K1 验收](./KEYS_ONLY_K1_ACCEPTANCE.md)。
 - [x] K2：设置页最小表单、零费用探测与免重启生效完成（2026-10-18；受控浏览器 6 阶段 0 失败；保存路径零任务、零提交；免重启登记与业务空间后补/移除的端点热切换用例通过；离线全量 958 passed / 2 skipped；submit=0）。见 [K2 验收](./KEYS_ONLY_K2_ACCEPTANCE.md)。
-- [ ] K3：wheel smoke、四组 CI 与文档同步完成；共享域真实样本完成（submit=1、估算 3.00 CNY，执行前显式批准额度）。
-- [ ] 各工作包完成时同步 README、M3_PLAN 与 VIDEO_API_NOTES。
+- [x] K3：wheel smoke 扩展、四组 CI 与文档同步完成（2026-10-18；K3 变更提交 `b953886`）；共享域真实样本完成（单镜头 5 秒 720P，submit=1、估算 3.00 CNY，执行前显式批准额度；任务 `ad3a4a68-6849-44a8-9b68-1cca1c6877be`，结果主机 `dashscope-a717.oss-accelerate.aliyuncs.com` 仍在 `wan-result-hosts-v2` 允许集内，实际账单 unknown）。见 [K3 验收](./KEYS_ONLY_K3_ACCEPTANCE.md)。
+- [x] 各工作包完成时同步 README、M3_PLAN 与 VIDEO_API_NOTES（K3 完成，2026-10-18）。
 
-本文为任务设计；K0 已于 2026-10-17 冻结，实施自 K1 起按第 3 节工作包与完成门槛推进。
+本文为任务设计；K0 已于 2026-10-17 冻结；K1–K3 已按第 3 节工作包与完成门槛全部完成（见各阶段验收文档）。

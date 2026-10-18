@@ -119,7 +119,7 @@
 4. **headless 付费授权形态**：建议默认 dry-run（草案与估算后结束）；显式预算参数（如 `--max-cost`）加显式确认（如 `--confirm`）才提交；无 TTY 不交互、不隐式接受。
 5. **扩展点范围**：建议只做用户 skills 目录；可执行插件加载与插件市场继续顺延。
 6. **M2 遗留项**：素材删除与检索、参考音频、云端取消、跨项目记忆。建议继续顺延；如要求纳入，单独确认范围与验收。
-7. **两 Key 直用的默认端点**：建议 Key-only 时默认北京共享域名 `dashscope.aliyuncs.com`（规划期零费用探测已验证鉴权与读取，见 [VIDEO_API_NOTES](./VIDEO_API_NOTES.md) 第 10 节）；业务空间与专属域名保留为高级覆盖；共享域名提交路径由 E0 与首个付费样本最终验证；独立提前实施方案（K 轨）见 [KEYS_ONLY_PLAN](./KEYS_ONLY_PLAN.md)（K0 已于 2026-10-17 冻结、K1 同日完成契约与服务端，见 [K1 验收](./KEYS_ONLY_K1_ACCEPTANCE.md)；K2 于 2026-10-18 完成设置页最小表单、零费用探测与免重启生效，见 [K2 验收](./KEYS_ONLY_K2_ACCEPTANCE.md)；两 Key 直用配置与设置页由该轨先行实施）。
+7. **两 Key 直用的默认端点**：建议 Key-only 时默认北京共享域名 `dashscope.aliyuncs.com`（规划期零费用探测已验证鉴权与读取，见 [VIDEO_API_NOTES](./VIDEO_API_NOTES.md) 第 10 节）；业务空间与专属域名保留为高级覆盖；共享域名提交路径由 E0 与首个付费样本最终验证；独立提前实施方案（K 轨）见 [KEYS_ONLY_PLAN](./KEYS_ONLY_PLAN.md)（K0 已于 2026-10-17 冻结、K1 同日完成契约与服务端，见 [K1 验收](./KEYS_ONLY_K1_ACCEPTANCE.md)；K2 于 2026-10-18 完成设置页最小表单、零费用探测与免重启生效，见 [K2 验收](./KEYS_ONLY_K2_ACCEPTANCE.md)；K3 于 2026-10-18 完成 wheel smoke 扩展、四组 CI 与共享域真实单镜头样本（submit=1、估算 3.00 CNY），K 轨 K0–K3 全部完成，见 [K3 验收](./KEYS_ONLY_K3_ACCEPTANCE.md)；两 Key 直用配置与设置页由该轨先行实施）。
 
 ## 7. 阶段完成清单
 
