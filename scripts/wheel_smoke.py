@@ -22,12 +22,15 @@ import vagent
 from vagent.application import ApplicationService
 from vagent.config import load_config
 from vagent.models import DemoModel
+from vagent.storage import FileStore
+from vagent.tools import create_project_tools
 from vagent.video.contracts import VideoCapabilities, VideoRequest, VideoSpec, validate_video_request
 from vagent.video.jobs import JobService
 from vagent.video.media_http import MediaHttpClient
 from vagent.video.media_worker import MediaWorker
 from vagent.video.providers.mock import MockVideoAdapter
 from vagent.video.providers.wan import WanAdapter
+from vagent.video.tools import register_video_tools
 from vagent.video.worker import JobWorker
 from vagent.waiting import WAIT_EXECUTION_VERSION, DeferredToolResult, ExternalResourceRef, WaitBinding
 from vagent.web import create_app
@@ -672,6 +675,230 @@ def smoke_m2_evaluation(directory):
     return report
 
 
+def seed_keys_only_storyboard(home):
+    """One fresh project with a single 5 s t2v shot; nothing else exists yet."""
+    home.mkdir(parents=True, exist_ok=True)
+    with FileStore.open(home) as store:
+        store.ensure_session("keys-only")
+        registry = register_video_tools(create_project_tools(), JobService(store, [MockVideoAdapter(store)]))
+        saved = registry.execute(
+            "storyboard_save",
+            {
+                "title": "keys-only wheel",
+                "shots": [
+                    {"description": "雨夜咖啡店，镜头缓慢推近", "framing": "wide", "durationSeconds": 5}
+                ],
+            },
+            store=store,
+            project_id="keys-only",
+            operation_key="keys-only-storyboard",
+        )
+        assert saved["ok"], saved
+        return {
+            "storyboardId": saved["data"]["storyboardId"],
+            "version": saved["data"]["version"],
+            "shotIds": list(saved["data"]["shotIds"]),
+        }
+
+
+async def smoke_keys_only_live(directory):
+    """Installed keys-only path: the settings save probes for free, registration goes live
+    hot and the shared host delivers one batch shot with no restart anywhere."""
+    import vagent.application as application
+
+    home = Path(directory) / "keys-only-state"
+    saved_storyboard = seed_keys_only_storyboard(home)
+    sample = Path(__file__).resolve().parent.parent / "tests" / "fixtures" / "m1c" / "sample-720p.mp4"
+    data = sample.read_bytes()
+    shared_host = "dashscope.aliyuncs.com"
+    video_key = "wheel-keys-only-video-key"
+    video_url = (
+        "https://dashscope-result-sh.oss-accelerate.aliyuncs.com/keys-only-fixture.mp4?Signature=keys-only"
+    )
+    fixture = {"calls": []}
+    clock = [datetime.fromisoformat("2030-01-01T00:00:00+00:00")]
+
+    def upstream(request):
+        fixture["calls"].append(request)
+        if request.method == "POST":
+            return httpx.Response(
+                200,
+                json={
+                    "request_id": "keys-only-submit",
+                    "output": {"task_id": "keys-only-task", "task_status": "PENDING"},
+                },
+            )
+        task = request.url.path.rsplit("/", 1)[-1]
+        if task == "keys-only-task":
+            return httpx.Response(
+                200,
+                json={
+                    "request_id": "keys-only-query",
+                    "output": {"task_id": task, "task_status": "SUCCEEDED", "video_url": video_url},
+                    "usage": {"duration": 5},
+                },
+            )
+        # The zero-cost save probe: a task ID that cannot exist answers UNKNOWN.
+        return httpx.Response(
+            200,
+            json={
+                "request_id": "keys-only-probe",
+                "output": {"task_id": task, "task_status": "UNKNOWN"},
+            },
+        )
+
+    def advance(service):
+        """Jump the fixture clock to the earliest persisted deadline, never backwards."""
+        deadlines = []
+        for job in service.video_jobs.list():
+            if job.next_poll_at and not job.query_started_at:
+                deadlines.append(job.next_poll_at)
+            download = getattr(job, "download", None)
+            if download is not None and download.next_attempt_at:
+                deadlines.append(download.next_attempt_at)
+        if deadlines:
+            clock[0] = max(clock[0], min(datetime.fromisoformat(value) for value in deadlines))
+
+    def media(_request):
+        return httpx.Response(
+            200, content=data, headers={"Content-Type": "video/mp4", "Content-Length": str(len(data))}
+        )
+
+    originals = (
+        application.WanAdapter,
+        application.MediaHttpClient,
+        application.JobService,
+        application.JobWorker,
+        application.MediaWorker,
+    )
+    application.WanAdapter = lambda **kwargs: WanAdapter(**kwargs, transport=httpx.MockTransport(upstream))
+    application.MediaHttpClient = lambda: MediaHttpClient(transport=httpx.MockTransport(media))
+    application.JobService = lambda *args, **kwargs: JobService(*args, **kwargs, clock=lambda: clock[0])
+    application.JobWorker = lambda service: JobWorker(service, idle_interval_seconds=0.05)
+    application.MediaWorker = lambda media_service, client: MediaWorker(
+        media_service, client, idle_interval_seconds=0.05
+    )
+    try:
+        # The workbench starts off with no video key at all: only the settings save enables live.
+        config = load_config({"VAGENT_HOME": str(home)})
+        app = create_app(config, model=DemoModel())
+        async with app.router.lifespan_context(app):
+            service = app.state.service
+            async with httpx.AsyncClient(
+                transport=httpx.ASGITransport(app=app), base_url="http://127.0.0.1:3210"
+            ) as client:
+                client.headers["X-CSRF-Token"] = (await client.get("/api/session-token")).json()["token"]
+                saved = await client.patch(
+                    "/api/config", json={"apiKey": "wheel-keys-only-text", "videoApiKey": video_key}
+                )
+                assert saved.status_code == 200, saved.text
+                settings = saved.json()
+                assert video_key not in saved.text and "wheel-keys-only-text" not in saved.text
+                assert settings["apiKeyConfigured"] and settings["videoApiKeyConfigured"]
+                assert settings["autoEnabledLive"] is True
+                assert settings["videoMode"] == "live" and settings["activeVideoMode"] == "live"
+                assert settings["videoWorkspaceId"] is None and settings["restartFields"] == []
+                probe = settings["videoProbe"]
+                assert probe["status"] == "authenticated" and probe["host"] == shared_host
+                assert probe["code"] == "PROVIDER_TASK_UNAVAILABLE"
+                assert probe["requestId"] == "keys-only-probe"
+                # Exactly one read-only GET: no task created, nothing submitted.
+                assert len(fixture["calls"]) == 1
+                probe_call = fixture["calls"][0]
+                assert probe_call.method == "GET" and probe_call.url.host == shared_host
+                assert probe_call.url.path == f"/api/v1/tasks/{probe['taskId']}"
+                assert probe_call.headers["authorization"] == f"Bearer {video_key}"
+                assert not service.store.snapshot()["jobs"]
+                # No restart: the saved key registers one live shot on the shared host.
+                registered = service.generate_shots(
+                    "keys-only",
+                    {
+                        "clientRequestId": "keys-only-wheel-1",
+                        "storyboardId": saved_storyboard["storyboardId"],
+                        "storyboardVersion": saved_storyboard["version"],
+                        "shotIds": saved_storyboard["shotIds"],
+                        "confirm": True,
+                    },
+                )
+                assert registered["mode"] == "live"
+                job_id = registered["shots"][0]["jobId"]
+                raw = service.store.snapshot()["jobs"][job_id]
+                assert raw["contractVersion"] == 5
+                assert raw["request"]["endpointProfile"] == "beijing-shared-v1"
+                assert "workspaceId" not in json.dumps(raw, ensure_ascii=False)
+                async with asyncio.timeout(30):
+                    while True:
+                        advance(service)
+                        if service.video_jobs.get(job_id).status == "succeeded":
+                            break
+                        await asyncio.sleep(0.01)
+                job = service.video_jobs.get(job_id)
+                assert job.provider_task_id == "keys-only-task" and job.submit_attempts == 1
+                submits = [call for call in fixture["calls"] if call.method == "POST"]
+                assert len(submits) == 1 and submits[0].url.host == shared_host
+                assert submits[0].headers["authorization"] == f"Bearer {video_key}"
+                assert submits[0].url.path == "/api/v1/services/aigc/video-generation/video-synthesis"
+                assert {call.url.host for call in fixture["calls"]} == {shared_host}
+                queries = [call for call in fixture["calls"] if call.method == "GET"]
+                assert [call.url.path.rsplit("/", 1)[-1] for call in queries] == [
+                    probe["taskId"],
+                    "keys-only-task",
+                ]
+                assert len(fixture["calls"]) == 3
+                body = json.loads(submits[0].content)
+                assert body["model"] == "wan2.7-t2v-2026-06-12"
+                assert body["input"]["prompt"].startswith("生成单镜头视频。\n")
+                assert body["parameters"] == {
+                    "resolution": "720P",
+                    "ratio": "16:9",
+                    "duration": 5,
+                    "prompt_extend": False,
+                    "watermark": True,
+                    "seed": 0,
+                }
+                media_id = job.download.media_id
+                asset = service.store.snapshot()["media"][media_id]
+                assert asset["sha256"] == hashlib.sha256(data).hexdigest()
+                assert (home / asset["relativePath"]).read_bytes() == data
+                detail = (await client.get(f"/api/media/{media_id}")).json()
+                assert detail["mediaAvailable"] and detail["sizeBytes"] == len(data)
+                full = await client.get(detail["contentUrl"])
+                assert full.status_code == 200 and full.content == data
+        assert not (home / "instance.lock").exists()
+        cli = Path(sysconfig.get_path("scripts")) / ("vagent.exe" if os.name == "nt" else "vagent")
+        env = isolated_environment(home)
+        detail = json.loads(run_command([str(cli), "jobs", "get", job_id], env=env))
+        assert detail["status"] == "succeeded" and detail["mediaAvailable"] is True
+        assert detail["providerTaskId"] == "keys-only-task" and detail["submitAttempts"] == 1
+        assert "Signature" not in json.dumps(detail)
+    finally:
+        (
+            application.WanAdapter,
+            application.MediaHttpClient,
+            application.JobService,
+            application.JobWorker,
+            application.MediaWorker,
+        ) = originals
+    return {
+        "jobId": job_id,
+        "providerTaskId": "keys-only-task",
+        "mediaId": media_id,
+        "sha256": hashlib.sha256(data).hexdigest(),
+        "sizeBytes": len(data),
+        "probeStatus": probe["status"],
+        "probeHost": probe["host"],
+        "contractVersion": raw["contractVersion"],
+        "endpointProfile": raw["request"]["endpointProfile"],
+        "autoEnabledLive": True,
+        "restartRequired": False,
+        "submitCalls": 1,
+        "queryCalls": 1,
+        "mediaApiVerified": True,
+        "cliMediaVerified": True,
+        "lockReleased": True,
+    }
+
+
 async def main(output=None):
     assert Path(vagent.__file__).resolve().is_relative_to(Path(sys.prefix).resolve()), (
         "Use an installed-wheel environment"
@@ -756,6 +983,7 @@ async def main(output=None):
             m1c_report = smoke_m1c_evaluation(directory)
             m2_workbench = await smoke_m2_workbench(directory)
             m2_report = smoke_m2_evaluation(directory)
+            keys_only_report = await smoke_keys_only_live(directory)
             report = {
                 "status": "passed",
                 "packagePath": str(Path(vagent.__file__).resolve()),
@@ -774,6 +1002,7 @@ async def main(output=None):
                     "sevenCaseM1cSuite": True,
                     "m2WorkbenchCliAndHttp": True,
                     "sevenCaseM2Suite": True,
+                    "keysOnlyLiveSharedHost": True,
                 },
                 "videoRestart": video_report,
                 "liveMedia": live_report,
@@ -781,13 +1010,14 @@ async def main(output=None):
                 "m1cEvaluation": m1c_report,
                 "m2Workbench": m2_workbench,
                 "m2Evaluation": m2_report,
+                "keysOnlyLive": keys_only_report,
             }
     report["temporaryDataCleaned"] = not Path(directory).exists()
     if output:
         output.parent.mkdir(parents=True, exist_ok=True)
         output.write_text(json.dumps(report, ensure_ascii=False, indent=2), encoding="utf-8")
     print(
-        "PASS: installed wheel, Web assets, config, streaming, text/quality, MCP, mock video tools, durable wait, original Run restart/automatic continuation, readonly delivery, unchanged budgets, CLI list/get/usage, five M1-B cases, live protocol with local media restart and CLI media evidence, seven M1-C cases, M2 storyboard/asset CLI and HTTP surface, seven M2 cases, cleanup."
+        "PASS: installed wheel, Web assets, config, streaming, text/quality, MCP, mock video tools, durable wait, original Run restart/automatic continuation, readonly delivery, unchanged budgets, CLI list/get/usage, five M1-B cases, live protocol with local media restart and CLI media evidence, seven M1-C cases, M2 storyboard/asset CLI and HTTP surface, seven M2 cases, keys-only live shared-host fixture with zero-cost save probe and hot registration, cleanup."
     )
     return report
 
