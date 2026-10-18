@@ -59,7 +59,7 @@
 - 离线全量：**958 passed / 2 skipped**（K1 基线 947 passed / 2 skipped；K2 新增 `tests/test_keys_only_web.py` 11 项，改写 `tests/test_live_application.py` 的保存用例为免重启语义）。
 - `ruff check` 与 `ruff format --check`（`src/vagent tests scripts`）通过；`node --check` 覆盖 `web/app.js` 等，`node --test` 两个前端状态文件（22 项）通过。
 - 视频 submit=0：全部用例与浏览器证据断言，探测与保存路径无任务创建。
-- 四组 CI（ubuntu/windows × 3.11/3.12）在最终提交上的运行结果随推送补记（K1 同法）。
+- 四组 CI（ubuntu/windows × 3.11/3.12）在最终提交 `b2b834b` 上全部通过（check runs `117578243305` / `117578243410` / `117578243420` / `117578243445`；ubuntu 3.11/3.12 均 957 passed / 3 skipped，windows 3.11/3.12 均 959 passed / 1 skipped；安装态 wheel smoke 四组 PASS）；汇总证据 `output/keys-only-k2-ci-b2b834b-summary.json`。
 
 ## 7. 失败与偏差记录
 
