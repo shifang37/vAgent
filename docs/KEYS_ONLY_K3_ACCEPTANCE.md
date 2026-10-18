@@ -62,7 +62,7 @@ tmp/m2-d1-wheel-env/Scripts/python.exe -I tmp/keys-only-k3-live/sample.py --outp
 
 ## 5. 四组 CI
 
-- 四组 CI（ubuntu/windows × 3.11/3.12）在最终提交上的运行结果随推送补记（K1/K2 同法）。
+- 四组 CI（ubuntu/windows × 3.11/3.12）在最终提交 `29b9162` 上全部通过（check runs `117589703143` / `117589703002` / `117589702784` / `117589703007`；ubuntu 3.11/3.12 均 957 passed / 3 skipped，windows 3.11/3.12 均 959 passed / 1 skipped；安装态 wheel smoke 四组 PASS 且含 keys-only 夹具）；汇总证据 `output/keys-only-k3-ci-29b9162-summary.json`。
 
 ## 6. 失败与偏差记录
 
