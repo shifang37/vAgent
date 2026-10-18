@@ -162,7 +162,7 @@ def create_app(config, *, port=3210, model=None, policy=None):
 
     @app.patch("/api/config")
     async def save_configuration(body: ConfigUpdate):
-        return app.state.service.save_configuration(body)
+        return await app.state.service.save_configuration(body)
 
     @app.post("/api/config/validate")
     async def validate_configuration():

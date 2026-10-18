@@ -89,6 +89,8 @@ class LocalSettings(BaseModel):
 
 
 class ConfigUpdate(LocalSettings):
+    # K2: an empty workspace ID removes it and returns to the shared host.
+    videoWorkspaceId: WorkspaceId | Literal[""] | None = None
     clearApiKey: bool = False
     clearVideoApiKey: bool = False
 
@@ -151,7 +153,7 @@ def update_local_settings(config: Config, update: ConfigUpdate) -> Config:
             if name in clears or getattr(update, name) != getattr(config, attr):
                 raise AppError("CONFIG_OVERRIDE", "该字段由启动配置或环境变量提供，请先移除该配置再修改。")
             continue
-        if clear:
+        if clear or (name == "videoWorkspaceId" and supplied and update.videoWorkspaceId == ""):
             values.pop(name, None)
         elif supplied:
             values[name] = getattr(update, name)

@@ -3,7 +3,6 @@
 import asyncio
 import copy
 from contextlib import AsyncExitStack, asynccontextmanager, suppress
-from dataclasses import replace
 from uuid import uuid4
 
 from vagent.cache import AnswerCache
@@ -60,6 +59,8 @@ class ApplicationService:
     ):
         self.config, self.store, self.catalog, self.tools = config, store, catalog, tools
         self._settings_config = config
+        self.video_probe = None
+        self.wan_adapter = None
         self.tool_views = {config.video_mode: tools}
         self.http_client, self.model, self.cache = http_client, model, cache
         self.policy = policy or RunPolicy()
@@ -128,6 +129,7 @@ class ApplicationService:
             service.mcp_status = mcp_status
             service.tool_views = tool_views
             service.video_jobs = video_jobs
+            service.wan_adapter = wan
             service.media = video_jobs.media
             service._event_loop = asyncio.get_running_loop()
             video_jobs.on_change = service._job_event
@@ -427,6 +429,7 @@ class ApplicationService:
             "activeVideoMode": self.config.video_mode,
             "videoApiKeyConfigured": bool(saved.video_api_key),
             "videoPermissionStatus": "unverified",
+            "videoProbe": copy.deepcopy(self.video_probe),
             "videoEstimate": self.video_jobs.price.model_dump(mode="json", by_alias=True)
             if self.video_jobs and self.video_jobs.price
             else None,
@@ -449,19 +452,50 @@ class ApplicationService:
         ):
             raise AppError("CONFIG_BUSY", "请等待当前执行或配置验证结束后再修改配置。")
 
-    def save_configuration(self, update: ConfigUpdate):
+    async def save_configuration(self, update: ConfigUpdate):
         self._check_config_idle()
+        sources = config_sources(self._settings_config)
+        auto_live = (
+            "videoApiKey" in update.model_fields_set
+            and update.videoApiKey is not None
+            and not self._settings_config.video_api_key
+            and self._settings_config.video_mode == "off"
+            and "videoMode" not in update.model_fields_set
+            and sources["videoMode"] not in {"environment", "provided"}
+        )
+        if auto_live:
+            # K2 freeze (decision 2): the first saved video key switches off to
+            # live once; an explicit mode in any save always writes the choice.
+            update = ConfigUpdate.model_validate(
+                {**update.model_dump(exclude_unset=True), "videoMode": "live"}
+            )
         previous = (self.config.api_key, self.config.model)
+        previous_video = (self._settings_config.video_api_key, self._settings_config.video_workspace_id)
         updated = update_local_settings(self._settings_config, update)
         self._settings_config = updated
-        # Text settings retain their established immediate behavior. Video clients,
-        # capability views and queue budgets all keep their startup snapshot.
-        self.config = replace(
-            updated, **{attr: getattr(self.config, attr) for attr, _, _ in VIDEO_SETTINGS.values()}
+        # K2: saved video settings apply to new registrations immediately, with no
+        # restart; in-flight and historical Jobs keep their frozen identities.
+        self.config = updated
+        self.video_jobs.config = updated
+        self.wan_adapter.update_credentials(
+            api_key=updated.video_api_key, workspace_id=updated.video_workspace_id
         )
         if previous != (self.config.api_key, self.config.model):
             self.validation = {"status": "unverified"}
-        return self.configuration()
+        if (updated.video_api_key, updated.video_workspace_id) != previous_video:
+            self.video_probe = None
+        touched_credentials = {"videoApiKey", "videoWorkspaceId"} & update.model_fields_set
+        if touched_credentials and updated.video_api_key:
+            # Zero-cost read-only probe: one query for a task ID that cannot
+            # exist. It registers nothing and never blocks the saved settings.
+            self.config_busy = True
+            try:
+                self.video_probe = await self.wan_adapter.probe_authentication()
+            finally:
+                self.config_busy = False
+        result = self.configuration()
+        result["autoEnabledLive"] = auto_live
+        return result
 
     async def validate_configuration(self):
         self._check_config_idle()

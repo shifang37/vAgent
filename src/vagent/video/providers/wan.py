@@ -7,6 +7,7 @@ from collections.abc import Callable
 from datetime import UTC, datetime, timedelta
 from email.utils import parsedate_to_datetime
 from urllib.parse import parse_qs, quote, urlsplit
+from uuid import uuid4
 
 import httpx
 from pydantic import TypeAdapter
@@ -250,6 +251,56 @@ class WanAdapter:
             or request.endpoint_profile != self.endpoint_profile
         ):
             raise AppError("VIDEO_PROVIDER_UNAVAILABLE", "缺少原视频任务的地域、业务空间或适配器配置。")
+
+    def update_credentials(self, *, api_key: str | None, workspace_id: str | None) -> None:
+        """K2: saved settings reach new registrations without a restart."""
+        if workspace_id is not None:
+            TypeAdapter(WorkspaceId).validate_python(workspace_id)
+        self._key = api_key
+        self.workspace_id = workspace_id
+
+    async def probe_authentication(self, timeout: float = 15) -> dict:
+        """One read-only query for a task ID that cannot exist.
+
+        It proves the key, the host and the auth without creating or charging
+        anything: the service answers a missing task with ``task_status=UNKNOWN``
+        and a request ID. Failures are reported by status, never raised.
+        """
+        profile = WAN_ENDPOINT_PROFILE if self.workspace_id else WAN_SHARED_ENDPOINT_PROFILE
+        task_id = str(uuid4())
+        record = {
+            "status": "inconclusive",
+            "checkedAt": self.clock().astimezone(UTC).isoformat(),
+            "host": self._host(profile),
+            "taskId": task_id,
+            "code": None,
+            "message": None,
+            "requestId": None,
+        }
+        try:
+            async with asyncio.timeout(timeout):
+                await self.query(task_id, endpoint_profile=profile)
+            record["status"] = "authenticated"
+        except ProviderCallError as error:
+            record["code"] = error.error.code
+            record["message"] = error.error.message
+            record["requestId"] = error.error.request_id
+            if error.error.code == "PROVIDER_TASK_UNAVAILABLE":
+                # The expected answer: key, host and auth are valid; no task exists.
+                record["status"] = "authenticated"
+            elif error.error.code in {
+                "PROVIDER_AUTH_FAILED",
+                "PROVIDER_ACCESS_DENIED",
+                "PROVIDER_MODEL_UNAVAILABLE",
+            }:
+                record["status"] = "rejected"
+        except TimeoutError:
+            record["message"] = "鉴权探测超时，未验证视频权限。"
+        except AppError as error:
+            record["code"], record["message"] = error.code, str(error)
+        except Exception:
+            record["message"] = "鉴权探测未完成，未验证视频权限。"
+        return record
 
     def _error(self, stage, code, *, status=None, payload=None, request_id=None):
         payload = payload if isinstance(payload, dict) else {}

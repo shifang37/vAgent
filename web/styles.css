@@ -1209,6 +1209,35 @@ dialog input:disabled {
 @media (max-width: 640px) {
   .video-settings-grid { grid-template-columns: 1fr; }
 }
+#settings-form details {
+  border: 1px dashed #dbe4f1;
+  border-radius: 10px;
+  margin: 14px 0 6px;
+  padding: 10px 12px;
+}
+#settings-form details summary {
+  cursor: pointer;
+  font-weight: 600;
+  font-size: 13px;
+  color: #3d4d63;
+}
+#settings-form details[open] summary { margin-bottom: 10px; }
+#settings-form .mode-toggle {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin: 12px 0;
+}
+#settings-form .mode-toggle input[type="checkbox"] {
+  width: auto;
+  margin: 0;
+  flex: 0 0 auto;
+}
+#settings-form .meta {
+  font-size: 12px;
+  color: #7b8da6;
+  margin: 8px 0;
+}
 .job-id, .job-footer small {
   font-size: 10px;
   color: #8795a7;

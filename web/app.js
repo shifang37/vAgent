@@ -967,6 +967,7 @@ function applyConfiguration(config) {
   health.apiKeyConfigured = config.apiKeyConfigured;
   if (health.modelKind === "deepseek") health.model = config.model;
   renderConnection();
+  renderVideoMode();
 }
 async function showSettings() {
   if (configSubmitting) return toast("配置请求正在进行，请稍候。");
@@ -975,20 +976,37 @@ async function showSettings() {
   applyConfiguration(config);
   if ($("#dialog").open && generation === dialogGeneration) renderSettings(config);
 }
+function videoProbeText(config) {
+  if (!config.videoApiKeyConfigured) return "未配置视频密钥；填写并保存会执行一次零费用鉴权探测。";
+  const probe = config.videoProbe;
+  if (!probe) return "已配置；保存视频 Key 会执行一次零费用只读探测（不创建任务）。";
+  const at = new Date(probe.checkedAt).toLocaleString();
+  if (probe.status === "authenticated") return `鉴权通过（视频权限未验证）· ${probe.host} · ${at}`;
+  if (probe.status === "rejected") return `鉴权未通过：${probe.message}（配置已保存；真实生成可能被拒绝）`;
+  return `探测未完成：${probe.message || "网络或协议问题"}（未验证，配置已保存）`;
+}
+function renderVideoMode() {
+  const mode = health?.configuration?.activeVideoMode ?? health?.videoMode;
+  $("#video-mode-label").hidden = mode === "off";
+  $("#video-mode-label").textContent = mode === "live" ? "真实视频 · 本地 MP4" : "模拟视频 · 无真实媒体";
+  $("#video-workflow").innerHTML = mode === "mock"
+    ? "模拟视频任务 <small>无真实媒体</small>" : mode === "live"
+    ? "真实视频任务 <small>本地 MP4</small>" : "视频生成 <small>未启用</small>";
+}
 function renderSettings(config, notice = "") {
   const sources = { environment: "环境变量 / .env", provided: "启动配置", local: "本地配置", default: "默认值", unset: "未配置" };
-  const videoFields = [
-    ["videoMode", "视频模式", [["off", "off · 仅文本创作"], ["mock", "mock · 模拟任务"], ["live", "live · 真实视频"]]],
+  const modeOptions = [["off", "off · 仅文本创作"], ["mock", "mock · 模拟任务（无费用）"], ["live", "live · 真实视频"]];
+  const advancedFields = [
     ["videoProvider", "供应商", [["wan", "阿里云百炼万相"]]],
     ["videoModel", "视频模型", [["wan2.7-t2v-2026-06-12", "wan2.7-t2v-2026-06-12"]]],
     ["videoRegion", "地域", [["cn-beijing", "北京 · cn-beijing"]]],
-    ["videoWorkspaceId", "业务空间 ID", null],
+    ["videoWorkspaceId", "业务空间 ID（可选）", null],
     ["videoMaxJobCost", "单任务估算金额上限（CNY）", null],
   ];
   const validation = config.validation;
   const status = { unverified: "尚未验证", validating: "正在验证", verified: "连接已验证", failed: "验证失败" }[validation.status];
   const generation = openDialog("Agent 连接与配置", `
-    <p>DeepSeek 配置保存在本机，下次执行即可生效；视频配置需重启。环境变量和 .env 优先，由启动配置提供的字段需在原处修改。</p>
+    <p>两个 Key 即可使用：DeepSeek 文本 Key 与万相视频 Key。配置保存在本机并立即生效、无需重启——视频配置用于新登记任务，在途与历史任务仍按其原配置恢复。环境变量和 .env 优先，由启动配置提供的字段需在原处修改。</p>
     <form id="settings-form">
       <fieldset><legend>DeepSeek 文本创作</legend>
       <label for="config-key">DeepSeek API Key · ${sources[config.sources.apiKey] || "启动配置"}
@@ -999,29 +1017,46 @@ function renderSettings(config, notice = "") {
       </label>
       ${config.editable.apiKey && config.apiKeyConfigured ? `<button type="button" class="secondary" data-config="clear" ${config.busy ? "disabled" : ""}>移除 DeepSeek 密钥</button>` : ""}
       </fieldset>
-      <fieldset><legend>视频生成</legend>
-      <p>当前运行：${escapeHTML(config.activeVideoMode)} · 已保存：${escapeHTML(config.videoMode)}。${config.restartRequired ? "修改将在重启服务后生效。" : "视频配置需重启生效。"}</p>
-      <div class="video-settings-grid">${videoFields.map(([field, label, options]) => {
-        const disabled = !config.editable[field] || config.busy ? "disabled" : "";
-        return `<label for="config-${field}">${label} · ${sources[config.sources[field]] || "启动配置"}${options
-          ? `<select id="config-${field}" data-video-field="${field}" ${disabled}>${options.map(([value, text]) => `<option value="${value}" ${config[field] === value ? "selected" : ""}>${text}</option>`).join("")}</select>`
-          : `<input id="config-${field}" data-video-field="${field}" value="${escapeHTML(config[field] || "")}" ${field === "videoMaxJobCost" ? 'type="number" min="0" step="0.01" required' : 'type="text" maxlength="63" spellcheck="false" autocapitalize="off"'} ${disabled}>`}</label>`;
-      }).join("")}</div>
+      <fieldset><legend>视频生成（万相）</legend>
       <label for="config-video-key">万相 API Key · ${sources[config.sources.videoApiKey] || "启动配置"}
         <input id="config-video-key" type="password" autocomplete="new-password" maxlength="512" spellcheck="false" autocapitalize="off" placeholder="${config.videoApiKeyConfigured ? "已配置，留空保持" : "输入视频专用 API Key"}" ${!config.editable.videoApiKey || config.busy ? "disabled" : ""}>
       </label>
-      <p>视频权限：${config.videoApiKeyConfigured ? "已配置，尚未验证账号权限" : "未配置视频密钥"}。保存不会生成视频。</p>
+      <label for="config-video-toggle" class="mode-toggle"><input id="config-video-toggle" type="checkbox" ${config.videoMode === "live" ? "checked" : ""} ${!config.editable.videoMode || config.busy ? "disabled" : ""}>启用真实视频生成（live）</label>
+      ${config.videoMode === "mock" ? '<p class="meta">当前为模拟任务（mock）：不调用供应商、无费用；可在高级中切换。</p>' : ""}
+      ${config.restartRequired ? `<p>当前运行：${escapeHTML(config.activeVideoMode)} · 已保存：${escapeHTML(config.videoMode)}。修改将在重启服务后生效。</p>` : ""}
+      <p id="config-video-probe">视频权限：${escapeHTML(videoProbeText(config))}</p>
+      <details id="config-video-advanced">
+        <summary>高级（可选）</summary>
+        <div class="video-settings-grid">
+        <label for="config-videoMode">视频模式 · ${sources[config.sources.videoMode] || "启动配置"}
+          <select id="config-videoMode" data-video-field="videoMode" ${!config.editable.videoMode || config.busy ? "disabled" : ""}>${modeOptions.map(([value, text]) => `<option value="${value}" ${config.videoMode === value ? "selected" : ""}>${text}</option>`).join("")}</select>
+        </label>
+        ${advancedFields.map(([field, label, options]) => {
+          const disabled = !config.editable[field] || config.busy ? "disabled" : "";
+          return `<label for="config-${field}">${label} · ${sources[config.sources[field]] || "启动配置"}${options
+            ? `<select id="config-${field}" data-video-field="${field}" ${disabled}>${options.map(([value, text]) => `<option value="${value}" ${config[field] === value ? "selected" : ""}>${text}</option>`).join("")}</select>`
+            : `<input id="config-${field}" data-video-field="${field}" value="${escapeHTML(config[field] || "")}" ${field === "videoMaxJobCost" ? 'type="number" min="0" step="0.01" required' : 'type="text" maxlength="63" spellcheck="false" autocapitalize="off"'} ${disabled}>`}</label>`;
+        }).join("")}
+        </div>
+        <p class="meta">业务空间留空时使用共享域名 dashscope.aliyuncs.com；填写后切换到专属域名（{业务空间}.cn-beijing.maas.aliyuncs.com），清空并保存即可移除。</p>
+      </details>
       <p>固定规格：5 秒 · 720P · 16:9。${config.videoEstimate ? `每次生成估算 ${escapeHTML(config.videoEstimate.amount)} CNY；单价 ${escapeHTML(config.videoEstimate.unitPrice)} CNY/秒（核实于 ${escapeHTML(config.videoEstimate.checkedAt)}）。实际费用以账单为准。` : "当前没有可用报价，不能提交真实生成。"}</p>
       ${config.editable.videoApiKey && config.videoApiKeyConfigured ? `<button type="button" class="secondary" data-config="clear-video" ${config.busy ? "disabled" : ""}>移除视频密钥</button>` : ""}
       </fieldset>
       <p id="config-status" role="status">${escapeHTML(notice || (config.busy ? "请等待当前执行或验证结束。" : `${config.apiKeyConfigured ? "密钥已配置" : "密钥未配置"} · ${status}`))}${validation.checkedAt ? `<br>上次验证：${escapeHTML(new Date(validation.checkedAt).toLocaleString())}` : ""}</p>
-      <p>保存不调用模型。「保存并验证 DeepSeek」会发起一次简短文本模型请求，可能产生少量费用。验证状态在服务重启后重置。</p>
+      <p>保存不调用模型；保存视频 Key 时会执行一次零费用只读探测（不存在任务 ID 的查询，不创建任务、不产生费用）。「保存并验证 DeepSeek」会发起一次简短文本模型请求，可能产生少量费用。验证状态在服务重启后重置。</p>
       <div class="actions config-actions">
         <button type="submit" class="secondary" ${config.busy ? "disabled" : ""}>保存</button>
         <button type="button" class="primary" data-config="validate" ${config.busy ? "disabled" : ""}>保存并验证 DeepSeek</button>
       </div>
     </form>`);
   const form = $("#settings-form");
+  const toggle = $("#config-video-toggle");
+  const modeSelect = $("#config-videoMode");
+  if (toggle && modeSelect) {
+    toggle.addEventListener("change", () => { modeSelect.value = toggle.checked ? "live" : "off"; });
+    modeSelect.addEventListener("change", () => { toggle.checked = modeSelect.value === "live"; });
+  }
   async function submitConfiguration(action) {
     if (configSubmitting || config.busy) return;
     if (!["clear", "clear-video"].includes(action) && !form.reportValidity()) return;
@@ -1054,7 +1089,13 @@ function renderSettings(config, notice = "") {
       applyConfiguration(result);
       if (action === "validate") result = await post("/api/config/validate");
       message = action === "validate" ? "DeepSeek 连接已验证。" : "配置已保存。";
-      if (result.restartRequired) message += "视频设置将在重启服务后生效。";
+      if (result.autoEnabledLive) message += "已自动启用真实视频生成（可在设置中关闭）。";
+      if (!["clear", "clear-video"].includes(action) && result.videoProbe) {
+        if (result.videoProbe.status === "authenticated") message += "视频鉴权通过（视频权限未验证）。";
+        else if (result.videoProbe.status === "rejected") message += "视频鉴权未通过：" + result.videoProbe.message;
+        else message += "视频鉴权探测未完成（网络或协议问题）。";
+      }
+      if (result.restartRequired) message += "部分视频设置将在重启服务后生效。";
     } catch (error) {
       message = error.message;
       try { result = await api("/api/config"); } catch {}
@@ -1372,11 +1413,7 @@ async function initialize() {
     renderConnection();
     $("#skills-label").textContent =
       `${health.skills.length} Skills · ${health.mcp.length} MCP`;
-    $("#video-mode-label").hidden = health.videoMode === "off";
-    $("#video-mode-label").textContent = health.videoMode === "live" ? "真实视频 · 本地 MP4" : "模拟视频 · 无真实媒体";
-    $("#video-workflow").innerHTML = health.videoMode === "mock"
-      ? "模拟视频任务 <small>无真实媒体</small>" : health.videoMode === "live"
-      ? "真实视频任务 <small>本地 MP4</small>" : "视频生成 <small>未启用</small>";
+    renderVideoMode();
     $("#execution-label").textContent =
       health.modelKind === "deepseek"
         ? "真实 Agent · 按实际模型用量计费"

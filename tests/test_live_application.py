@@ -33,6 +33,16 @@ def live_runtime(monkeypatch, video_clock):
 
     def handler(request):
         runtime.calls.append(request)
+        task_id = request.url.path.rsplit("/", 1)[-1] if request.method == "GET" else "wan-original"
+        if request.method == "GET" and task_id != "wan-original":
+            # K2 probe: a task ID that cannot exist answers UNKNOWN.
+            return httpx.Response(
+                200,
+                json={
+                    "request_id": "offline-trace",
+                    "output": {"task_id": task_id, "task_status": "UNKNOWN"},
+                },
+            )
         status = runtime.query_status if request.method == "GET" and runtime.query_status else runtime.status
         return httpx.Response(
             200,
@@ -142,7 +152,7 @@ def test_invalid_video_environment_has_safe_errors(tmp_path, field, value):
     assert caught.value.code == "VIDEO_CONFIG_INVALID" and "private-secret" not in str(caught.value)
 
 
-async def test_config_api_saves_without_http_and_video_changes_apply_after_restart(tmp_path, live_runtime):
+async def test_config_api_saves_without_http_and_video_changes_apply_without_restart(tmp_path, live_runtime):
     config = load_config({"VAGENT_HOME": str(tmp_path)})
     model = ScriptedModel(lambda *_: AIMessage(content="unused"))
     app = create_app(config, model=model)
@@ -162,33 +172,40 @@ async def test_config_api_saves_without_http_and_video_changes_apply_after_resta
             )
             assert saved.status_code == 200 and "video-api-secret" not in saved.text
             settings = saved.json()
-            assert settings["videoMode"] == "live" and settings["activeVideoMode"] == "off"
-            assert settings["restartRequired"] and set(settings["restartFields"]) == {
-                "videoMode",
-                "videoApiKey",
-                "videoWorkspaceId",
-            }
+            # K2: an explicit mode is written as given; nothing waits for a restart.
+            assert settings["videoMode"] == "live" and settings["activeVideoMode"] == "live"
+            assert not settings["restartRequired"] and settings["restartFields"] == []
+            assert settings["autoEnabledLive"] is False
             assert settings["videoApiKeyConfigured"] and settings["videoPermissionStatus"] == "unverified"
             assert settings["videoMaxJobCost"] == "3.00"
-            assert app.state.service.runner().video_mode == "off"
-            assert not app.state.service.video_jobs.config.video_api_key
-            assert not live_runtime.calls and model.calls == 0
+            assert app.state.service.runner().video_mode == "live"
+            assert app.state.service.video_jobs.config.video_api_key == "video-api-secret"
+            assert app.state.service.video_jobs.config.video_workspace_id == "test-space"
+            # One zero-cost probe GET on the dedicated host: no model call, no task.
+            probe = settings["videoProbe"]
+            assert probe and probe["status"] == "authenticated"
+            assert probe["host"] == "test-space.cn-beijing.maas.aliyuncs.com"
+            assert [call.method for call in live_runtime.calls] == ["GET"]
+            assert live_runtime.calls[0].url.path.startswith("/api/v1/tasks/")
+            assert model.calls == 0
             assert not app.state.service.store.snapshot()["jobs"]
     restarted = create_app(load_config({"VAGENT_HOME": str(tmp_path)}), model=model)
     async with restarted.router.lifespan_context(restarted):
         service = restarted.state.service
         settings = service.configuration()
         assert not settings["restartRequired"] and settings["activeVideoMode"] == "live"
+        assert settings["videoProbe"] is None  # The probe state resets with the process.
         assert (
             service.runner().video_mode == "live"
             and service.video_jobs.config.video_api_key == "video-api-secret"
         )
         assert not service.configuration()["apiKeyConfigured"]
-        cleared = service.save_configuration(ConfigUpdate(clearVideoApiKey=True))
-        assert not cleared["videoApiKeyConfigured"] and cleared["restartRequired"]
-        assert service.video_jobs.config.video_api_key == "video-api-secret"
+        cleared = await service.save_configuration(ConfigUpdate(clearVideoApiKey=True))
+        assert not cleared["videoApiKeyConfigured"] and not cleared["restartRequired"]
+        assert service.video_jobs.config.video_api_key is None
+        assert service.configuration()["videoProbe"] is None
         assert "video-api-secret" not in str(service.store.snapshot())
-        assert not live_runtime.calls
+        assert len(live_runtime.calls) == 1  # Clearing a key never probes.
     assert all(provider.client.is_closed for provider in live_runtime.providers)
 
 
