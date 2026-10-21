@@ -995,6 +995,11 @@ function renderUsagePanel() {
       ${metric("报价版本", String(Object.keys(cost.byPriceVersion).length) || "0")}
     </div>
     <p class="meta">${cost.actual.status === "reported" ? "已按账单记录实际费用。" : "未取得账单的费用保持未知，不按估算冒充实际扣费。"}</p>
+    ${Array.isArray(report.costByProvider) && report.costByProvider.length
+      ? `<p class="meta">按供应商分桶（不换汇、不互相挪用）：${report.costByProvider
+          .map((item) => `${escapeHTML(item.provider)} ${escapeHTML(item.estimated)} ${escapeHTML(item.currency)}${item.units ? ` · ${item.units} VIDEO_UNIT` : ""}（${item.jobs} 个任务）`)
+          .join(" · ")}</p>`
+      : ""}
     <h3>分镜与素材</h3><div class="metrics">
       ${metric("分镜数", String(report.storyboards.total))}${metric("镜头版本", String(report.storyboards.shotVersions))}
       ${metric("本项目素材", String(report.assets.total))}${metric("素材库总量", String(report.assets.libraryTotal))}
@@ -1068,14 +1073,35 @@ async function showSettings() {
   applyConfiguration(config);
   if ($("#dialog").open && generation === dialogGeneration) renderSettings(config);
 }
-function videoProbeText(config) {
-  if (!config.videoApiKeyConfigured) return "未配置视频密钥；填写并保存会执行一次零费用鉴权探测。";
+function providerEntry(config, provider) {
+  return (config.providers || []).find((item) => item.provider === provider) || null;
+}
+function videoProbeText(config, provider) {
+  const entry = providerEntry(config, provider);
+  if (!entry || !entry.keyConfigured) {
+    return provider === "wan"
+      ? "未配置视频密钥；填写并保存会执行一次零费用鉴权探测。"
+      : "未配置该供应商密钥；保存只做本地格式检查，不执行鉴权探测。";
+  }
+  if (provider !== "wan") {
+    return `已保存 ${entry.model}；鉴权/模型权限未验证（该供应商没有已核实的免费只读探测接口）。`;
+  }
   const probe = config.videoProbe;
   if (!probe) return "已配置；保存视频 Key 会执行一次零费用只读探测（不创建任务）。";
   const at = new Date(probe.checkedAt).toLocaleString();
   if (probe.status === "authenticated") return `鉴权通过（视频权限未验证）· ${probe.host} · ${at}`;
   if (probe.status === "rejected") return `鉴权未通过：${probe.message}（配置已保存；真实生成可能被拒绝）`;
   return `探测未完成：${probe.message || "网络或协议问题"}（未验证，配置已保存）`;
+}
+function providerEstimateText(config, provider) {
+  const entry = providerEntry(config, provider);
+  if (!entry || !entry.estimate) return "当前没有可用报价，不能提交真实生成。";
+  const estimate = entry.estimate;
+  const amount = (Number(estimate.unitPrice) * 5).toFixed(2);
+  const units = entry.resource
+    ? `，另计 ${entry.resource.unitsPerSecond} ${entry.resource.unit}/秒`
+    : "";
+  return `5 秒估算 ${amount} ${estimate.currency}${units}；单价 ${estimate.unitPrice} ${estimate.currency}/秒（价格版本 ${estimate.priceVersion}）。实际费用以账单为准。`;
 }
 function renderVideoMode() {
   const mode = health?.configuration?.activeVideoMode ?? health?.videoMode;
@@ -1088,17 +1114,39 @@ function renderVideoMode() {
 function renderSettings(config, notice = "") {
   const sources = { environment: "环境变量 / .env", provided: "启动配置", local: "本地配置", default: "默认值", unset: "未配置" };
   const modeOptions = [["off", "off · 仅文本创作"], ["mock", "mock · 模拟任务（无费用）"], ["live", "live · 真实视频"]];
-  const advancedFields = [
-    ["videoProvider", "供应商", [["wan", "阿里云百炼万相"]]],
-    ["videoModel", "视频模型", [["wan2.7-t2v-2026-06-12", "wan2.7-t2v-2026-06-12"]]],
-    ["videoRegion", "地域", [["cn-beijing", "北京 · cn-beijing"]]],
-    ["videoWorkspaceId", "业务空间 ID（可选）", null],
-    ["videoMaxJobCost", "单任务估算金额上限（CNY）", null],
+  const selectedProvider = config.videoProvider || "wan";
+  const providerOptions = [
+    ["wan", "阿里云百炼万相（wan）"],
+    ["kling", "Kling 新加坡直连（kling）"],
+    ["fal", "fal 队列中转（fal）"],
   ];
+  const keyFields = { wan: "videoApiKey", kling: "klingApiKey", fal: "falApiKey" };
+  const configuredKey = {
+    wan: config.videoApiKeyConfigured,
+    kling: config.klingApiKeyConfigured,
+    fal: config.falApiKeyConfigured,
+  }[selectedProvider];
+  const advancedFields = [
+    ["videoModel", "视频模型（万相）", [["wan2.7-t2v-2026-06-12", "wan2.7-t2v-2026-06-12"]]],
+    ["videoRegion", "地域（万相）", [["cn-beijing", "北京 · cn-beijing"]]],
+    ["videoWorkspaceId", "万相业务空间 ID（可选）", null],
+    ["videoMaxJobCost", "万相单任务上限（CNY）", null],
+    ["videoMaxRunCost", "万相每 Run 上限（CNY）", null],
+    ["klingMaxJobCost", "Kling 单任务上限（USD）", null],
+    ["klingMaxRunCost", "Kling 每 Run 上限（USD）", null],
+    ["klingMaxJobUnits", "Kling 单任务上限（VIDEO_UNIT）", null],
+    ["klingMaxRunUnits", "Kling 每 Run 上限（VIDEO_UNIT）", null],
+    ["falMaxJobCost", "fal 单任务上限（USD）", null],
+    ["falMaxRunCost", "fal 每 Run 上限（USD）", null],
+  ];
+  const numericFields = new Set([
+    "videoMaxJobCost", "videoMaxRunCost", "klingMaxJobCost", "klingMaxRunCost",
+    "klingMaxJobUnits", "klingMaxRunUnits", "falMaxJobCost", "falMaxRunCost",
+  ]);
   const validation = config.validation;
   const status = { unverified: "尚未验证", validating: "正在验证", verified: "连接已验证", failed: "验证失败" }[validation.status];
   const generation = openDialog("Agent 连接与配置", `
-    <p>两个 Key 即可使用：DeepSeek 文本 Key 与万相视频 Key。配置保存在本机并立即生效、无需重启——视频配置用于新登记任务，在途与历史任务仍按其原配置恢复。环境变量和 .env 优先，由启动配置提供的字段需在原处修改。</p>
+    <p>两个 Key 即可使用：DeepSeek 文本 Key 与所选视频供应商的 Key（万相 / Kling 直连 / fal 中转，由能力表逐条列出）。配置保存在本机并立即生效、无需重启——视频配置用于新登记任务，在途与历史任务仍按其原配置恢复。环境变量和 .env 优先，由启动配置提供的字段需在原处修改。</p>
     <form id="settings-form">
       <fieldset><legend>DeepSeek 文本创作</legend>
       <label for="config-key">DeepSeek API Key · ${sources[config.sources.apiKey] || "启动配置"}
@@ -1109,14 +1157,17 @@ function renderSettings(config, notice = "") {
       </label>
       ${config.editable.apiKey && config.apiKeyConfigured ? `<button type="button" class="secondary" data-config="clear" ${config.busy ? "disabled" : ""}>移除 DeepSeek 密钥</button>` : ""}
       </fieldset>
-      <fieldset><legend>视频生成（万相）</legend>
-      <label for="config-video-key">万相 API Key · ${sources[config.sources.videoApiKey] || "启动配置"}
-        <input id="config-video-key" type="password" autocomplete="new-password" maxlength="512" spellcheck="false" autocapitalize="off" placeholder="${config.videoApiKeyConfigured ? "已配置，留空保持" : "输入视频专用 API Key"}" ${!config.editable.videoApiKey || config.busy ? "disabled" : ""}>
+      <fieldset><legend>视频生成</legend>
+      <label for="config-video-provider">视频供应商 · ${sources[config.sources.videoProvider] || "默认值"}
+        <select id="config-video-provider" data-video-field="videoProvider" ${!config.editable.videoProvider || config.busy ? "disabled" : ""}>${providerOptions.map(([value, text]) => `<option value="${value}" ${selectedProvider === value ? "selected" : ""}>${text}</option>`).join("")}</select>
+      </label>
+      <label for="config-video-key">所选供应商 API Key · ${sources[config.sources[keyFields[selectedProvider]]] || "启动配置"}
+        <input id="config-video-key" type="password" autocomplete="new-password" maxlength="512" spellcheck="false" autocapitalize="off" placeholder="${configuredKey ? "已配置，留空保持" : "输入该供应商的 API Key"}" ${!config.editable[keyFields[selectedProvider]] || config.busy ? "disabled" : ""}>
       </label>
       <label for="config-video-toggle" class="mode-toggle"><input id="config-video-toggle" type="checkbox" ${config.videoMode === "live" ? "checked" : ""} ${!config.editable.videoMode || config.busy ? "disabled" : ""}>启用真实视频生成（live）</label>
       ${config.videoMode === "mock" ? '<p class="meta">当前为模拟任务（mock）：不调用供应商、无费用；可在高级中切换。</p>' : ""}
       ${config.restartRequired ? `<p>当前运行：${escapeHTML(config.activeVideoMode)} · 已保存：${escapeHTML(config.videoMode)}。修改将在重启服务后生效。</p>` : ""}
-      <p id="config-video-probe">视频权限：${escapeHTML(videoProbeText(config))}</p>
+      <p id="config-video-probe">视频权限：${escapeHTML(videoProbeText(config, selectedProvider))}</p>
       <details id="config-video-advanced">
         <summary>高级（可选）</summary>
         <div class="video-settings-grid">
@@ -1125,15 +1176,16 @@ function renderSettings(config, notice = "") {
         </label>
         ${advancedFields.map(([field, label, options]) => {
           const disabled = !config.editable[field] || config.busy ? "disabled" : "";
-          return `<label for="config-${field}">${label} · ${sources[config.sources[field]] || "启动配置"}${options
+          const numeric = numericFields.has(field);
+          return `<label for="config-${field}">${label} · ${sources[config.sources[field]] || "默认值"}${options
             ? `<select id="config-${field}" data-video-field="${field}" ${disabled}>${options.map(([value, text]) => `<option value="${value}" ${config[field] === value ? "selected" : ""}>${text}</option>`).join("")}</select>`
-            : `<input id="config-${field}" data-video-field="${field}" value="${escapeHTML(config[field] || "")}" ${field === "videoMaxJobCost" ? 'type="number" min="0" step="0.01" required' : 'type="text" maxlength="63" spellcheck="false" autocapitalize="off"'} ${disabled}>`}</label>`;
+            : `<input id="config-${field}" data-video-field="${field}" value="${escapeHTML(config[field] ?? "")}" ${numeric ? `type="number" min="0" ${field.endsWith("Units") ? 'step="1"' : 'step="0.01"'} required` : 'type="text" maxlength="63" spellcheck="false" autocapitalize="off"'} ${disabled}>`}</label>`;
         }).join("")}
         </div>
-        <p class="meta">业务空间留空时使用共享域名 dashscope.aliyuncs.com；填写后切换到专属域名（{业务空间}.cn-beijing.maas.aliyuncs.com），清空并保存即可移除。</p>
+        <p class="meta">万相业务空间留空时使用共享域名 dashscope.aliyuncs.com；填写后切换到专属域名，清空并保存即可移除。Kling/fal 固定官方端点，不提供自定义基址。</p>
       </details>
-      <p>固定规格：5 秒 · 720P · 16:9。${config.videoEstimate ? `每次生成估算 ${escapeHTML(config.videoEstimate.amount)} CNY；单价 ${escapeHTML(config.videoEstimate.unitPrice)} CNY/秒（核实于 ${escapeHTML(config.videoEstimate.checkedAt)}）。实际费用以账单为准。` : "当前没有可用报价，不能提交真实生成。"}</p>
-      ${config.editable.videoApiKey && config.videoApiKeyConfigured ? `<button type="button" class="secondary" data-config="clear-video" ${config.busy ? "disabled" : ""}>移除视频密钥</button>` : ""}
+      <p id="config-video-estimate">固定规格：5 秒 · 720P · 16:9。${escapeHTML(providerEstimateText(config, selectedProvider))}</p>
+      ${config.editable[keyFields[selectedProvider]] && configuredKey ? `<button type="button" class="secondary" data-config="clear-video" ${config.busy ? "disabled" : ""}>移除所选供应商密钥</button>` : ""}
       </fieldset>
       <p id="config-status" role="status">${escapeHTML(notice || (config.busy ? "请等待当前执行或验证结束。" : `${config.apiKeyConfigured ? "密钥已配置" : "密钥未配置"} · ${status}`))}${validation.checkedAt ? `<br>上次验证：${escapeHTML(new Date(validation.checkedAt).toLocaleString())}` : ""}</p>
       <p>保存不调用模型；保存视频 Key 时会执行一次零费用只读探测（不存在任务 ID 的查询，不创建任务、不产生费用）。「保存并验证 DeepSeek」会发起一次简短文本模型请求，可能产生少量费用。验证状态在服务重启后重置。</p>
@@ -1149,6 +1201,19 @@ function renderSettings(config, notice = "") {
     toggle.addEventListener("change", () => { modeSelect.value = toggle.checked ? "live" : "off"; });
     modeSelect.addEventListener("change", () => { toggle.checked = modeSelect.value === "live"; });
   }
+  const providerSelect = $("#config-video-provider");
+  if (providerSelect) {
+    providerSelect.addEventListener("change", () => {
+      const provider = providerSelect.value;
+      const entry = providerEntry(config, provider);
+      const videoInput = $("#config-video-key");
+      videoInput.value = "";
+      videoInput.placeholder = entry && entry.keyConfigured ? "已配置，留空保持" : "输入该供应商的 API Key";
+      $("#config-video-probe").textContent = "视频权限：" + videoProbeText(config, provider);
+      $("#config-video-estimate").textContent = "固定规格：5 秒 · 720P · 16:9。" + providerEstimateText(config, provider);
+    });
+  }
+  const clearFields = { wan: "clearVideoApiKey", kling: "clearKlingApiKey", fal: "clearFalApiKey" };
   async function submitConfiguration(action) {
     if (configSubmitting || config.busy) return;
     if (!["clear", "clear-video"].includes(action) && !form.reportValidity()) return;
@@ -1156,18 +1221,20 @@ function renderSettings(config, notice = "") {
     const input = $("#config-key");
     const key = input.value.trim();
     const videoInput = $("#config-video-key"), videoKey = videoInput.value.trim();
+    const providerSelect = $("#config-video-provider");
+    const provider = providerSelect ? providerSelect.value : (config.videoProvider || "wan");
     input.value = "";
     videoInput.value = "";
     if (action === "clear") update.clearApiKey = true;
-    else if (action === "clear-video") update.clearVideoApiKey = true;
+    else if (action === "clear-video") update[clearFields[provider]] = true;
     else {
       if (config.editable.apiKey && key) update.apiKey = key;
       const model = $("#config-model").value.trim();
       if (config.editable.model && model !== config.model) update.model = model;
-      if (config.editable.videoApiKey && videoKey) update.videoApiKey = videoKey;
+      if (config.editable[keyFields[provider]] && videoKey) update[keyFields[provider]] = videoKey;
       for (const input of form.querySelectorAll("[data-video-field]")) {
         const field = input.dataset.videoField, value = input.value.trim();
-        if (config.editable[field] && value !== (config[field] || "")) update[field] = value;
+        if (config.editable[field] && value !== String(config[field] ?? "")) update[field] = value;
       }
     }
     configSubmitting = true;
@@ -1182,10 +1249,14 @@ function renderSettings(config, notice = "") {
       if (action === "validate") result = await post("/api/config/validate");
       message = action === "validate" ? "DeepSeek 连接已验证。" : "配置已保存。";
       if (result.autoEnabledLive) message += "已自动启用真实视频生成（可在设置中关闭）。";
-      if (!["clear", "clear-video"].includes(action) && result.videoProbe) {
-        if (result.videoProbe.status === "authenticated") message += "视频鉴权通过（视频权限未验证）。";
-        else if (result.videoProbe.status === "rejected") message += "视频鉴权未通过：" + result.videoProbe.message;
-        else message += "视频鉴权探测未完成（网络或协议问题）。";
+      if (!["clear", "clear-video"].includes(action)) {
+        if (provider !== "wan") {
+          if (videoKey) message += "已保存该供应商密钥（鉴权与模型权限未验证）。";
+        } else if (result.videoProbe) {
+          if (result.videoProbe.status === "authenticated") message += "视频鉴权通过（视频权限未验证）。";
+          else if (result.videoProbe.status === "rejected") message += "视频鉴权未通过：" + result.videoProbe.message;
+          else message += "视频鉴权探测未完成（网络或协议问题）。";
+        }
       }
       if (result.restartRequired) message += "部分视频设置将在重启服务后生效。";
     } catch (error) {

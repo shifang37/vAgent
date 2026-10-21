@@ -249,8 +249,10 @@ async def test_live_application_model_tools_replay_http_views_and_client_closure
             # M2 publishes the verified shot entries; the frozen M1-C single-shot
             # version stays registered for this compatibility path but is not advertised.
             published = previous["data"]["models"]
-            assert {item["provider"] for item in published} == {"wan"}
+            assert {item["provider"] for item in published} == {"wan", "kling", "fal"}
             assert sorted(item["capabilitiesVersion"] for item in published) == [
+                "multi-provider-v3",
+                "multi-provider-v3",
                 "wan27-shot-beijing-v2",
                 "wan27-shot-beijing-v2",
             ]
@@ -281,8 +283,8 @@ async def test_live_application_model_tools_replay_http_views_and_client_closure
             and record["executionVersion"] == 3
             and record["contextVersion"] == 2
         )
-        assert record["toolFeatures"]["video"]["toolsVersion"] == 5
-        assert record["toolFeatures"]["video"]["rulesVersion"] == 5
+        assert record["toolFeatures"]["video"]["toolsVersion"] == 6
+        assert record["toolFeatures"]["video"]["rulesVersion"] == 6
         await eventually(lambda: service.job(remembered["jobId"])["status"] == "downloading")
         job = service.job(remembered["jobId"])
         assert job["providerTaskId"] == "wan-original" and job["submitAttempts"] == 1
@@ -374,9 +376,14 @@ async def test_legacy_run_resumes_under_live_startup_with_original_tools_and_bud
     async with ApplicationService.open(replace(config, video_mode="live"), model=model) as service:
         assert service.runner().video_mode == "live"
         published = service.runner().tools.features["video"]["capabilities"]
-        assert [cap["provider"] for cap in published] == ["wan", "wan"]
-        assert {cap["capabilitiesVersion"] for cap in published} == {"wan27-shot-beijing-v2"}
+        assert sorted(cap["provider"] for cap in published) == ["fal", "kling", "wan", "wan"]
+        assert {cap["capabilitiesVersion"] for cap in published} == {
+            "wan27-shot-beijing-v2",
+            "multi-provider-v3",
+        }
         assert sorted(cap["model"] for cap in published) == [
+            "fal-ai/kling-video/v3/standard/text-to-video",
+            "kling-3.0-turbo",
             "wan2.7-i2v-2026-04-25",
             "wan2.7-t2v-2026-06-12",
         ]

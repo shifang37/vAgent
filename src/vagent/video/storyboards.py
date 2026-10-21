@@ -20,9 +20,11 @@ from vagent.video.contracts import (
     ArtifactRef,
     CostEstimate,
     MediaId,
+    ProviderPrice,
     VideoRequest,
     VideoRequestV3,
     VideoRequestV5,
+    VideoRequestV6,
 )
 
 SHOT_LIMIT = 64
@@ -81,7 +83,7 @@ class ShotVersion(Contract):
     storyboard_version: int = Field(ge=1)
     job_id: Identifier
     request: JsonValue
-    estimate: CostEstimate | None = None
+    estimate: CostEstimate | ProviderPrice | None = None
     media_id: MediaId | None = None
     created_at: UtcTimestamp
 
@@ -344,7 +346,7 @@ def stored_request_fingerprint(stored) -> str | None:
     """Recompute the exact fingerprint a stored request would hash to today."""
     if not isinstance(stored, dict):
         return None
-    for model in (VideoRequestV5, VideoRequestV3, VideoRequest):
+    for model in (VideoRequestV6, VideoRequestV5, VideoRequestV3, VideoRequest):
         try:
             return model.model_validate(stored).fingerprint()
         except ValueError:

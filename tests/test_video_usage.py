@@ -86,6 +86,7 @@ async def test_live_estimates_are_summed_per_price_version_and_bills_stay_unknow
         "mock": 0,
         "byStatus": {"pending_submit": 2},
         "byMode": {"live": 2},
+        "byProvider": {"wan": 2},
     }
     # 5s + 3s at 0.60 CNY per output second.
     assert usage["cost"]["estimateAmount"] == "4.80"

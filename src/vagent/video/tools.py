@@ -18,6 +18,7 @@ from vagent.video.contracts import (
     ShotGenerationArgs,
     VideoCapabilities,
     VideoIntentV2,
+    VideoIntentV6,
     VideoRequest,
     VideoSpec,
     parse_job,
@@ -36,12 +37,13 @@ from vagent.waiting import (
 )
 
 # Mock moves to the M2 toolset (storyboard tools); live keeps its frozen M1-C
-# 3/3 identity until the M2 Wan protocol lands in D2. E1 raises both to 5/5 by
-# appending the film tools, and registers 4/4 variants so pre-E1 Runs restore.
-VIDEO_TOOLS_VERSION = 5
-VIDEO_RULES_VERSION = 5
-LIVE_VIDEO_TOOLS_VERSION = 5
-LIVE_VIDEO_RULES_VERSION = 5
+# 3/3 identity until the M2 Wan protocol lands in D2. E1 raised both to 5/5 by
+# appending the film tools; E2 raises both to 6/6 for the generic provider request
+# and keeps the 5/5 and 4/4 frozen variants so recorded Runs restore.
+VIDEO_TOOLS_VERSION = 6
+VIDEO_RULES_VERSION = 6
+LIVE_VIDEO_TOOLS_VERSION = 6
+LIVE_VIDEO_RULES_VERSION = 6
 WAIT_TIMEOUT_SECONDS = 600
 WAIT_SET_LIMIT = 16
 # Every tool this file adds after the frozen pre-M2 versions 1/2/3.
@@ -145,6 +147,20 @@ film_read 只读返回当前成片、历史版本与受控媒体 URL；状态以
 
 VIDEO_RULES_V5 = VIDEO_RULES_V4 + "\n" + FILM_RULES
 LIVE_VIDEO_RULES_V5 = LIVE_VIDEO_RULES_V4 + "\n" + FILM_RULES
+
+MULTI_PROVIDER_RULES = """真实视频供应商由能力表逐条列出：wan（万相）、kling（Kling 新加坡直连）、fal（fal 队列中转）。
+每个供应商只使用自己的 Key；未配置 Key 的供应商不可用，但不阻塞其他供应商、模拟任务与文本创作。
+kling 与 fal 本期只开放文生视频：5 秒、720p、16:9；kling 含原生音频，fal standard 档显式静音。不要请求图生、首尾帧、时长或画幅变体。
+video_generate 只登记本地 Job；每个 Run 最多新建 4 个真实任务，全 Run 共享这一上限。各供应商按原币种与资源单位分桶限额，不换汇、不把某供应商的余额挪给另一个。
+estimate 与资源单位来自冻结能力表；actual 在取得账单前始终未知。不同供应商的镜头能否拼接要按实际编码检查，不能按模型名或 720p 标签保证。"""
+
+VIDEO_RULES_V6 = VIDEO_RULES_V5
+LIVE_VIDEO_RULES_V6 = LIVE_VIDEO_RULES_V5 + "\n" + MULTI_PROVIDER_RULES
+
+OLD_LIVE_GENERATE_DESCRIPTION = (
+    "登记一个真实视频 Job，返回 jobId 与登记状态；后台仅提交一次，云端成功后还需本地媒体交付。"
+    "按能力表选择完整规格；来源须属于当前项目并指定 version。每个 Run 最多新建一个 Job。"
+)
 
 
 def legacy_live_capabilities() -> list[dict]:
@@ -386,6 +402,9 @@ def register_video_tools(registry: ToolRegistry, service: JobService, *, mode="m
     if mode not in {"mock", "live"} or not capabilities:
         raise AppError("VIDEO_PROVIDER_UNAVAILABLE", "缺少原模式的视频适配器和能力表。")
     live = mode == "live"
+    # The frozen 4/4 and 5/5 live signatures saw only the Wan entries; the E2
+    # multi-provider table is appended in 6/6 and must not leak into an old one.
+    historical = [item for item in capabilities if item["provider"] == "wan"] if live else capabilities
     registry.register_feature(
         ToolFeature(
             name="video",
@@ -395,7 +414,7 @@ def register_video_tools(registry: ToolRegistry, service: JobService, *, mode="m
                 "rulesVersion": LIVE_VIDEO_RULES_VERSION if live else VIDEO_RULES_VERSION,
                 "capabilities": capabilities,
             },
-            instructions=LIVE_VIDEO_RULES_V5 if live else VIDEO_RULES_V5,
+            instructions=LIVE_VIDEO_RULES_V6 if live else VIDEO_RULES_V6,
             bypass_answer_cache=True,
         )
     )
@@ -415,7 +434,14 @@ def register_video_tools(registry: ToolRegistry, service: JobService, *, mode="m
                 "simulated": not live,
                 "mediaAvailable": False,
                 "models": capabilities,
-                **({"configuration": service.configuration_status()} if live else {}),
+                **(
+                    {
+                        "configuration": service.configuration_status(),
+                        "providers": service.provider_statuses(),
+                    }
+                    if live
+                    else {}
+                ),
             },
         )
 
@@ -622,14 +648,15 @@ def register_video_tools(registry: ToolRegistry, service: JobService, *, mode="m
             "video_generate",
             (
                 "登记一个真实视频 Job，返回 jobId 与登记状态；后台仅提交一次，云端成功后还需本地媒体交付。"
-                "按能力表选择完整规格；来源须属于当前项目并指定 version。每个 Run 最多新建一个 Job。"
+                "按能力表选择供应商与完整规格；kling/fal 本期只开放文生视频；来源须属于当前项目并指定 version。"
+                "每个 Run 最多新建 4 个真实任务，各供应商额度单独计。"
             )
             if live
             else (
                 "登记一个模拟视频 Job，返回 jobId 与登记状态；不提交上游、不交付真实媒体。"
                 "按能力表选择完整规格；来源须属于当前项目并指定 version。每个 Run 最多新建一个 Job。"
             ),
-            VideoIntentV2 if live else VideoRequest,
+            VideoIntentV6 if live else VideoRequest,
             "write",
             context_execute=generate,
             feature="video",
@@ -712,8 +739,15 @@ def register_video_tools(registry: ToolRegistry, service: JobService, *, mode="m
         ),
     ]
     await_definition = next(item for item in definitions if item.name == "await_job")
+    generate_definition = next(item for item in definitions if item.name == "video_generate")
     for definition in definitions:
         registry.register(definition)
+
+    # The six public live arguments arrived with 6/6; older signatures keep the
+    # frozen intent schema and description they were recorded with.
+    frozen_generate = replace(
+        generate_definition, schema=VideoIntentV2, description=OLD_LIVE_GENERATE_DESCRIPTION
+    )
 
     def frozen_await(description: str) -> ToolDefinition:
         return replace(await_definition, schema=JobLookup, description=description)
@@ -736,7 +770,10 @@ def register_video_tools(registry: ToolRegistry, service: JobService, *, mode="m
             ],
             descriptions={},
             exclude=PRE_M3_TOOL_NAMES,
-            definitions={"await_job": frozen_await(AWAIT_DESCRIPTION_M1C)},
+            definitions={
+                "await_job": frozen_await(AWAIT_DESCRIPTION_M1C),
+                "video_generate": frozen_generate,
+            },
         )
         registry.register_tools_variant(
             4,
@@ -747,13 +784,31 @@ def register_video_tools(registry: ToolRegistry, service: JobService, *, mode="m
                         "mode": "live",
                         "toolsVersion": 4,
                         "rulesVersion": 4,
-                        "capabilities": capabilities,
+                        "capabilities": historical,
                     },
                     instructions=LIVE_VIDEO_RULES_V4,
                     bypass_answer_cache=True,
                 )
             ],
             exclude=M3_TOOL_NAMES,
+            definitions={"video_generate": frozen_generate},
+        )
+        registry.register_tools_variant(
+            5,
+            features=[
+                ToolFeature(
+                    name="video",
+                    configuration={
+                        "mode": "live",
+                        "toolsVersion": 5,
+                        "rulesVersion": 5,
+                        "capabilities": historical,
+                    },
+                    instructions=LIVE_VIDEO_RULES_V5,
+                    bypass_answer_cache=True,
+                )
+            ],
+            definitions={"video_generate": frozen_generate},
         )
     else:
         legacy_capabilities = legacy_mock_capabilities()
@@ -804,13 +859,29 @@ def register_video_tools(registry: ToolRegistry, service: JobService, *, mode="m
                         "mode": "mock",
                         "toolsVersion": 4,
                         "rulesVersion": 4,
-                        "capabilities": capabilities,
+                        "capabilities": historical,
                     },
                     instructions=VIDEO_RULES_V4,
                     bypass_answer_cache=True,
                 )
             ],
             exclude=M3_TOOL_NAMES,
+        )
+        registry.register_tools_variant(
+            5,
+            features=[
+                ToolFeature(
+                    name="video",
+                    configuration={
+                        "mode": "mock",
+                        "toolsVersion": 5,
+                        "rulesVersion": 5,
+                        "capabilities": historical,
+                    },
+                    instructions=VIDEO_RULES_V5,
+                    bypass_answer_cache=True,
+                )
+            ],
         )
     registry.register_wait_resolver(
         "job", lambda binding: resolve_job_wait(service.store, binding, service=service), feature="video"

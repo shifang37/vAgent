@@ -15,7 +15,7 @@ async def eventually(read, *, timeout=30):
 
 
 def register_job(service, *, run_id="owner", session_id="coffee"):
-    provider = service.video_jobs.capabilities()[0]
+    provider = next(item for item in service.video_jobs.capabilities() if item.mode == "mock")
     request = {
         "provider": provider.provider,
         "model": provider.model,

@@ -1,6 +1,7 @@
 """Unauthenticated media HTTP with exact source policy and pinned public DNS answers."""
 
 import asyncio
+import hashlib
 import ipaddress
 import socket
 import ssl
@@ -11,7 +12,7 @@ from urllib.parse import urljoin, urlsplit
 import httpcore
 import httpx
 
-from vagent.video.contracts import SOURCE_POLICY_VERSION
+from vagent.video.contracts import AUTH_RESULT_ORIGIN_POLICIES, SOURCE_POLICY_VERSION
 from vagent.video.media import MediaError, file_io
 
 # v1: C0 document examples (text-to-video API reference).
@@ -34,7 +35,13 @@ SOURCE_HOSTS = {
 }
 
 
-def check_source(url: str, version: str) -> str:
+def check_source(url: str, version: str, binding=None) -> str:
+    """Approve one URL under its frozen policy; returns the host to pin.
+
+    Wan keeps its static answer-host allowlist. The E2 providers use an authenticated
+    result-origin binding: the exact HTTPS origin and full-URL fingerprint obtained
+    from the credentialed task result, so no shared CDN allowlist is implied.
+    """
     try:
         parsed = urlsplit(url)
         host = parsed.hostname
@@ -59,6 +66,15 @@ def check_source(url: str, version: str) -> str:
         unsafe, host = True, None
     if unsafe:
         raise MediaError("MEDIA_SOURCE_UNSAFE")
+    if version in AUTH_RESULT_ORIGIN_POLICIES:
+        if (
+            binding is None
+            or binding.source_policy_version != version
+            or binding.origin != f"https://{host}:443"
+            or hashlib.sha256(url.encode("utf-8")).hexdigest() != binding.url_fingerprint
+        ):
+            raise MediaError("MEDIA_SOURCE_UNAPPROVED")
+        return host
     if host not in SOURCE_HOSTS.get(version, ()):
         raise MediaError("MEDIA_SOURCE_UNAPPROVED")
     return host
@@ -78,9 +94,19 @@ class PinnedPublicBackend(httpcore.AsyncNetworkBackend):
     def __init__(self, *, backend=None, resolver=None):
         self.backend = backend or httpcore.AnyIOBackend()
         self.resolver = resolver
+        # One authenticated-origin download at a time binds its approved host here;
+        # otherwise only the frozen static answer hosts may be reached.
+        self._bound_origin: str | None = None
+
+    def bind_origin(self, host: str) -> None:
+        self._bound_origin = host
+
+    def release_origin(self) -> None:
+        self._bound_origin = None
 
     async def connect_tcp(self, host, port, timeout=None, local_address=None, socket_options=None):
-        if port != 443 or host not in set().union(*SOURCE_HOSTS.values()):
+        allowed = {self._bound_origin} if self._bound_origin else set().union(*SOURCE_HOSTS.values())
+        if port != 443 or host not in allowed:
             raise MediaError("MEDIA_SOURCE_UNAPPROVED")
         async with asyncio.timeout(timeout):
             resolve = self.resolver or asyncio.get_running_loop().getaddrinfo
@@ -116,14 +142,25 @@ class CoreStream(httpx.AsyncByteStream):
 
 class MediaTransport(httpx.AsyncBaseTransport):
     def __init__(self, *, network_backend=None):
+        self.backend = network_backend or PinnedPublicBackend()
         self.pool = httpcore.AsyncConnectionPool(
             ssl_context=ssl.create_default_context(),
             max_connections=1,
             max_keepalive_connections=0,
             retries=0,
             http2=False,
-            network_backend=network_backend or PinnedPublicBackend(),
+            network_backend=self.backend,
         )
+
+    def bind_origin(self, host: str) -> None:
+        bind = getattr(self.backend, "bind_origin", None)
+        if bind is not None:
+            bind(host)
+
+    def release_origin(self) -> None:
+        release = getattr(self.backend, "release_origin", None)
+        if release is not None:
+            release()
 
     async def handle_async_request(self, request):
         response = await self.pool.handle_async_request(
@@ -183,6 +220,11 @@ class MediaHttpClient:
 
     async def download(self, job, file, *, timestamp):
         output, policy = job.provider_output, job.download_policy
+        version = job.download.source_policy_version
+        authenticated = version in AUTH_RESULT_ORIGIN_POLICIES
+        binding = getattr(job, "result_source", None)
+        if authenticated and (binding is None or binding.task_id != job.provider_task_id):
+            raise MediaError("MEDIA_SOURCE_UNAPPROVED")
         if output.url_expires_at and datetime.fromisoformat(output.url_expires_at) <= datetime.fromisoformat(
             timestamp
         ):
@@ -190,7 +232,14 @@ class MediaHttpClient:
         url = output.video_url
         try:
             for hop in range(policy.max_redirects + 1):
-                check_source(url, job.download.source_policy_version)
+                host = check_source(url, version, binding)
+                if authenticated:
+                    # The production transport pins this host for the connection; a
+                    # test transport that cannot pin is still bound by the exact
+                    # origin and full-URL fingerprint verified above.
+                    bind = getattr(self.transport, "bind_origin", None)
+                    if bind is not None:
+                        bind(host)
                 # Construct a fresh request, bypassing client cookie/default header merging.
                 request = httpx.Request(
                     "GET",
@@ -212,10 +261,14 @@ class MediaHttpClient:
                 response = await self.transport.handle_async_request(request)
                 try:
                     if response.status_code in {301, 302, 303, 307, 308}:
+                        if authenticated:
+                            # An authenticated result origin is bound exactly; a
+                            # redirect is a different source and is never followed.
+                            raise MediaError("MEDIA_SOURCE_UNAPPROVED")
                         if hop == policy.max_redirects or "location" not in response.headers:
                             raise MediaError("MEDIA_SOURCE_UNAPPROVED")
                         url = urljoin(url, response.headers["location"])
-                        check_source(url, job.download.source_policy_version)
+                        check_source(url, version)
                         continue
                     if response.status_code != 200:
                         code = (
@@ -261,6 +314,10 @@ class MediaHttpClient:
             raise MediaError("DOWNLOAD_INCOMPLETE", retryable=True) from None
         except (httpx.TransportError, httpcore.NetworkError, httpcore.ProtocolError, socket.gaierror):
             raise MediaError("DOWNLOAD_NETWORK", retryable=True) from None
+        finally:
+            release = getattr(self.transport, "release_origin", None)
+            if release is not None:
+                release()
 
 
 assert SOURCE_POLICY_VERSION in SOURCE_HOSTS

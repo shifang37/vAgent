@@ -228,11 +228,17 @@ def select_inputs(state: dict, project_id: str, storyboard_id: str, expected_rev
         if shot_version is None:
             missing.append(shot.id)
             continue
-        if shot_version.media_id is None:
+        job = state["jobs"].get(shot_version.job_id)
+        # M2 records delivery on the Job; the ShotVersion media link stays a
+        # historical M1 field. Read the Job's committed media when it is null.
+        media_id = shot_version.media_id
+        if media_id is None and isinstance(job, dict):
+            refs = (job.get("result") or {}).get("mediaRefs") or []
+            media_id = refs[0].get("mediaId") if refs else None
+        if media_id is None:
             not_ready.append(shot.id)
             continue
-        media = _media_record(state, shot_version.media_id)
-        job = state["jobs"].get(shot_version.job_id)
+        media = _media_record(state, media_id)
         if media is None or job is None:
             incompatible.append({"shotId": shot.id, "fields": ["mediaId", "jobId"]})
             continue

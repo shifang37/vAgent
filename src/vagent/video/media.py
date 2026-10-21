@@ -22,6 +22,7 @@ from vagent.video.contracts import (
     JobResultV2,
     JobResultV3,
     JobV3,
+    JobV6,
     LiveJob,
     MediaAsset,
     PreparedMedia,
@@ -536,7 +537,11 @@ class MediaService:
                     "deadlineAt": None,
                     "error": None,
                     "repair": job.status == "succeeded",
-                    "sourcePolicyVersion": SOURCE_POLICY_VERSION,
+                    "sourcePolicyVersion": (
+                        job.capabilities.source_policy_version
+                        if isinstance(job, JobV6)
+                        else SOURCE_POLICY_VERSION
+                    ),
                 },
             )
             draft["jobs"][job_id] = updated.model_dump(mode="json", by_alias=True)
@@ -566,7 +571,7 @@ class MediaService:
         )
         # A shot Job's delivered result carries its own shot specification; the
         # frozen single-shot path keeps the V2 result.
-        result_model = JobResultV3 if isinstance(job, JobV3) else JobResultV2
+        result_model = JobResultV3 if isinstance(job, (JobV3, JobV6)) else JobResultV2
         result = job.result or result_model(
             request_fingerprint=job.request_fingerprint,
             spec=job.request.spec,

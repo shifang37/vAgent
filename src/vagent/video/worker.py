@@ -9,15 +9,19 @@ from weakref import WeakKeyDictionary
 
 from vagent.errors import AppError
 from vagent.video.contracts import (
+    SOURCE_POLICY_VERSION,
     DownloadRecord,
     Job,
     JobError,
+    JobV6,
     LiveJob,
     ProviderCallError,
     ProviderTaskHandle,
     ProviderTaskHandleV2,
+    ProviderTaskHandleV3,
     ProviderTaskSnapshot,
     ProviderTaskSnapshotV2,
+    ProviderTaskSnapshotV3,
     VideoProviderAdapter,
     parse_job,
 )
@@ -142,7 +146,7 @@ class JobWorker:
             nextPollAt=after_seconds(timestamp, job.policy.interval_seconds) if active else None,
         )
 
-    def _live_snapshot(self, job: Job, snapshot: ProviderTaskSnapshotV2) -> Job:
+    def _live_snapshot(self, job: Job, snapshot: ProviderTaskSnapshotV2 | ProviderTaskSnapshotV3) -> Job:
         if snapshot.task_id != job.provider_task_id:
             raise ValueError("A snapshot cannot replace the confirmed task ID")
         if job.provider_output is not None:
@@ -156,12 +160,16 @@ class JobWorker:
         extra = {}
         if snapshot.output is not None:
             media_id = str(uuid4())
+            policy_version = (
+                job.capabilities.source_policy_version if isinstance(job, JobV6) else SOURCE_POLICY_VERSION
+            )
             extra = {
                 "providerOutput": snapshot.output.model_dump(mode="json", by_alias=True),
                 "download": DownloadRecord(
                     media_id=media_id,
                     relative_path=f"media/{job.context.project_id}/{media_id}.mp4",
                     next_attempt_at=timestamp,
+                    source_policy_version=policy_version,
                 ).model_dump(mode="json", by_alias=True),
                 "cost": {
                     **job.cost.model_dump(mode="json", by_alias=True),
@@ -170,6 +178,8 @@ class JobWorker:
                     else None,
                 },
             }
+            if isinstance(job, JobV6):
+                extra["resultSource"] = snapshot.output.result_source.model_dump(mode="json", by_alias=True)
             status = "downloading"
         if job.query_started_at is not None:
             extra["lastQueryRequestId"] = snapshot.request_id
@@ -221,20 +231,20 @@ class JobWorker:
                 adapter.submit(job.request, job.operation_key), timeout=job.policy.submit_timeout_seconds
             )
             if isinstance(job, LiveJob):
+                handle_type = ProviderTaskHandleV3 if isinstance(job, JobV6) else ProviderTaskHandleV2
+                snapshot_type = ProviderTaskSnapshotV3 if isinstance(job, JobV6) else ProviderTaskSnapshotV2
                 value = (
                     raw.model_dump(mode="json", by_alias=True)
-                    if isinstance(raw, ProviderTaskHandleV2)
+                    if isinstance(raw, (ProviderTaskHandleV2, ProviderTaskHandleV3))
                     else raw
                 )
                 # Confirm the ID independently of any optional initial snapshot.
-                handle = ProviderTaskHandleV2.model_validate(
+                handle = handle_type.model_validate(
                     {key: item for key, item in value.items() if key != "snapshot"}
                 )
                 try:
                     snapshot = (
-                        ProviderTaskSnapshotV2.model_validate(value["snapshot"])
-                        if value.get("snapshot")
-                        else None
+                        snapshot_type.model_validate(value["snapshot"]) if value.get("snapshot") else None
                     )
                     if snapshot and snapshot.task_id != handle.task_id:
                         snapshot = None
@@ -307,7 +317,13 @@ class JobWorker:
             raw = await asyncio.wait_for(
                 adapter.query(job.provider_task_id, **profile_args), timeout=job.policy.query_timeout_seconds
             )
-            snapshot_type = ProviderTaskSnapshotV2 if isinstance(job, LiveJob) else ProviderTaskSnapshot
+            snapshot_type = (
+                ProviderTaskSnapshotV3
+                if isinstance(job, JobV6)
+                else ProviderTaskSnapshotV2
+                if isinstance(job, LiveJob)
+                else ProviderTaskSnapshot
+            )
             snapshot = snapshot_type.model_validate(
                 raw.model_dump(mode="json", by_alias=True) if isinstance(raw, snapshot_type) else raw
             )

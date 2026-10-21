@@ -4,15 +4,25 @@ from collections.abc import Mapping
 from contextlib import suppress
 from dataclasses import dataclass, field, replace
 from pathlib import Path
-from typing import Literal
+from typing import Annotated, Literal
 from urllib.parse import urlsplit
 from uuid import uuid4
 
 import yaml
-from pydantic import BaseModel, ConfigDict, Field, ValidationError, model_validator
+from pydantic import BaseModel, BeforeValidator, ConfigDict, Field, ValidationError, model_validator
 
 from vagent.errors import AppError
 from vagent.video.contracts import WAN_MODEL, WAN_REGION, Money, WorkspaceId
+
+
+def _integer_setting(value):
+    """The settings form submits numeric inputs as strings; parse only integers."""
+    if isinstance(value, str) and value.strip().isdigit():
+        return int(value.strip())
+    return value
+
+
+IntegerSetting = Annotated[int, BeforeValidator(_integer_setting)]
 
 # Public configuration name -> (runtime attribute, environment name, default).
 VIDEO_SETTINGS = {
@@ -29,7 +39,16 @@ VIDEO_SETTINGS = {
         4,
     ),
     "videoMaxRunCost": ("video_max_run_cost", "VAGENT_VIDEO_MAX_RUN_COST", "12.00"),
+    "klingApiKey": ("kling_api_key", "VAGENT_KLING_API_KEY", None),
+    "falApiKey": ("fal_api_key", "FAL_KEY", None),
+    "klingMaxJobCost": ("kling_max_job_cost", "VAGENT_KLING_MAX_JOB_COST", "0.60"),
+    "klingMaxRunCost": ("kling_max_run_cost", "VAGENT_KLING_MAX_RUN_COST", "2.40"),
+    "klingMaxJobUnits": ("kling_max_job_units", "VAGENT_KLING_MAX_JOB_UNITS", 4),
+    "klingMaxRunUnits": ("kling_max_run_units", "VAGENT_KLING_MAX_RUN_UNITS", 16),
+    "falMaxJobCost": ("fal_max_job_cost", "VAGENT_FAL_MAX_JOB_COST", "0.50"),
+    "falMaxRunCost": ("fal_max_run_cost", "VAGENT_FAL_MAX_RUN_COST", "2.00"),
 }
+_SECRET_VIDEO_SETTINGS = frozenset({"videoApiKey", "klingApiKey", "falApiKey"})
 _SETTINGS = {"apiKey": ("api_key", None, None), "model": ("model", None, "deepseek-flash"), **VIDEO_SETTINGS}
 
 
@@ -54,6 +73,14 @@ class Config:
     video_max_job_cost: str = "3.00"
     video_max_new_jobs_per_run: int = 4
     video_max_run_cost: str = "12.00"
+    kling_api_key: str | None = field(default=None, repr=False)
+    fal_api_key: str | None = field(default=None, repr=False)
+    kling_max_job_cost: str = "0.60"
+    kling_max_run_cost: str = "2.40"
+    kling_max_job_units: int = 4
+    kling_max_run_units: int = 16
+    fal_max_job_cost: str = "0.50"
+    fal_max_run_cost: str = "2.00"
 
     def __post_init__(self):
         if self.video_mode not in {"off", "mock", "live"}:
@@ -80,12 +107,20 @@ class LocalSettings(BaseModel):
     videoMode: Literal["off", "mock", "live"] | None = None
     videoApiKey: str | None = Field(default=None, pattern=r"^[\x21-\x7e]{1,512}$", repr=False)
     videoWorkspaceId: WorkspaceId | None = None
-    videoProvider: Literal["wan"] | None = None
+    videoProvider: Literal["wan", "kling", "fal"] | None = None
     videoModel: Literal["wan2.7-t2v-2026-06-12"] | None = None
     videoRegion: Literal["cn-beijing"] | None = None
     videoMaxJobCost: Money | None = None
-    videoMaxNewJobsPerRun: int | None = Field(default=None, ge=1, le=4)
+    videoMaxNewJobsPerRun: IntegerSetting | None = Field(default=None, ge=1, le=4)
     videoMaxRunCost: Money | None = None
+    klingApiKey: str | None = Field(default=None, pattern=r"^[\x21-\x7e]{1,512}$", repr=False)
+    falApiKey: str | None = Field(default=None, pattern=r"^[\x21-\x7e]{1,512}$", repr=False)
+    klingMaxJobCost: Money | None = None
+    klingMaxRunCost: Money | None = None
+    klingMaxJobUnits: IntegerSetting | None = Field(default=None, ge=0, le=4)
+    klingMaxRunUnits: IntegerSetting | None = Field(default=None, ge=0, le=16)
+    falMaxJobCost: Money | None = None
+    falMaxRunCost: Money | None = None
 
 
 class ConfigUpdate(LocalSettings):
@@ -93,19 +128,22 @@ class ConfigUpdate(LocalSettings):
     videoWorkspaceId: WorkspaceId | Literal[""] | None = None
     clearApiKey: bool = False
     clearVideoApiKey: bool = False
+    clearKlingApiKey: bool = False
+    clearFalApiKey: bool = False
 
     @model_validator(mode="after")
     def check_update(self):
-        if any(
-            getattr(self, key) is None
-            for key in self.model_fields_set
-            if key not in {"clearApiKey", "clearVideoApiKey"}
-        ):
+        clears = {"clearApiKey", "clearVideoApiKey", "clearKlingApiKey", "clearFalApiKey"}
+        if any(getattr(self, key) is None for key in self.model_fields_set if key not in clears):
             raise ValueError("省略保持原值；移除密钥使用对应的 clear 字段")
-        if self.clearApiKey and self.apiKey is not None:
-            raise ValueError("不能同时设置和移除密钥")
-        if self.clearVideoApiKey and self.videoApiKey is not None:
-            raise ValueError("不能同时设置和移除视频密钥")
+        for secret, clear in (
+            ("apiKey", "clearApiKey"),
+            ("videoApiKey", "clearVideoApiKey"),
+            ("klingApiKey", "clearKlingApiKey"),
+            ("falApiKey", "clearFalApiKey"),
+        ):
+            if getattr(self, clear) and getattr(self, secret) is not None:
+                raise ValueError("不能同时设置和移除密钥")
         return self
 
 
@@ -143,7 +181,12 @@ def config_sources(config: Config) -> dict[str, str]:
 def update_local_settings(config: Config, update: ConfigUpdate) -> Config:
     sources = config_sources(config)
     values = read_local_settings(config.home).model_dump(exclude_none=True)
-    clears = {"apiKey": update.clearApiKey, "videoApiKey": update.clearVideoApiKey}
+    clears = {
+        "apiKey": update.clearApiKey,
+        "videoApiKey": update.clearVideoApiKey,
+        "klingApiKey": update.clearKlingApiKey,
+        "falApiKey": update.clearFalApiKey,
+    }
     for name, (attr, _, _) in _SETTINGS.items():
         supplied = name in update.model_fields_set
         clear = clears.get(name, False)
@@ -188,6 +231,18 @@ def update_local_settings(config: Config, update: ConfigUpdate) -> Config:
     return replace(config, **effective, sources=following_sources)
 
 
+def _environment_value(value, local_value, default):
+    """Environment strings for integer settings are parsed once, before validation."""
+    if value:
+        if isinstance(default, int):
+            try:
+                return int(value)
+            except ValueError:
+                raise AppError("VIDEO_CONFIG_INVALID", "视频配置中的数量上限必须是整数。") from None
+        return value
+    return local_value if local_value is not None else default
+
+
 def load_config(env: Mapping[str, str] | None = None) -> Config:
     env = os.environ if env is None else env
     home = Path(env.get("VAGENT_HOME") or Path.home() / ".vagent").expanduser().resolve()
@@ -225,7 +280,7 @@ def load_config(env: Mapping[str, str] | None = None) -> Config:
         mcp_config=Path(env["VAGENT_MCP_CONFIG"]).resolve() if env.get("VAGENT_MCP_CONFIG") else None,
         mcp_local=env.get("VAGENT_MCP_LOCAL", "0") == "1",
         **{
-            attr: env.get(variable) or (getattr(local, name) if getattr(local, name) is not None else default)
+            attr: _environment_value(env.get(variable), getattr(local, name), default)
             for name, (attr, variable, default) in VIDEO_SETTINGS.items()
         },
         sources={

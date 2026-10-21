@@ -64,6 +64,9 @@ def summarize_records(state: dict, *, project_id: str | None = None) -> dict:
     by_status: dict[str, int] = defaultdict(int)
     by_mode: dict[str, int] = defaultdict(int)
     by_price: dict[str, int] = defaultdict(int)
+    by_provider: dict[str, int] = defaultdict(int)
+    provider_amounts: dict[tuple[str, str], Decimal] = defaultdict(Decimal)
+    provider_units: dict[str, int] = defaultdict(int)
     daily: dict[str, dict] = {}
     estimated = Decimal(0)
     reported = Decimal(0)
@@ -77,9 +80,21 @@ def summarize_records(state: dict, *, project_id: str | None = None) -> dict:
             open_jobs += 1
         cost = raw.get("cost")
         amount = Decimal(0)
+        provider, currency = "wan", "CNY"
+        if raw.get("contractVersion") == 6:
+            provider = raw["request"]["provider"]
+            currency = cost["estimate"]["currency"] if cost else "USD"
+        by_provider[provider] += 1
         if cost:
             amount = Decimal(cost["estimate"]["amount"])
-            estimated += amount
+            provider_amounts[(provider, currency)] += amount
+            if raw.get("contractVersion") == 6:
+                units = (cost.get("resourceEstimate") or {}).get("units")
+                if isinstance(units, int):
+                    provider_units[provider] += units
+            # Top-level totals stay the Wan CNY bucket for historical filters.
+            if currency == "CNY":
+                estimated += amount
             actual = cost.get("actual") or {}
             if actual.get("status") == "reported" and actual.get("amount") is not None:
                 reported += Decimal(actual["amount"])
@@ -94,7 +109,7 @@ def summarize_records(state: dict, *, project_id: str | None = None) -> dict:
             bucket = daily.setdefault(day, {"date": day, "jobs": 0, "live": 0, "estimated": Decimal(0)})
             bucket["jobs"] += 1
             bucket["live"] += 1 if raw.get("mode") == "live" else 0
-            bucket["estimated"] += amount
+            bucket["estimated"] += amount if currency == "CNY" else Decimal(0)
     storyboards = [
         raw for raw in state["storyboards"].values() if project_id is None or raw["projectId"] == project_id
     ]
@@ -112,6 +127,7 @@ def summarize_records(state: dict, *, project_id: str | None = None) -> dict:
             "mock": by_mode.get("mock", 0),
             "byStatus": dict(sorted(by_status.items())),
             "byMode": dict(sorted(by_mode.items())),
+            "byProvider": dict(sorted(by_provider.items())),
         },
         "cost": {
             "currency": "CNY",
@@ -124,6 +140,20 @@ def summarize_records(state: dict, *, project_id: str | None = None) -> dict:
                 "unknownJobs": unknown_jobs,
             },
         },
+        "costByProvider": [
+            {
+                "provider": provider,
+                "currency": currency,
+                "jobs": by_provider[provider],
+                "estimated": money(amount),
+                **(
+                    {"units": provider_units[provider]}
+                    if (provider, currency) in provider_amounts and provider_units[provider]
+                    else {}
+                ),
+            }
+            for (provider, currency), amount in sorted(provider_amounts.items())
+        ],
         "storyboards": {
             "total": len(storyboards),
             "shotVersions": sum(len(raw.get("shotVersions", ())) for raw in storyboards),

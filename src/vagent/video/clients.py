@@ -57,7 +57,8 @@ def client_context(service, *, session_id: str, client_request_id: str, group: s
         raise AppError("INVALID_ARGUMENTS", "未知的本地动作。")
     mode = service.generation_mode()
     if mode == "live" and require_mode_config:
-        service.check_live_configuration()
+        # The two-Key setup needs only the Key of the provider the user selected.
+        service.check_live_configuration(service.config.video_provider)
     store = service.store
     run_id = client_run_id(session_id, client_request_id)
     existing = store.snapshot()["runs"].get(run_id)

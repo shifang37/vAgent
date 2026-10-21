@@ -5,7 +5,7 @@ storyboard view is the one shape the CLI, the Web panel and the storyboard tools
 share, so ordering, version history and delivered media agree across all three.
 """
 
-from vagent.video.contracts import Job, JobV3, LiveJob, parse_job
+from vagent.video.contracts import Job, JobV3, JobV6, LiveJob, parse_job
 
 
 def job_snapshot(job: Job) -> dict:
@@ -82,7 +82,9 @@ def live_job_snapshot(job: Job) -> dict:
         "error": job.error.public() if job.error else None,
         "result": job.result.model_dump(mode="json", by_alias=True) if job.result else None,
     }
-    if isinstance(job, JobV3):
+    if isinstance(job, JobV6):
+        view["shotRef"] = job.shot_ref.model_dump(mode="json", by_alias=True) if job.shot_ref else None
+    elif isinstance(job, JobV3):
         view["shotRef"] = job.shot_ref.model_dump(mode="json", by_alias=True)
     return view
 

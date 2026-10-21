@@ -32,6 +32,8 @@ from vagent.video.jobs import JobService
 from vagent.video.media import file_io
 from vagent.video.media_http import MediaHttpClient
 from vagent.video.media_worker import MediaWorker
+from vagent.video.providers.fal import FalAdapter
+from vagent.video.providers.kling import KlingAdapter
 from vagent.video.providers.mock import MockVideoAdapter
 from vagent.video.providers.wan import WanAdapter
 from vagent.video.storyboards import storyboard_in_state
@@ -61,6 +63,8 @@ class ApplicationService:
         self._settings_config = config
         self.video_probe = None
         self.wan_adapter = None
+        self.kling_adapter = None
+        self.fal_adapter = None
         self.tool_views = {config.video_mode: tools}
         self.http_client, self.model, self.cache = http_client, model, cache
         self.policy = policy or RunPolicy()
@@ -101,7 +105,11 @@ class ApplicationService:
                     reference_loader=asset_reference_loader(store, ImageInputRule()),
                 )
             )
-            video_jobs = JobService(store, [MockVideoAdapter(store), wan], config=config)
+            # The E2 providers publish one frozen combination each; a missing Key
+            # disables only that provider and never blocks the others.
+            kling = await stack.enter_async_context(KlingAdapter(api_key=config.kling_api_key))
+            fal = await stack.enter_async_context(FalAdapter(api_key=config.fal_api_key))
+            video_jobs = JobService(store, [MockVideoAdapter(store), wan, kling, fal], config=config)
             media_client = await stack.enter_async_context(MediaHttpClient())
             tool_views = {mode: tools.copy() for mode in ("off", "mock", "live")}
             for mode in ("mock", "live"):
@@ -131,6 +139,8 @@ class ApplicationService:
             service.tool_views = tool_views
             service.video_jobs = video_jobs
             service.wan_adapter = wan
+            service.kling_adapter = kling
+            service.fal_adapter = fal
             service.media = video_jobs.media
             service.films = video_jobs.films
             service._event_loop = asyncio.get_running_loop()
@@ -443,11 +453,14 @@ class ApplicationService:
             **{
                 name: getattr(saved, attr)
                 for name, (attr, _, _) in VIDEO_SETTINGS.items()
-                if name != "videoApiKey"
+                if name not in {"videoApiKey", "klingApiKey", "falApiKey"}
             },
             "activeVideoMode": self.config.video_mode,
             "videoApiKeyConfigured": bool(saved.video_api_key),
+            "klingApiKeyConfigured": bool(saved.kling_api_key),
+            "falApiKeyConfigured": bool(saved.fal_api_key),
             "videoPermissionStatus": "unverified",
+            "providers": self.provider_configuration(),
             "videoProbe": copy.deepcopy(self.video_probe),
             "videoEstimate": self.video_jobs.price.model_dump(mode="json", by_alias=True)
             if self.video_jobs and self.video_jobs.price
@@ -463,6 +476,58 @@ class ApplicationService:
             or execution_control(self.store).lock.locked(),
         }
 
+    def provider_configuration(self):
+        """Per-provider keys, frozen rates and verification state for the settings page."""
+        if not self.video_jobs:
+            return []
+        entries, seen = [], set()
+        for capabilities in self.video_jobs.capabilities("live"):
+            provider = capabilities.provider
+            if provider in seen:
+                continue
+            seen.add(provider)
+            rate = getattr(capabilities, "rate", None)
+            if rate is not None:
+                estimate = {
+                    "currency": rate.currency,
+                    "unitPrice": rate.unit_price,
+                    "priceVersion": rate.price_version,
+                    "sourceUrl": rate.source_url,
+                }
+                resource = (
+                    {
+                        "unit": capabilities.resource.unit,
+                        "unitsPerSecond": capabilities.resource.units_per_second,
+                    }
+                    if getattr(capabilities, "resource", None)
+                    else None
+                )
+            else:
+                price = self.video_jobs.price
+                estimate = (
+                    {
+                        "currency": price.currency,
+                        "unitPrice": price.unit_price,
+                        "priceVersion": price.price_version,
+                        "sourceUrl": price.source_url,
+                    }
+                    if price
+                    else None
+                )
+                resource = None
+            entries.append(
+                {
+                    "provider": provider,
+                    "model": self.config.video_model if provider == "wan" else capabilities.model,
+                    "keyConfigured": bool(self.video_jobs.provider_key(provider)),
+                    # New providers publish no verified zero-cost auth probe.
+                    "permissionStatus": "unverified",
+                    "estimate": estimate,
+                    "resource": resource,
+                }
+            )
+        return entries
+
     def _check_config_idle(self):
         if (
             self.config_busy
@@ -474,10 +539,20 @@ class ApplicationService:
     async def save_configuration(self, update: ConfigUpdate):
         self._check_config_idle()
         sources = config_sources(self._settings_config)
+        new_video_key = any(
+            name in update.model_fields_set and getattr(update, name) is not None
+            for name in ("videoApiKey", "klingApiKey", "falApiKey")
+        )
+        already_live = any(
+            (
+                self._settings_config.video_api_key,
+                self._settings_config.kling_api_key,
+                self._settings_config.fal_api_key,
+            )
+        )
         auto_live = (
-            "videoApiKey" in update.model_fields_set
-            and update.videoApiKey is not None
-            and not self._settings_config.video_api_key
+            new_video_key
+            and not already_live
             and self._settings_config.video_mode == "off"
             and "videoMode" not in update.model_fields_set
             and sources["videoMode"] not in {"environment", "provided"}
@@ -489,7 +564,10 @@ class ApplicationService:
                 {**update.model_dump(exclude_unset=True), "videoMode": "live"}
             )
         previous = (self.config.api_key, self.config.model)
-        previous_video = (self._settings_config.video_api_key, self._settings_config.video_workspace_id)
+        previous_video = (
+            self._settings_config.video_api_key,
+            self._settings_config.video_workspace_id,
+        )
         updated = update_local_settings(self._settings_config, update)
         self._settings_config = updated
         # K2: saved video settings apply to new registrations immediately, with no
@@ -499,6 +577,10 @@ class ApplicationService:
         self.wan_adapter.update_credentials(
             api_key=updated.video_api_key, workspace_id=updated.video_workspace_id
         )
+        if self.kling_adapter is not None:
+            self.kling_adapter.update_credentials(api_key=updated.kling_api_key)
+        if self.fal_adapter is not None:
+            self.fal_adapter.update_credentials(api_key=updated.fal_api_key)
         if previous != (self.config.api_key, self.config.model):
             self.validation = {"status": "unverified"}
         if (updated.video_api_key, updated.video_workspace_id) != previous_video:
@@ -507,6 +589,8 @@ class ApplicationService:
         if touched_credentials and updated.video_api_key:
             # Zero-cost read-only probe: one query for a task ID that cannot
             # exist. It registers nothing and never blocks the saved settings.
+            # Kling and fal publish no verified free auth endpoint, so their saved
+            # keys stay explicitly unverified instead of probing with a paid task.
             self.config_busy = True
             try:
                 self.video_probe = await self.wan_adapter.probe_authentication()
@@ -748,10 +832,16 @@ class ApplicationService:
         if record.get("videoMode", "off") != "live":
             return
         try:
-            self.video_jobs.check_live_configuration()
-            for job in self.video_jobs.list(session_id=record["sessionId"]):
-                if job.context.run_id == record["id"]:
-                    self.video_jobs.check_runtime(job)
+            jobs = [
+                job
+                for job in self.video_jobs.list(session_id=record["sessionId"])
+                if job.context.run_id == record["id"]
+            ]
+            providers = {job.request.provider for job in jobs} or {self.config.video_provider}
+            for provider in providers:
+                self.video_jobs.check_live_configuration(provider)
+            for job in jobs:
+                self.video_jobs.check_runtime(job)
         except AppError:
             raise AppError(
                 "RESUME_CONFIG_CHANGED",

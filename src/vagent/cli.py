@@ -23,6 +23,8 @@ from vagent.video.contracts import ImageInputRule
 from vagent.video.film_service import FilmService
 from vagent.video.jobs import JobService
 from vagent.video.media import DownloadRetry
+from vagent.video.providers.fal import FalAdapter
+from vagent.video.providers.kling import KlingAdapter
 from vagent.video.providers.mock import MockVideoAdapter
 from vagent.video.providers.wan import WanAdapter
 from vagent.video.storyboards import find_shot, storyboard_in_state
@@ -259,14 +261,32 @@ def local_jobs(config, args):
             print_json(cli_job_view(job))
 
 
+async def live_adapters(config, store, stack):
+    """Mock plus every published live provider; missing Keys stay unusable.
+
+    Inspection and retry commands must find the original adapter even when the
+    current mode is off, so the missing-Key/configuration diagnostics stay exact.
+    """
+    adapters = [MockVideoAdapter(store)]
+    adapters.append(
+        await stack.enter_async_context(
+            WanAdapter(
+                api_key=config.video_api_key,
+                workspace_id=config.video_workspace_id,
+                model=config.video_model,
+                region=config.video_region,
+                reference_loader=asset_reference_loader(store, ImageInputRule()),
+            )
+        )
+    )
+    adapters.append(await stack.enter_async_context(KlingAdapter(api_key=config.kling_api_key)))
+    adapters.append(await stack.enter_async_context(FalAdapter(api_key=config.fal_api_key)))
+    return adapters
+
+
 async def retry_live_query(config, store, job):
-    async with WanAdapter(
-        api_key=config.video_api_key,
-        workspace_id=config.video_workspace_id,
-        model=config.video_model,
-        region=config.video_region,
-    ) as adapter:
-        service = JobService(store, [adapter], config=config)
+    async with AsyncExitStack() as stack:
+        service = JobService(store, await live_adapters(config, store, stack), config=config)
         return service.retry_query(job.id, project_id=job.context.project_id)
 
 
@@ -343,19 +363,7 @@ def local_usage(state, selector: str) -> dict:
 async def local_redo(config, store, args) -> int:
     """Register one new ShotVersion and Job for a named shot; submits nothing."""
     async with AsyncExitStack() as stack:
-        adapters = [MockVideoAdapter(store)]
-        if config.video_mode == "live":
-            adapters.append(
-                await stack.enter_async_context(
-                    WanAdapter(
-                        api_key=config.video_api_key,
-                        workspace_id=config.video_workspace_id,
-                        model=config.video_model,
-                        region=config.video_region,
-                        reference_loader=asset_reference_loader(store, ImageInputRule()),
-                    )
-                )
-            )
+        adapters = await live_adapters(config, store, stack)
         service = JobService(store, adapters, config=config)
         record, shot = find_shot(store.snapshot(), args.shot_id)
         if args.storyboard_id and record.id != args.storyboard_id:
@@ -537,7 +545,11 @@ def main() -> None:
             safe = asdict(config)
             key = safe.pop("api_key")
             video_key = safe.pop("video_api_key")
+            kling_key = safe.pop("kling_api_key")
+            fal_key = safe.pop("fal_api_key")
             safe["video_api_key_configured"] = bool(video_key)
+            safe["kling_api_key_configured"] = bool(kling_key)
+            safe["fal_api_key_configured"] = bool(fal_key)
             safe["video_permission_status"] = "unverified"
             safe["redis_configured"] = bool(safe.pop("redis_url"))
             print_json({**safe, "api_key_configured": bool(key and key.strip()), "thinking": "disabled"})

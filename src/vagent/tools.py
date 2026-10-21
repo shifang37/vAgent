@@ -164,22 +164,28 @@ class ToolRegistry:
                 registry._definitions[name] = copy.deepcopy(definition)
         return registry
 
-    def register_tools_variant(self, tools_version: int, *, features, exclude=()) -> None:
+    def register_tools_variant(self, tools_version: int, *, features, exclude=(), definitions=()) -> None:
         """Freeze the tool set published under one toolsVersion for later restores."""
-        frozen_features, frozen_exclude = self._tool_variants.get(tools_version, ([], frozenset()))
+        frozen_features, frozen_exclude, frozen_definitions = self._tool_variants.get(
+            tools_version, ([], frozenset(), {})
+        )
         self._tool_variants[tools_version] = (
             [*frozen_features, *copy.deepcopy(features)],
             frozen_exclude | frozenset(exclude),
+            {**frozen_definitions, **copy.deepcopy(dict(definitions))},
         )
 
     def for_tools_version(self, tools_version: int) -> "ToolRegistry":
         if tools_version not in self._tool_variants:
             return self
-        features, excluded = self._tool_variants[tools_version]
+        features, excluded, definitions = self._tool_variants[tools_version]
         registry = self._filtered(lambda definition: definition.name not in excluded)
         for feature in features:
             if feature.name in registry._features:
                 registry._features[feature.name] = copy.deepcopy(feature)
+        for name, definition in definitions.items():
+            if name in registry._definitions:
+                registry._definitions[name] = copy.deepcopy(definition)
         return registry
 
     def for_record_features(self, recorded: dict) -> "ToolRegistry | None":

@@ -2,13 +2,15 @@
 
 面向视频创作的 Agent 实习项目，使用 **Python + DeepSeek + LangGraph**，自主设计上下文、项目记忆、Skills、工具执行与护栏，再接入视频生成模型。
 
-当前已实现 **Python CLI + 本地 Web Agent**，前端通过同源 API/SSE 调用共享 LangGraph Runner。M1、M2 已完成并合入 master，支持真实万相多镜头本地 MP4 交付、逐镜头重做、素材库、用量统计和客户端序列连播；两 Key 直用 K0–K3 已完成。**2026-10-21 完成 M3 E0 契约冻结与 E1 本地拼接成片**：schema v5 的 `films`、`mp4-copy-signature-v1` 流复制签名、包内 FFmpeg 拼接、`film_assemble`/`film_read`（tools/rules 5/5）、`vagent film`、成片媒体分支与 Web 成片面板均已交付，**E1 全程视频 submit=0**；E2–E4 尚未交付。首轮发现见 [编排测试报告](./docs/AGENT_ORCHESTRATION_ACCEPTANCE.md)，当前边界见 [M3 契约](./docs/M3_CONTRACTS.md)、[E0 验收](./docs/M3_E0_ACCEPTANCE.md) 与 [E1 验收](./docs/M3_E1_ACCEPTANCE.md)。
+当前已实现 **Python CLI + 本地 Web Agent**，前端通过同源 API/SSE 调用共享 LangGraph Runner。M1、M2 已完成并合入 master，支持真实万相多镜头本地 MP4 交付、逐镜头重做、素材库、用量统计和客户端序列连播；两 Key 直用 K0–K3 已完成。**2026-10-21 完成 M3 E0 契约冻结与 E1 本地拼接成片**：schema v5 的 `films`、`mp4-copy-signature-v1` 流复制签名、包内 FFmpeg 拼接、`film_assemble`/`film_read`（tools/rules 5/5）、`vagent film`、成片媒体分支与 Web 成片面板均已交付，**E1 全程视频 submit=0**。**2026-10-21 完成 M3 E2 多供应商与中转**：Job/Request v6、`multi-provider-v3`（Kling Singapore 直连与 fal standard 静音中转）、逐 provider/currency 与 Kling VIDEO_UNIT 预算桶、认证任务结果来源绑定与公网连接固定、tools/rules 6/6（冻结 5/5 与 4/4 仍可恢复）以及设置页多供应商 Key 均已交付，**E2 全程视频 submit=0**；E3–E4 尚未交付。首轮发现见 [编排测试报告](./docs/AGENT_ORCHESTRATION_ACCEPTANCE.md)，当前边界见 [M3 契约](./docs/M3_CONTRACTS.md)、[E0 验收](./docs/M3_E0_ACCEPTANCE.md)、[E1 验收](./docs/M3_E1_ACCEPTANCE.md) 与 [E2 验收](./docs/M3_E2_ACCEPTANCE.md)。
 
 任务 2 已补齐本地配置向导、CLI/Web 流式回复和 9 类固定评测。**2026-10-09 完成 A5：完整真实套件 9/9 通过，M1-A 已验收。** 最终套件包含 3 次显式恢复，累计 27 次模型调用、25 次工具调用；此前失败记录完整保留，详见 [M1-A 验收记录](./docs/M1A_ACCEPTANCE.md)。**2026-10-10 完成 B5，M1-B 的 B0–B5 已验收**：真实 DeepSeek + Mock 套件 5/5 通过，累计 15 次模型调用、14 次工具调用，3 个 Job 各提交一次。应用自动推进模拟任务，持久等待、停止、重启恢复及 CLI/Web 已通过回归和仓库外 wheel 验证。详见 [M1-B 验收](./docs/M1B_ACCEPTANCE.md)；真实视频接入属于后续 M1-C。
 
 ## 当前进度
 
 M3 E0 已完成 Kling 3.0 Turbo 直连与 fal standard 静音中转的官方核实、拼接方案 A（固定包内 FFmpeg、仅流复制）、版本/预算/headless 两阶段授权与用户 skills 契约，以及 schema v4 合成兼容基线。**E1 已交付本地拼接成片**：schema v4→v5 机械迁移（`films`）、`mp4-copy-signature-v1`（逐字段校验 avcC/AAC 配置、轨道时间线、edit list 与 priming）、按样本表推导每段时长与接缝偏移、Store 锁外可取消的 FFmpeg 流复制、`film_assemble`/`film_read` 与 tools/rules 5/5（旧 4/4 Run 仍按冻结工具集恢复）、`FilmMedia` 联合分支与 Range/下载、`vagent film assemble|show` 与 Web 成片面板。双片段真实拼接输出的 SHA-256 与 E0 记录的夹具修正变体逐字节一致；全量回归 **1007 passed / 2 skipped** 与前端 **31 项**通过，视频 **submit=0**，详见 [E1 验收](./docs/M3_E1_ACCEPTANCE.md)。
+
+**E2 已交付多供应商与中转**：`JobV6`/`VideoRequestV6` 通用请求（历史 1–5 精确分派不变）、`multi-provider-v3` 能力表（Kling `kling-3.0-turbo` 新加坡直连、fal `kling-video/v3/standard/text-to-video` 静音中转）、逐 provider/currency 与 Kling `VIDEO_UNIT` 预算桶（共享每 Run 4 个新 Job）、`kling-auth-result-origin-v1`/`fal-auth-result-origin-v1` 认证结果来源绑定（精确 origin + 整条 URL 指纹、禁重定向、每次连接重新解析并固定公网地址）、tools/rules 6/6 与冻结 5/5 真实检查点恢复、Kling/fal Key 热更新与未验证标注、设置页供应商选择与逐供应商报价/上限。全部供应商调用均为受控 HTTP，视频 **submit=0**；真实账号样本留待 E4，详见 [E2 验收](./docs/M3_E2_ACCEPTANCE.md)。
 
 | 部分 | 状态 | 已交付内容 |
 |---|---|---|

@@ -169,7 +169,7 @@ def test_current_mock_toolset_is_five_five_and_keeps_the_frozen_four_four_view(s
     assert {"storyboard_read", "storyboard_save", "shot_generate", "asset_read"}.issubset(set(names))
     assert {"film_assemble", "film_read"}.issubset(set(names))
     features = tools.features["video"]
-    assert features["mode"] == "mock" and (features["toolsVersion"], features["rulesVersion"]) == (5, 5)
+    assert features["mode"] == "mock" and (features["toolsVersion"], features["rulesVersion"]) == (6, 6)
     frozen = tools.for_tools_version(4)
     assert (frozen.features["video"]["toolsVersion"], frozen.features["video"]["rulesVersion"]) == (4, 4)
     assert frozen.features["video"]["capabilities"] == features["capabilities"]
@@ -264,7 +264,7 @@ async def test_the_frozen_live_m2_view_extends_its_rules_at_the_same_version(sto
             create_project_tools(), JobService(store, [MockVideoAdapter(store), wan]), mode="live"
         )
         current = tools.features["video"]
-        assert (current["toolsVersion"], current["rulesVersion"]) == (5, 5)
+        assert (current["toolsVersion"], current["rulesVersion"]) == (6, 6)
         frozen = tools.for_tools_version(4)
         features = frozen.features["video"]
         assert (features["toolsVersion"], features["rulesVersion"], features["mode"]) == (4, 4, "live")
@@ -320,7 +320,7 @@ async def test_e1_restores_a_four_four_run_with_its_frozen_tools_and_starts_five
         resumed_model = ScriptedModel(lambda *_: AIMessage(content="按原 4/4 工具集继续完成"))
         resumed_model.name = "e1-restore-fixture"
         current = AgentRunner(store=reopened, model=resumed_model, tools=mock_tools(reopened))
-        assert current.tools.features["video"]["toolsVersion"] == 5
+        assert current.tools.features["video"]["toolsVersion"] == 6
         restored = current.for_record(reopened.snapshot()["runs"][first["id"]])
         restored_names = {spec["function"]["name"] for spec in restored.tools.specs()}
         assert "film_assemble" not in restored_names and "storyboard_save" in restored_names
@@ -331,5 +331,5 @@ async def test_e1_restores_a_four_four_run_with_its_frozen_tools_and_starts_five
         fresh_model = ScriptedModel(lambda *_: AIMessage(content="新 Run 使用 5/5"))
         fresh_model.name = "e1-restore-fixture"
         fresh = AgentRunner(store=reopened, model=fresh_model, tools=mock_tools(reopened))
-        assert fresh.tools.features["video"]["toolsVersion"] == 5
+        assert fresh.tools.features["video"]["toolsVersion"] == 6
         assert {spec["function"]["name"] for spec in fresh.tools.specs()} >= {"film_assemble", "film_read"}

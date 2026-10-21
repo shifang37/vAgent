@@ -1,7 +1,9 @@
 """M1-B video requests, provider protocol and persistent Job invariants."""
 
 import hashlib
+import ipaddress
 import json
+import re
 from collections.abc import Mapping
 from datetime import datetime, timedelta
 from decimal import Decimal
@@ -1267,6 +1269,10 @@ class JobV2(Job):
 
     @model_validator(mode="after")
     def coherent_state(self):
+        # Pydantic keeps this frozen v2 validator on subclasses as well; the generic
+        # v6 contract has its own quote and bucket invariants.
+        if isinstance(self, JobV6):
+            return self
         if self.operation_key != self.context.operation_key:
             raise ValueError("Job operation key must match its server execution context")
         if (
@@ -1390,13 +1396,653 @@ class JobV5(JobV3):
     request: VideoRequestV5
 
 
+# --- M3 E2: generic multi-provider requests (contract 6) ---------------------
+# E2 adds one direct provider and one relay beside the frozen Wan models. Only the
+# minimal verified combinations are published: text-to-video, 5 s, 720p, 16:9.
+# Historical requests 1-5 stay their own classes; Wan is never re-encoded as 6.
+
+MULTI_PROVIDER_CAPABILITIES_VERSION = "multi-provider-v3"
+
+ProviderModel = Annotated[
+    str, Field(min_length=1, max_length=256, pattern=r"^[A-Za-z0-9][A-Za-z0-9._/-]{0,255}$")
+]
+# Unit prices keep their public precision (0.112 USD/s); amounts stay 2 decimals.
+UnitPrice = Annotated[str, Field(max_length=32, pattern=r"^(?:0|[1-9][0-9]*)(?:\.[0-9]{1,4})?$")]
+UnitsPerSecond = Annotated[str, Field(max_length=32, pattern=r"^(?:0\.[0-9]{1,4}|[1-9][0-9]*)$")]
+Currency = Literal["CNY", "USD"]
+LiveProvider = Literal["wan", "kling", "fal"]
+
+KLING_PROVIDER = "kling"
+KLING_MODEL = "kling-3.0-turbo"
+KLING_REGION = "singapore"
+KLING_ENDPOINT_PROFILE = "kling-singapore-v1"
+KLING_ADAPTER_VERSION = "kling-http-v1"
+KLING_PRICE_VERSION = "kling30-turbo-720p-20261021"
+KLING_SOURCE_POLICY_VERSION = "kling-auth-result-origin-v1"
+KLING_PRICE_SOURCE = "https://kling.ai/document-api/pricing/base/video.md"
+KLING_RATE_USD = "0.112"
+KLING_UNITS_PER_SECOND = "0.8"
+FAL_PROVIDER = "fal"
+FAL_MODEL = "fal-ai/kling-video/v3/standard/text-to-video"
+FAL_REGION = "global"
+FAL_ENDPOINT_PROFILE = "fal-queue-v1"
+FAL_ADAPTER_VERSION = "fal-http-v1"
+FAL_PRICE_VERSION = "fal-kling30-standard-silent-20261021"
+FAL_SOURCE_POLICY_VERSION = "fal-auth-result-origin-v1"
+FAL_PRICE_SOURCE = "https://fal.ai/models/fal-ai/kling-video/v3/standard/text-to-video"
+FAL_RATE_USD = "0.084"
+MULTI_PROVIDER_PRICE_CHECKED_AT = "2026-10-21"
+
+# Frozen per-provider ceilings. Users may tighten them in local settings; the
+# effective ceiling is the smaller of the stored value and these constants.
+KLING_MAX_JOB_USD = "0.60"
+KLING_MAX_RUN_USD = "2.40"
+KLING_MAX_JOB_UNITS = 4
+KLING_MAX_RUN_UNITS = 16
+FAL_MAX_JOB_USD = "0.50"
+FAL_MAX_RUN_USD = "2.00"
+
+AUTH_RESULT_ORIGIN_POLICIES = frozenset({KLING_SOURCE_POLICY_VERSION, FAL_SOURCE_POLICY_VERSION})
+
+_PROVIDER_PROFILES = {
+    KLING_PROVIDER: (
+        KLING_MODEL,
+        KLING_REGION,
+        KLING_ENDPOINT_PROFILE,
+        KLING_ADAPTER_VERSION,
+        KLING_PRICE_VERSION,
+        KLING_SOURCE_POLICY_VERSION,
+    ),
+    FAL_PROVIDER: (
+        FAL_MODEL,
+        FAL_REGION,
+        FAL_ENDPOINT_PROFILE,
+        FAL_ADAPTER_VERSION,
+        FAL_PRICE_VERSION,
+        FAL_SOURCE_POLICY_VERSION,
+    ),
+}
+
+
+class ProviderRate(Contract):
+    """The published per-output-second rate of one provider/model entry."""
+
+    currency: Currency
+    unit: Literal["output_second"] = "output_second"
+    unit_price: UnitPrice
+    price_version: Name
+    checked_at: str = Field(pattern=r"^[0-9]{4}-[0-9]{2}-[0-9]{2}$")
+    source_url: str = Field(min_length=1, max_length=1000, pattern=r"^https://")
+
+    @model_validator(mode="after")
+    def valid_date(self):
+        datetime.strptime(self.checked_at, "%Y-%m-%d")
+        return self
+
+
+class ProviderPrice(Contract):
+    """One frozen quote in the provider's own billing currency (never converted)."""
+
+    currency: Currency
+    unit: Literal["output_second"] = "output_second"
+    unit_price: UnitPrice
+    quantity: str = Field(pattern=r"^[1-9][0-9]{0,8}$")
+    amount: Money
+    price_version: Name
+    checked_at: str = Field(pattern=r"^[0-9]{4}-[0-9]{2}-[0-9]{2}$")
+    source_url: str = Field(min_length=1, max_length=1000, pattern=r"^https://")
+
+    @model_validator(mode="after")
+    def correct_amount(self):
+        if Decimal(self.unit_price) * Decimal(self.quantity) != Decimal(self.amount):
+            raise ValueError("Estimate must equal its frozen unit price times quantity")
+        datetime.strptime(self.checked_at, "%Y-%m-%d")
+        return self
+
+
+class ResourceRate(Contract):
+    """Kling's second billing dimension: resource units per output second."""
+
+    unit: Literal["VIDEO_UNIT"] = "VIDEO_UNIT"
+    units_per_second: UnitsPerSecond
+    price_version: Name
+
+
+class ResourceEstimate(Contract):
+    unit: Literal["VIDEO_UNIT"] = "VIDEO_UNIT"
+    units_per_second: UnitsPerSecond
+    quantity: str = Field(pattern=r"^[1-9][0-9]{0,8}$")
+    units: int = Field(ge=0)
+    price_version: Name
+
+    @model_validator(mode="after")
+    def exact_units(self):
+        product = Decimal(self.units_per_second) * Decimal(self.quantity)
+        if product != Decimal(self.units):
+            raise ValueError("Resource units must equal the frozen rate times duration")
+        return self
+
+
+def provider_price(rate: ProviderRate, duration_seconds: int) -> ProviderPrice:
+    amount = Decimal(rate.unit_price) * duration_seconds
+    return ProviderPrice(
+        currency=rate.currency,
+        unit=rate.unit,
+        unit_price=rate.unit_price,
+        quantity=str(duration_seconds),
+        amount=_money(amount),
+        price_version=rate.price_version,
+        checked_at=rate.checked_at,
+        source_url=rate.source_url,
+    )
+
+
+def resource_estimate(rate: ResourceRate, duration_seconds: int) -> ResourceEstimate:
+    product = Decimal(rate.units_per_second) * duration_seconds
+    if product != product.to_integral_value():
+        raise ValueError("A resource estimate must be a whole number of units")
+    return ResourceEstimate(
+        units_per_second=rate.units_per_second,
+        quantity=str(duration_seconds),
+        units=int(product),
+        price_version=rate.price_version,
+    )
+
+
+class VideoCapabilitiesV4(Contract):
+    """One verified live entry of the multi-provider capability table (v3)."""
+
+    provider: Literal["kling", "fal"]
+    model: ProviderModel
+    capabilities_version: Literal["multi-provider-v3"] = MULTI_PROVIDER_CAPABILITIES_VERSION
+    mode: Literal["live"] = "live"
+    region: Name
+    endpoint_profile: Name
+    adapter_version: Name
+    source_policy_version: Name
+    price_version: Name
+    shot_modes: JsonTuple[Literal["t2v"]] = ("t2v",)
+    input_types: JsonTuple[Literal["text"]] = ("text",)
+    specs: JsonTuple[ShotSpecV3] = Field(min_length=1, max_length=8)
+    audio_mode: Literal["native", "silent"]
+    max_prompt_characters: int = Field(default=2500, ge=2500, le=2500)
+    supports_cancel: bool = False
+    supports_idempotent_submit: bool = False
+    supports_result_url_refresh: bool = False
+    rate: ProviderRate
+    resource: ResourceRate | None = None
+
+    @model_validator(mode="after")
+    def frozen_entry(self):
+        if self.supports_cancel or self.supports_idempotent_submit or self.supports_result_url_refresh:
+            raise ValueError("M3 providers do not advertise unsupported options")
+        expected = _PROVIDER_PROFILES[self.provider]
+        if (
+            self.model,
+            self.region,
+            self.endpoint_profile,
+            self.adapter_version,
+            self.price_version,
+            self.source_policy_version,
+        ) != expected:
+            raise ValueError("A capability entry must use its provider's frozen profile")
+        if self.price_version != self.rate.price_version:
+            raise ValueError("The frozen rate and price version must agree")
+        if len(set(self.specs)) != len(self.specs) or {item.mode for item in self.specs} != {"t2v"}:
+            raise ValueError("Only unique, verified text-to-video specifications are published")
+        native = self.provider == KLING_PROVIDER
+        if (self.audio_mode == "native") != native:
+            raise ValueError("Kling publishes native audio; the fal standard entry is silent")
+        if (self.resource is not None) != native:
+            raise ValueError("Only Kling bills resource units in this table")
+        if self.resource is not None and self.resource.price_version != self.price_version:
+            raise ValueError("The resource rate belongs to the same price version")
+        return self
+
+
+def _multi_provider_specs() -> tuple[ShotSpecV3, ...]:
+    return (ShotSpecV3(mode="t2v", duration_seconds=5, aspect_ratio="16:9"),)
+
+
+def kling_capabilities() -> VideoCapabilitiesV4:
+    return VideoCapabilitiesV4(
+        provider=KLING_PROVIDER,
+        model=KLING_MODEL,
+        region=KLING_REGION,
+        endpoint_profile=KLING_ENDPOINT_PROFILE,
+        adapter_version=KLING_ADAPTER_VERSION,
+        source_policy_version=KLING_SOURCE_POLICY_VERSION,
+        price_version=KLING_PRICE_VERSION,
+        specs=_multi_provider_specs(),
+        audio_mode="native",
+        rate=ProviderRate(
+            currency="USD",
+            unit_price=KLING_RATE_USD,
+            price_version=KLING_PRICE_VERSION,
+            checked_at=MULTI_PROVIDER_PRICE_CHECKED_AT,
+            source_url=KLING_PRICE_SOURCE,
+        ),
+        resource=ResourceRate(units_per_second=KLING_UNITS_PER_SECOND, price_version=KLING_PRICE_VERSION),
+    )
+
+
+def fal_capabilities() -> VideoCapabilitiesV4:
+    return VideoCapabilitiesV4(
+        provider=FAL_PROVIDER,
+        model=FAL_MODEL,
+        region=FAL_REGION,
+        endpoint_profile=FAL_ENDPOINT_PROFILE,
+        adapter_version=FAL_ADAPTER_VERSION,
+        source_policy_version=FAL_SOURCE_POLICY_VERSION,
+        price_version=FAL_PRICE_VERSION,
+        specs=_multi_provider_specs(),
+        audio_mode="silent",
+        rate=ProviderRate(
+            currency="USD",
+            unit_price=FAL_RATE_USD,
+            price_version=FAL_PRICE_VERSION,
+            checked_at=MULTI_PROVIDER_PRICE_CHECKED_AT,
+            source_url=FAL_PRICE_SOURCE,
+        ),
+    )
+
+
+def multi_provider_capabilities() -> tuple[VideoCapabilitiesV4, VideoCapabilitiesV4]:
+    return (kling_capabilities(), fal_capabilities())
+
+
+class KlingParameters(Contract):
+    """The exact Kling `settings` block; nothing else is sent."""
+
+    duration: Literal[5] = 5
+    resolution: Literal["720p"] = "720p"
+    aspect_ratio: Literal["16:9"] = "16:9"
+
+
+class FalParameters(Contract):
+    """The exact fal input; the silent tier is fixed so no audio fee is implied."""
+
+    duration: Literal["5"] = "5"
+    aspect_ratio: Literal["16:9"] = "16:9"
+    generate_audio: Literal[False] = False
+    shot_type: Literal["customize"] = "customize"
+    enable_safety_checker: Literal[True] = True
+    cfg_scale: Literal[0.5] = 0.5
+    negative_prompt: Literal["blur, distort, and low quality"] = "blur, distort, and low quality"
+
+
+ProviderParameters = KlingParameters | FalParameters
+_PARAMETER_TYPES = {KLING_PROVIDER: KlingParameters, FAL_PROVIDER: FalParameters}
+
+
+class VideoRequestV6(Contract):
+    """One frozen multi-provider text-to-video request."""
+
+    provider: Literal["kling", "fal"]
+    model: ProviderModel
+    mode: Literal["t2v"] = "t2v"
+    region: Name
+    endpoint_profile: Name
+    adapter_version: Name
+    capabilities_version: Literal["multi-provider-v3"]
+    price_version: Name
+    source_policy_version: Name
+    prompt: str = Field(min_length=1, max_length=2500)
+    spec: ShotSpecV3
+    source_refs: JsonTuple[ArtifactRef] = Field(default=(), max_length=16)
+    provider_prompt: str = Field(min_length=1, max_length=2500)
+    parameters: ProviderParameters
+
+    @field_validator("prompt")
+    @classmethod
+    def nonblank_prompt(cls, value):
+        if not value.strip():
+            raise ValueError("Prompt cannot be blank")
+        return value.strip()
+
+    @model_validator(mode="after")
+    def complete_request(self):
+        expected = _PROVIDER_PROFILES[self.provider]
+        if (
+            self.model,
+            self.region,
+            self.endpoint_profile,
+            self.adapter_version,
+            self.price_version,
+            self.source_policy_version,
+        ) != expected:
+            raise ValueError("The frozen request must use its provider's exact profile")
+        if type(self.parameters) is not _PARAMETER_TYPES[self.provider]:
+            raise ValueError("The frozen parameters must match the provider protocol")
+        if self.provider_prompt != self.prompt:
+            raise ValueError("A multi-provider prompt is sent exactly as written")
+        if self.spec != ShotSpecV3(mode="t2v", duration_seconds=5, aspect_ratio="16:9"):
+            raise ValueError("Only the frozen 5 s / 720p / 16:9 text-to-video entry is published")
+        return self
+
+    def public_arguments(self) -> dict:
+        """The public camelCase arguments a Job may show; never private fields."""
+        return {
+            name: self.model_dump(mode="json", by_alias=True)[name]
+            for name in ("provider", "model", "capabilitiesVersion", "prompt", "spec", "sourceRefs")
+        }
+
+    def intent_fingerprint(self) -> str:
+        return canonical_fingerprint({"intentVersion": 4, "arguments": self.public_arguments()})
+
+    def fingerprint(self) -> str:
+        return canonical_fingerprint(
+            {"requestVersion": 6, "request": self.model_dump(mode="json", by_alias=True)}
+        )
+
+
+_HOSTNAME = re.compile(r"[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?(?:\.[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?)+")
+
+
+class VideoIntentV6(Contract):
+    """The six public arguments of one multi-provider registration call."""
+
+    provider: Literal["wan", "kling", "fal"]
+    model: ProviderModel
+    capabilities_version: Name
+    prompt: str = Field(min_length=1, max_length=8000)
+    spec: VideoSpecV2
+    source_refs: JsonTuple[ArtifactRef] = Field(default=(), max_length=16)
+
+    @field_validator("prompt")
+    @classmethod
+    def nonblank_prompt(cls, value):
+        if not value.strip():
+            raise ValueError("Prompt cannot be blank")
+        return value.strip()
+
+    @model_validator(mode="after")
+    def unique_sources(self):
+        if len(set(self.source_refs)) != len(self.source_refs):
+            raise ValueError("Source version references must be unique")
+        return self
+
+    def public_arguments(self) -> dict:
+        return self.model_dump(mode="json", by_alias=True)
+
+    def intent_fingerprint(self) -> str:
+        # The Wan path freezes its own request (intent 2); the generic providers
+        # keep intent 4 so a recorded Run replays the same normalized intent.
+        version = 2 if self.provider == "wan" else 4
+        return canonical_fingerprint({"intentVersion": version, "arguments": self.public_arguments()})
+
+    def fingerprint(self) -> str:
+        return canonical_fingerprint({"intentVersion": 4, "arguments": self.public_arguments()})
+
+
+class ResultSource(Contract):
+    """The authenticated task result's exact origin and URL fingerprint."""
+
+    task_id: ProviderId
+    origin: str = Field(min_length=10, max_length=300, pattern=r"^https://[a-z0-9.-]+:443$")
+    url_fingerprint: Fingerprint
+    source_policy_version: Name
+
+
+def bound_result_source(task_id: str, url: str, source_policy_version: str) -> ResultSource:
+    """Bind one success URL to its exact HTTPS origin, as returned under auth.
+
+    The fingerprint covers the URL bytes exactly as received: no percent decoding,
+    query reordering or path normalization.
+    """
+    parsed = urlsplit(url)
+    host = parsed.hostname
+    if (
+        not isinstance(url, str)
+        or len(url) > 8192
+        or any(ord(char) < 33 or ord(char) == 127 for char in url)
+        or parsed.scheme != "https"
+        or not host
+        or parsed.username is not None
+        or parsed.password is not None
+        or parsed.port not in {None, 443}
+        or bool(parsed.fragment)
+    ):
+        raise ValueError("A provider result must be a bounded HTTPS URL")
+    try:
+        ipaddress.ip_address(host)
+    except ValueError:
+        pass
+    else:
+        raise ValueError("An IP literal is not an acceptable result origin")
+    try:
+        normalized = host.encode("idna").decode("ascii").lower()
+    except UnicodeError:
+        raise ValueError("The result host cannot be normalized") from None
+    if not _HOSTNAME.fullmatch(normalized):
+        raise ValueError("The result host is not a canonical DNS name")
+    return ResultSource(
+        task_id=task_id,
+        origin=f"https://{normalized}:443",
+        url_fingerprint=hashlib.sha256(url.encode("utf-8")).hexdigest(),
+        source_policy_version=source_policy_version,
+    )
+
+
+class ProviderOutputV2(ProviderOutput):
+    result_source: ResultSource
+
+
+class ProviderTaskSnapshotV3(Contract):
+    task_id: ProviderId
+    request_id: ProviderId | None = None
+    status: Literal["queued", "running", "succeeded", "failed"]
+    output: ProviderOutputV2 | None = None
+    error: JobErrorV2 | None = None
+
+    @model_validator(mode="after")
+    def terminal_payload(self):
+        if (self.status == "succeeded") != (self.output is not None):
+            raise ValueError("Only provider success contains private output")
+        if self.output is not None and (
+            self.output.task_id != self.task_id or self.output.result_source.task_id != self.task_id
+        ):
+            raise ValueError("Output must identify the original task")
+        if (self.status == "failed") != (self.error is not None):
+            raise ValueError("Confirmed failure requires a generation error")
+        if self.error is not None and self.error.stage != "generate":
+            raise ValueError("Query failures cannot change generation state")
+        return self
+
+    @property
+    def provider_status(self) -> str:
+        if self.error and self.error.code == "PROVIDER_CANCELED":
+            return "CANCELED"
+        return {"queued": "PENDING", "running": "RUNNING", "succeeded": "SUCCEEDED", "failed": "FAILED"}[
+            self.status
+        ]
+
+
+class ProviderTaskHandleV3(Contract):
+    task_id: ProviderId
+    request_id: ProviderId | None = None
+    snapshot: ProviderTaskSnapshotV3 | None = None
+
+    @model_validator(mode="after")
+    def same_task(self):
+        if self.snapshot is not None and self.snapshot.task_id != self.task_id:
+            raise ValueError("Handle and snapshot must identify the same task")
+        return self
+
+
+class ProviderActualCost(Contract):
+    """No bill evidence in this stage: an actual cost is always unknown."""
+
+    status: Literal["unknown"] = "unknown"
+    currency: Currency
+    amount: None = None
+    source: None = None
+
+
+class AmountLimit(Contract):
+    """One provider/currency budget bucket; USD never pools across providers."""
+
+    provider: LiveProvider
+    currency: Currency
+    max_job_amount: Money
+    max_run_amount: Money
+    used_amount: Money
+    remaining_amount: Money
+    max_job_units: int | None = Field(default=None, ge=0)
+    max_run_units: int | None = Field(default=None, ge=0)
+    used_units: int | None = Field(default=None, ge=0)
+    remaining_units: int | None = Field(default=None, ge=0)
+
+    @model_validator(mode="after")
+    def coherent_bucket(self):
+        if Decimal(self.used_amount) > Decimal(self.max_run_amount):
+            raise ValueError("A bucket cannot use more than its Run ceiling")
+        if Decimal(self.remaining_amount) != Decimal(self.max_run_amount) - Decimal(self.used_amount):
+            raise ValueError("Remaining budget is the ceiling minus recorded usage")
+        units = (self.max_job_units, self.max_run_units, self.used_units, self.remaining_units)
+        if any(value is None for value in units) and any(value is not None for value in units):
+            raise ValueError("A bucket either tracks units or does not")
+        if self.max_run_units is not None:
+            if self.max_job_units > self.max_run_units:
+                raise ValueError("The per-Job unit ceiling cannot exceed the Run ceiling")
+            if self.used_units > self.max_run_units:
+                raise ValueError("A bucket cannot use more units than its Run ceiling")
+            if self.remaining_units != self.max_run_units - self.used_units:
+                raise ValueError("Remaining units are the ceiling minus recorded usage")
+        return self
+
+
+class RunLimitsSnapshotV2(Contract):
+    """Registration-time snapshot of every provider/currency bucket of one Run."""
+
+    max_new_jobs_per_run: int = Field(ge=1, le=LIVE_JOBS_PER_RUN)
+    used_new_jobs: int = Field(ge=0, le=LIVE_JOBS_PER_RUN)
+    buckets: JsonTuple[AmountLimit] = Field(min_length=1, max_length=8)
+
+    @model_validator(mode="after")
+    def consistent_usage(self):
+        if self.used_new_jobs > self.max_new_jobs_per_run:
+            raise ValueError("Recorded usage cannot exceed the frozen Job ceiling")
+        keys = [(bucket.provider, bucket.currency) for bucket in self.buckets]
+        if len(set(keys)) != len(keys):
+            raise ValueError("Each provider/currency bucket appears once")
+        return self
+
+
+class JobCostV6(Contract):
+    estimate: ProviderPrice
+    max_job_amount: Money
+    resource_estimate: ResourceEstimate | None = None
+    limits: RunLimitsSnapshotV2
+    provider_usage: ProviderUsage | None = None
+    actual: ProviderActualCost
+
+    @model_validator(mode="after")
+    def affordable_quote(self):
+        if Decimal(self.estimate.amount) > Decimal(self.max_job_amount):
+            raise ValueError("A Job quote cannot exceed its per-Job ceiling")
+        if self.actual.currency != self.estimate.currency:
+            raise ValueError("Actual and estimated costs share one currency")
+        return self
+
+
+class JobV6(JobV2):
+    """One multi-provider live Job with per-provider/currency budget buckets."""
+
+    contract_version: int = Field(default=6, ge=6, le=6)
+    request: VideoRequestV6
+    capabilities: VideoCapabilitiesV4
+    shot_ref: ShotRef | None = None
+    cost: JobCostV6
+    provider_output: ProviderOutputV2 | None = None
+    result: JobResultV3 | None = None
+    result_source: ResultSource | None = None
+
+    @model_validator(mode="after")
+    def coherent_state(self):
+        if self.operation_key != self.context.operation_key:
+            raise ValueError("Job operation key must match its server execution context")
+        if (
+            self.request_fingerprint != self.request.fingerprint()
+            or self.intent_fingerprint != self.request.intent_fingerprint()
+        ):
+            raise ValueError("Job fingerprints must match the complete frozen request and intent")
+        expected = _PROVIDER_PROFILES[self.request.provider]
+        if (
+            self.request.provider,
+            self.request.model,
+            self.request.capabilities_version,
+            self.request.region,
+            self.request.endpoint_profile,
+            self.request.adapter_version,
+            self.request.price_version,
+            self.request.source_policy_version,
+        ) != (
+            self.capabilities.provider,
+            self.capabilities.model,
+            self.capabilities.capabilities_version,
+            self.capabilities.region,
+            self.capabilities.endpoint_profile,
+            self.capabilities.adapter_version,
+            self.capabilities.price_version,
+            self.capabilities.source_policy_version,
+        ) or expected != (
+            self.request.model,
+            self.request.region,
+            self.request.endpoint_profile,
+            self.request.adapter_version,
+            self.request.price_version,
+            self.request.source_policy_version,
+        ):
+            raise ValueError("Frozen request does not match its capability snapshot")
+        if (
+            self.request.spec not in self.capabilities.specs
+            or self.request.spec.mode not in self.capabilities.shot_modes
+        ):
+            raise ValueError("Frozen shot specification is not a verified combination")
+        estimate = provider_price(self.capabilities.rate, self.request.spec.duration_seconds)
+        if self.cost.estimate != estimate:
+            raise ValueError("Job must retain the frozen quote of its original shot")
+        if self.capabilities.resource is None:
+            if self.cost.resource_estimate is not None:
+                raise ValueError("A silent provider has no resource estimate")
+        elif self.cost.resource_estimate != resource_estimate(
+            self.capabilities.resource, self.request.spec.duration_seconds
+        ):
+            raise ValueError("Job must retain the frozen resource estimate of its shot")
+        bucket = next(
+            (
+                item
+                for item in self.cost.limits.buckets
+                if item.provider == self.request.provider and item.currency == estimate.currency
+            ),
+            None,
+        )
+        if bucket is None or bucket.max_job_amount != self.cost.max_job_amount:
+            raise ValueError("The Job must retain its provider/currency budget bucket")
+        if self.result_source is not None:
+            if (
+                self.provider_output is None
+                or self.provider_task_id != self.result_source.task_id
+                or self.result_source.source_policy_version != self.capabilities.source_policy_version
+                or self.provider_output.result_source != self.result_source
+            ):
+                raise ValueError("A result source must bind the confirmed authenticated task")
+        elif self.provider_output is not None:
+            raise ValueError("A private output always carries its bound result source")
+        _coherent_live_state(self)
+        return self
+
+
 # Every live contract version shares one lifecycle; only the frozen request differs.
-LiveJob = (JobV2, JobV3, JobV4, JobV5)
+LiveJob = (JobV2, JobV3, JobV4, JobV5, JobV6)
 
-JobDispatch = {1: Job, 2: JobV2, 3: JobV3, 4: JobV4, 5: JobV5}
+LiveJobModel = JobV2 | JobV3 | JobV4 | JobV5 | JobV6
+
+JobDispatch = {1: Job, 2: JobV2, 3: JobV3, 4: JobV4, 5: JobV5, 6: JobV6}
 
 
-def parse_job(value) -> Job | JobV2 | JobV3 | JobV4 | JobV5:
+def parse_job(value) -> LiveJobModel | Job:
     if isinstance(value, Job):
         value = value.model_dump(mode="json", by_alias=True)
     if not isinstance(value, dict):
@@ -1407,7 +2053,7 @@ def parse_job(value) -> Job | JobV2 | JobV3 | JobV4 | JobV5:
     return JobDispatch[version].model_validate(value)
 
 
-StoredJob = Annotated[Job | JobV2 | JobV3 | JobV4 | JobV5, BeforeValidator(parse_job)]
+StoredJob = Annotated[Job | JobV2 | JobV3 | JobV4 | JobV5 | JobV6, BeforeValidator(parse_job)]
 
 
 _LIVE_JOB_TRANSITIONS = {

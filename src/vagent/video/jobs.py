@@ -13,6 +13,12 @@ from pydantic import ValidationError
 from vagent.errors import AppError, failure
 from vagent.video.assets import AssetService, verified_reference_data
 from vagent.video.contracts import (
+    FAL_MAX_JOB_USD,
+    FAL_MAX_RUN_USD,
+    KLING_MAX_JOB_UNITS,
+    KLING_MAX_JOB_USD,
+    KLING_MAX_RUN_UNITS,
+    KLING_MAX_RUN_USD,
     LIVE_JOBS_PER_RUN,
     MODE_FRAMES,
     WAN_ADAPTER_VERSION,
@@ -21,29 +27,39 @@ from vagent.video.contracts import (
     WAN_MODEL,
     WAN_PROMPT_PREFIX,
     WAN_SHARED_ENDPOINT_PROFILE,
+    AmountLimit,
     CostEstimate,
     CostRecord,
     CostRecordV3,
     DownloadPolicy,
+    FalParameters,
     ImageSize,
     Job,
+    JobCostV6,
     JobError,
     JobErrorV2,
     JobV2,
     JobV3,
     JobV4,
     JobV5,
+    JobV6,
+    KlingParameters,
     LiveJob,
     MediaAsset,
     PollingPolicy,
+    ProviderActualCost,
+    ProviderPrice,
     RunLimitsSnapshot,
+    RunLimitsSnapshotV2,
     ShotGenerationArgs,
     ShotMediaInput,
     ShotRedoArgs,
     ShotRef,
     ShotSpecV3,
     VideoCapabilities,
+    VideoCapabilitiesV4,
     VideoIntentV2,
+    VideoIntentV6,
     VideoPrice,
     VideoProviderAdapter,
     VideoRequest,
@@ -51,12 +67,15 @@ from vagent.video.contracts import (
     VideoRequestV3,
     VideoRequestV4,
     VideoRequestV5,
+    VideoRequestV6,
     WanParameters,
     WanParametersV3,
     job_transition_allowed,
     live_job_transition_allowed,
     live_polling_policy,
     parse_job,
+    provider_price,
+    resource_estimate,
     shot_price,
     validate_video_request,
     wan_price,
@@ -314,6 +333,7 @@ def validate_job_changes(previous: dict[str, dict], state: dict) -> None:
                 job.intent_fingerprint != old.intent_fingerprint
                 or job.cost.estimate != old.cost.estimate
                 or job.download_policy != old.download_policy
+                or (isinstance(job, JobV6) and getattr(old, "shot_ref", None) != job.shot_ref)
                 or (
                     old.submission_started_at is not None
                     and (
@@ -326,6 +346,11 @@ def validate_job_changes(previous: dict[str, dict], state: dict) -> None:
                     and job.provider_submission_request_id != old.provider_submission_request_id
                 )
                 or (old.provider_output is not None and job.provider_output != old.provider_output)
+                or (
+                    isinstance(job, JobV6)
+                    and old.result_source is not None
+                    and job.result_source != old.result_source
+                )
                 or (old.result is not None and job.result != old.result)
             ):
                 raise AppError("JOB_IMMUTABLE", "真实任务的请求、报价、提交身份和已交付结果不可修改。")
@@ -409,8 +434,9 @@ def validate_media_changes(previous: dict[str, dict], state: dict) -> None:
             raise AppError("MEDIA_CONFLICT", "媒体索引必须与完整交付结果及原任务一起提交。")
         seen_jobs.add(asset.job_id)
     for raw in state["jobs"].values():
-        # Both single-shot live contract versions carry the frozen media-commit duty.
-        single_shot = raw.get("contractVersion", 1) in {2, 4}
+        # Both single-shot live contract versions carry the frozen media-commit duty;
+        # the generic v6 contract keeps it for every delivered clip.
+        single_shot = raw.get("contractVersion", 1) in {2, 4, 6}
         if single_shot and raw["status"] == "succeeded" and raw["id"] not in seen_jobs:
             raise AppError("MEDIA_NOT_COMMITTED", "完整媒体索引提交前不能将真实任务标记为成功。")
 
@@ -487,19 +513,36 @@ class JobService:
             None,
         )
 
-    def check_live_configuration(self) -> None:
+    def provider_key(self, provider: str = "wan") -> str | None:
+        """The saved Key of one provider; providers never share credentials."""
+        if self.config is None:
+            return None
+        return {
+            "wan": self.config.video_api_key,
+            "kling": getattr(self.config, "kling_api_key", None),
+            "fal": getattr(self.config, "fal_api_key", None),
+        }.get(provider)
+
+    def check_live_configuration(self, provider: str = "wan") -> None:
         # K1 keys-only track: the video Key alone is a complete live configuration;
         # a workspace stays optional and selects the dedicated endpoint at registration.
-        if self.config is None or not self.config.video_api_key:
-            raise AppError("VIDEO_KEY_MISSING", "请配置视频服务 Key，文本模型 Key 不能代替视频 Key。")
+        if self.config is None or not self.provider_key(provider):
+            if provider == "wan":
+                raise AppError("VIDEO_KEY_MISSING", "请配置视频服务 Key，文本模型 Key 不能代替视频 Key。")
+            raise AppError("VIDEO_KEY_MISSING", f"请配置 {provider} 视频服务 Key。")
 
-    def configuration_status(self) -> dict:
+    def configuration_status(self, provider: str = "wan") -> dict:
         try:
-            self.check_live_configuration()
-            if self.price is None:
-                raise AppError("VIDEO_PRICE_UNKNOWN", "缺少已核实的视频价格，未创建或提交任务。")
-            if Decimal(self.price.amount) > Decimal(self.config.video_max_job_cost):
-                raise AppError("VIDEO_COST_LIMIT", "视频估算超过单 Job 金额上限，未创建或提交任务。")
+            self.check_live_configuration(provider)
+            if provider == "wan":
+                if self.price is None:
+                    raise AppError("VIDEO_PRICE_UNKNOWN", "缺少已核实的视频价格，未创建或提交任务。")
+                if Decimal(self.price.amount) > Decimal(self.config.video_max_job_cost):
+                    raise AppError("VIDEO_COST_LIMIT", "视频估算超过单 Job 金额上限，未创建或提交任务。")
+            elif self._capability_for_provider(provider) is None:
+                raise AppError("VIDEO_MODEL_UNAVAILABLE", "缺少这个供应商的能力表，未创建任务。")
+            # Kling and fal publish no verified zero-cost auth probe; saved keys stay
+            # explicitly unverified instead of running a random paid task.
             return {"configured": True, "permissionStatus": "unverified", "error": None}
         except AppError as error:
             return {
@@ -507,6 +550,18 @@ class JobService:
                 "permissionStatus": "unverified",
                 "error": {"code": error.code, "message": str(error)},
             }
+
+    def provider_statuses(self) -> list[dict]:
+        return [
+            {"provider": provider, **self.configuration_status(provider)}
+            for provider in ("wan", "kling", "fal")
+        ]
+
+    def _capability_for_provider(self, provider: str):
+        return next(
+            (capabilities for capabilities in self.capabilities("live") if capabilities.provider == provider),
+            None,
+        )
 
     def default_adapter(self, provider: str, model: str) -> VideoProviderAdapter:
         """The adapter serving one provider/model pair, whatever its entry version."""
@@ -530,6 +585,17 @@ class JobService:
 
     def check_runtime(self, job: Job, *, submit=False) -> VideoProviderAdapter:
         adapter = self.adapter_for(job)
+        if isinstance(job, JobV6):
+            self.check_live_configuration(job.request.provider)
+            if hasattr(adapter, "check_configuration"):
+                adapter.check_configuration(job.request)
+            if submit:
+                # The v6 quote and ceiling are frozen at registration; a changed
+                # capability entry surfaces as a missing adapter/price instead.
+                expected = provider_price(job.capabilities.rate, job.request.spec.duration_seconds)
+                if expected != job.cost.estimate:
+                    raise AppError("VIDEO_PRICE_CHANGED", "视频价格版本已变化，保留原报价并暂停提交。")
+            return adapter
         if isinstance(job, LiveJob):
             self.check_live_configuration()
             models = (WAN_MODEL, WAN_I2V_MODEL) if isinstance(job, JobV3) else (self.config.video_model,)
@@ -637,7 +703,7 @@ class JobService:
             except AppError as error:
                 return failure(error.code, str(error))
             return previous
-        live = args.get("provider") == "wan"
+        live = args.get("provider") in {"wan", "kling", "fal"}
         try:
             if live:
                 if (
@@ -653,7 +719,7 @@ class JobService:
                     )
                 ):
                     raise ValueError("Only public camelCase arguments are accepted")
-            parsed = (VideoIntentV2 if live else VideoRequest).model_validate(args)
+            parsed = (VideoIntentV6 if live else VideoRequest).model_validate(args)
         except (ValidationError, ValueError, TypeError):
             return failure("INVALID_ARGUMENTS", "视频请求不符合 Schema，未创建任务。")
 
@@ -668,7 +734,7 @@ class JobService:
             if existing is not None:
                 same = (
                     existing.intent_fingerprint == parsed.intent_fingerprint()
-                    if isinstance(existing, JobV2) and isinstance(parsed, VideoIntentV2)
+                    if isinstance(existing, JobV2) and isinstance(parsed, (VideoIntentV2, VideoIntentV6))
                     else not isinstance(existing, JobV2)
                     and existing.request_fingerprint == parsed.fingerprint()
                 )
@@ -683,49 +749,84 @@ class JobService:
             mode = draft["runs"][context.run_id].get("videoMode")
             if capabilities.mode != mode and not (mode is None and capabilities.mode == "mock"):
                 raise AppError("VIDEO_MODEL_UNAVAILABLE", "原 Run 的视频模式不开放所选模型。")
-            validate_video_request(
-                parsed, capabilities, project_id=context.project_id, artifacts=draft["artifacts"]
-            )
+            if isinstance(capabilities, VideoCapabilitiesV4):
+                if (
+                    parsed.provider,
+                    parsed.model,
+                    parsed.capabilities_version,
+                ) != (
+                    capabilities.provider,
+                    capabilities.model,
+                    capabilities.capabilities_version,
+                ):
+                    raise AppError("VIDEO_CAPABILITIES_CHANGED", "视频能力版本已变化，请重新读取能力表。")
+                for reference in parsed.source_refs:
+                    source = draft["artifacts"].get(reference.artifact_id)
+                    if source is None or source["projectId"] != context.project_id:
+                        raise AppError("SOURCE_NOT_FOUND", "当前项目中没有所引用的源产物。")
+                    if not any(item["version"] == reference.version for item in source["versions"]):
+                        raise AppError("SOURCE_VERSION_NOT_FOUND", "源产物版本不存在，未创建任务。")
+            else:
+                validate_video_request(
+                    parsed, capabilities, project_id=context.project_id, artifacts=draft["artifacts"]
+                )
             timestamp = self.timestamp()
             extra = {}
             frozen = parsed
+            job_class = Job
             if live:
-                self.check_live_configuration()
-                if len(parsed.prompt) > 4991:
-                    raise AppError("VIDEO_PROMPT_TOO_LONG", "视频提示词正文最多 4991 个字符，未创建任务。")
-                if self.price is None or self.price != capabilities.price:
-                    raise AppError("VIDEO_PRICE_UNKNOWN", "缺少与当前视频能力匹配的已核实价格，未创建任务。")
-                if Decimal(self.price.amount) > Decimal(self.config.video_max_job_cost):
-                    raise AppError("VIDEO_COST_LIMIT", "视频估算超过单 Job 金额上限，未创建任务。")
-                if self.config.video_workspace_id:
-                    frozen = VideoRequestV2(
-                        **parsed.model_dump(mode="json", by_alias=True),
-                        region=self.config.video_region,
-                        workspace_id=self.config.video_workspace_id,
-                        adapter_version=WAN_ADAPTER_VERSION,
-                        endpoint_profile=WAN_ENDPOINT_PROFILE,
-                        provider_prompt=WAN_PROMPT_PREFIX + parsed.prompt,
-                        parameters=WanParameters(),
-                    )
+                self.check_live_configuration(parsed.provider)
+                if isinstance(capabilities, VideoCapabilitiesV4):
+                    if len(parsed.prompt) > capabilities.max_prompt_characters:
+                        raise AppError("VIDEO_PROMPT_TOO_LONG", "视频提示词正文超过供应商上限，未创建任务。")
+                    frozen = self._freeze_provider_request(parsed, capabilities)
+                    limits = self._single_limits(draft, context, capabilities, frozen)
+                    job_class = JobV6
+                    extra = {
+                        "intent_fingerprint": frozen.intent_fingerprint(),
+                        "download_policy": self.download_policy,
+                        "cost": self._job_cost_v6(capabilities, frozen, limits),
+                    }
                 else:
-                    frozen = VideoRequestV4(
-                        **parsed.model_dump(mode="json", by_alias=True),
-                        region=self.config.video_region,
-                        adapter_version=WAN_ADAPTER_VERSION,
-                        endpoint_profile=WAN_SHARED_ENDPOINT_PROFILE,
-                        provider_prompt=WAN_PROMPT_PREFIX + parsed.prompt,
-                        parameters=WanParameters(),
-                    )
-                extra = {
-                    "intent_fingerprint": frozen.intent_fingerprint(),
-                    "download_policy": self.download_policy,
-                    "cost": CostRecord(
-                        estimate=CostEstimate(
-                            **self.price.model_dump(), max_job_cost=self.config.video_max_job_cost
+                    if len(parsed.prompt) > 4991:
+                        raise AppError(
+                            "VIDEO_PROMPT_TOO_LONG", "视频提示词正文最多 4991 个字符，未创建任务。"
                         )
-                    ),
-                }
-            job_class = (JobV4 if isinstance(frozen, VideoRequestV4) else JobV2) if live else Job
+                    if self.price is None or self.price != capabilities.price:
+                        raise AppError(
+                            "VIDEO_PRICE_UNKNOWN", "缺少与当前视频能力匹配的已核实价格，未创建任务。"
+                        )
+                    if Decimal(self.price.amount) > Decimal(self.config.video_max_job_cost):
+                        raise AppError("VIDEO_COST_LIMIT", "视频估算超过单 Job 金额上限，未创建任务。")
+                    if self.config.video_workspace_id:
+                        frozen = VideoRequestV2(
+                            **parsed.model_dump(mode="json", by_alias=True),
+                            region=self.config.video_region,
+                            workspace_id=self.config.video_workspace_id,
+                            adapter_version=WAN_ADAPTER_VERSION,
+                            endpoint_profile=WAN_ENDPOINT_PROFILE,
+                            provider_prompt=WAN_PROMPT_PREFIX + parsed.prompt,
+                            parameters=WanParameters(),
+                        )
+                    else:
+                        frozen = VideoRequestV4(
+                            **parsed.model_dump(mode="json", by_alias=True),
+                            region=self.config.video_region,
+                            adapter_version=WAN_ADAPTER_VERSION,
+                            endpoint_profile=WAN_SHARED_ENDPOINT_PROFILE,
+                            provider_prompt=WAN_PROMPT_PREFIX + parsed.prompt,
+                            parameters=WanParameters(),
+                        )
+                    extra = {
+                        "intent_fingerprint": frozen.intent_fingerprint(),
+                        "download_policy": self.download_policy,
+                        "cost": CostRecord(
+                            estimate=CostEstimate(
+                                **self.price.model_dump(), max_job_cost=self.config.video_max_job_cost
+                            )
+                        ),
+                    }
+                    job_class = JobV4 if isinstance(frozen, VideoRequestV4) else JobV2
             job = job_class(
                 id=str(uuid4()),
                 context=context,
@@ -783,8 +884,10 @@ class JobService:
             raise AppError("VIDEO_MODEL_UNAVAILABLE", "当前视频模式不开放镜头生成。")
         return mode
 
-    def _shot_estimate(self, capabilities, request) -> CostEstimate:
+    def _shot_estimate(self, capabilities, request) -> CostEstimate | ProviderPrice:
         """The frozen quote of one shot: the verified rate times its own duration."""
+        if isinstance(capabilities, VideoCapabilitiesV4):
+            return provider_price(capabilities.rate, request.spec.duration_seconds)
         return CostEstimate(
             **shot_price(capabilities.price, request.spec.duration_seconds).model_dump(),
             max_job_cost=self.config.video_max_job_cost,
@@ -804,7 +907,7 @@ class JobService:
         mode = self.generation_mode()
         live = mode == "live"
         if live:
-            self.check_live_configuration()
+            self.check_live_configuration(self.config.video_provider)
         record = storyboard_in_state(state, project_id, parsed.storyboard_id)
         version = parsed.storyboard_version
         if record.current_version != version:
@@ -833,6 +936,7 @@ class JobService:
             )
         limits = self._batch_limits(state, _preview_context(project_id), plan) if live else None
         total = sum((Decimal(row["estimate"]["amount"]) for row in rows if row["estimate"]), Decimal(0))
+        currency = next((row["estimate"]["currency"] for row in rows if row["estimate"]), "CNY")
         return {
             "storyboardId": record.id,
             "storyboardVersion": version,
@@ -840,7 +944,7 @@ class JobService:
             "mode": mode,
             "simulated": not live,
             "shots": rows,
-            "totalEstimate": {"currency": "CNY", "amount": money(total)} if live else None,
+            "totalEstimate": {"currency": currency, "amount": money(total)} if live else None,
             "limits": limits.model_dump(mode="json", by_alias=True) if limits else None,
         }
 
@@ -895,7 +999,7 @@ class JobService:
             order = list(parsed.shot_ids)
         live = mode == "live"
         if live:
-            self.check_live_configuration()
+            self.check_live_configuration(self.config.video_provider)
         plan, reused = [], {}
         for shot_id in order:
             shot = shot_of(record, version, shot_id)
@@ -911,8 +1015,11 @@ class JobService:
     def _shot_capability(self, mode: str, *, live: bool):
         """The published entry that verifies this shot mode for the Run's provider."""
         expected = "live" if live else "mock"
+        provider = self.config.video_provider if live else None
         for capabilities in self.capabilities():
             if capabilities.mode != expected:
+                continue
+            if provider is not None and capabilities.provider != provider:
                 continue
             if mode in tuple(getattr(capabilities, "shot_modes", None) or ("t2v",)):
                 return capabilities
@@ -924,6 +1031,33 @@ class JobService:
         if not prompt:
             raise AppError("SHOT_DESCRIPTION_EMPTY", "镜头描述为空，未创建任务。")
         capabilities = self._shot_capability(shot.mode, live=live)
+        if live and isinstance(capabilities, VideoCapabilitiesV4):
+            # The multi-provider table publishes only text-to-video 5 s / 720p / 16:9.
+            if shot.mode != "t2v":
+                raise AppError("VIDEO_UNSUPPORTED_MODE", "当前供应商只开放文生视频，未创建任务。")
+            spec = ShotSpecV3(mode="t2v", duration_seconds=shot.duration_seconds, aspect_ratio="16:9")
+            if spec not in capabilities.specs:
+                raise AppError(
+                    "VIDEO_UNSUPPORTED_SPEC", "镜头的时长不在已核实的供应商规格组合中，未创建任务。"
+                )
+            if len(prompt) > capabilities.max_prompt_characters:
+                raise AppError("VIDEO_PROMPT_TOO_LONG", "镜头描述超过供应商提示词上限，未创建任务。")
+            request = VideoRequestV6(
+                provider=capabilities.provider,
+                model=capabilities.model,
+                region=capabilities.region,
+                endpoint_profile=capabilities.endpoint_profile,
+                adapter_version=capabilities.adapter_version,
+                capabilities_version=capabilities.capabilities_version,
+                price_version=capabilities.price_version,
+                source_policy_version=capabilities.source_policy_version,
+                prompt=prompt,
+                spec=spec,
+                source_refs=record.source_refs,
+                provider_prompt=prompt,
+                parameters=KlingParameters() if capabilities.provider == "kling" else FalParameters(),
+            )
+            return capabilities, request
         if live:
             spec = ShotSpecV3(
                 mode=shot.mode,
@@ -1000,8 +1134,161 @@ class JobService:
             )
         return tuple(media)
 
+    def _provider_ceiling(self, provider: str):
+        """The effective per-provider ceilings: stored values may only tighten."""
+        config = self.config
+        if provider == "kling":
+            return (
+                min(Decimal(config.kling_max_job_cost), Decimal(KLING_MAX_JOB_USD)),
+                min(Decimal(config.kling_max_run_cost), Decimal(KLING_MAX_RUN_USD)),
+                min(int(config.kling_max_job_units), KLING_MAX_JOB_UNITS),
+                min(int(config.kling_max_run_units), KLING_MAX_RUN_UNITS),
+            )
+        if provider == "fal":
+            return (
+                min(Decimal(config.fal_max_job_cost), Decimal(FAL_MAX_JOB_USD)),
+                min(Decimal(config.fal_max_run_cost), Decimal(FAL_MAX_RUN_USD)),
+                None,
+                None,
+            )
+        return (
+            Decimal(config.video_max_job_cost),
+            Decimal(config.video_max_run_cost),
+            None,
+            None,
+        )
+
+    def _freeze_provider_request(
+        self, parsed: "VideoIntentV2 | VideoIntentV6", capabilities: VideoCapabilitiesV4
+    ):
+        """Freeze one public intent into the generic v6 provider request."""
+        if parsed.spec.resolution != "720p" or parsed.spec.aspect_ratio != "16:9":
+            raise AppError("VIDEO_UNSUPPORTED_SPEC", "当前供应商只开放 720p / 16:9，未创建任务。")
+        spec = ShotSpecV3(mode="t2v", duration_seconds=parsed.spec.duration_seconds, aspect_ratio="16:9")
+        if spec not in capabilities.specs:
+            raise AppError("VIDEO_UNSUPPORTED_SPEC", "镜头的时长不在已核实的供应商规格组合中，未创建任务。")
+        return VideoRequestV6(
+            provider=capabilities.provider,
+            model=capabilities.model,
+            region=capabilities.region,
+            endpoint_profile=capabilities.endpoint_profile,
+            adapter_version=capabilities.adapter_version,
+            capabilities_version=capabilities.capabilities_version,
+            price_version=capabilities.price_version,
+            source_policy_version=capabilities.source_policy_version,
+            prompt=parsed.prompt,
+            spec=spec,
+            source_refs=parsed.source_refs,
+            provider_prompt=parsed.prompt,
+            parameters=KlingParameters() if capabilities.provider == "kling" else FalParameters(),
+        )
+
+    def _single_limits(self, draft, context, capabilities, request):
+        return self._v6_limits(draft, context, capabilities, [request])
+
+    def _v6_limits(self, draft, context, capabilities, requests):
+        """Enforce every provider/currency bucket and the shared Job ceiling."""
+        owned = [
+            parse_job(raw)
+            for raw in draft["jobs"].values()
+            if raw["context"]["runId"] == context.run_id and raw.get("mode") == "live"
+        ]
+        used_jobs = len(owned)
+        ceiling_jobs = min(int(self.config.video_max_new_jobs_per_run), LIVE_JOBS_PER_RUN)
+        amounts = {("wan", "CNY"): Decimal(0), ("kling", "USD"): Decimal(0), ("fal", "USD"): Decimal(0)}
+        units = {"kling": 0}
+        for job in owned:
+            if isinstance(job, JobV6):
+                key = (job.request.provider, job.cost.estimate.currency)
+                amounts[key] = amounts.get(key, Decimal(0)) + Decimal(job.cost.estimate.amount)
+                if job.cost.resource_estimate is not None:
+                    units[job.request.provider] = (
+                        units.get(job.request.provider, 0) + job.cost.resource_estimate.units
+                    )
+            elif isinstance(job, LiveJob):
+                amounts[("wan", "CNY")] += Decimal(job.cost.estimate.amount)
+        provider = capabilities.provider
+        job_amount, run_amount, job_units, run_units = self._provider_ceiling(provider)
+        estimates = [provider_price(capabilities.rate, request.spec.duration_seconds) for request in requests]
+        new_amount = sum((Decimal(item.amount) for item in estimates), Decimal(0))
+        unit_estimates = []
+        if capabilities.resource is not None:
+            unit_estimates = [
+                resource_estimate(capabilities.resource, request.spec.duration_seconds).units
+                for request in requests
+            ]
+        new_units = sum(unit_estimates)
+        for item in estimates:
+            if Decimal(item.amount) > job_amount:
+                raise AppError("VIDEO_COST_LIMIT", "有镜头的估算超过单 Job 金额上限，整批未登记。")
+        for per_job_units in unit_estimates:
+            if job_units is not None and per_job_units > job_units:
+                raise AppError("VIDEO_COST_LIMIT", "有镜头的资源单位超过单 Job 上限，整批未登记。")
+        if used_jobs + len(requests) > ceiling_jobs:
+            raise AppError(
+                "VIDEO_RUN_JOB_LIMIT",
+                f"本次 Run 最多新建 {ceiling_jobs} 个真实视频任务，整批未登记。",
+            )
+        key = (provider, estimates[0].currency)
+        total = amounts.get(key, Decimal(0)) + new_amount
+        if total > run_amount:
+            raise AppError("VIDEO_RUN_COST_LIMIT", "本次 Run 的累计估算超过金额上限，整批未登记。")
+        total_units = units.get(provider, 0) + new_units
+        if run_units is not None and total_units > run_units:
+            raise AppError("VIDEO_RUN_UNIT_LIMIT", "本次 Run 的累计资源单位超过上限，整批未登记。")
+        buckets = []
+        for name in ("wan", "kling", "fal"):
+            amount_key = (name, "CNY" if name == "wan" else "USD")
+            bucket_amount, bucket_run, bucket_job_units, bucket_run_units = self._provider_ceiling(name)
+            used = amounts.get(amount_key, Decimal(0)) + (new_amount if name == provider else Decimal(0))
+            used_units = (
+                units.get(name, 0) + (new_units if name == provider else 0)
+                if bucket_job_units is not None
+                else None
+            )
+            buckets.append(
+                AmountLimit(
+                    provider=name,
+                    currency=amount_key[1],
+                    max_job_amount=money(bucket_amount),
+                    max_run_amount=money(bucket_run),
+                    used_amount=money(used),
+                    remaining_amount=money(bucket_run - used),
+                    max_job_units=bucket_job_units,
+                    max_run_units=bucket_run_units,
+                    used_units=used_units,
+                    remaining_units=None if used_units is None else bucket_run_units - used_units,
+                )
+            )
+        return RunLimitsSnapshotV2(
+            max_new_jobs_per_run=ceiling_jobs,
+            used_new_jobs=used_jobs + len(requests),
+            buckets=tuple(buckets),
+        )
+
+    def _job_cost_v6(self, capabilities, request, limits) -> JobCostV6:
+        estimate = provider_price(capabilities.rate, request.spec.duration_seconds)
+        bucket = next(
+            item
+            for item in limits.buckets
+            if item.provider == capabilities.provider and item.currency == estimate.currency
+        )
+        return JobCostV6(
+            estimate=estimate,
+            max_job_amount=bucket.max_job_amount,
+            resource_estimate=(
+                resource_estimate(capabilities.resource, request.spec.duration_seconds)
+                if capabilities.resource is not None
+                else None
+            ),
+            limits=limits,
+            actual=ProviderActualCost(currency=estimate.currency),
+        )
+
     def _batch_limits(self, draft, context, plan):
-        """Enforce the three frozen ceilings before anything is registered."""
+        """Enforce the frozen ceilings before anything is registered."""
+        if plan and isinstance(plan[0][1], VideoCapabilitiesV4):
+            return self._v6_limits(draft, context, plan[0][1], [request for _, _, request in plan])
         owned = [
             parse_job(raw)
             for raw in draft["jobs"].values()
@@ -1043,25 +1330,42 @@ class JobService:
             estimate = None
             if live:
                 estimate = self._shot_estimate(capabilities, request)
-                job = (JobV5 if isinstance(request, VideoRequestV5) else JobV3)(
-                    id=job_id,
-                    context=context,
-                    operation_key=context.operation_key,
-                    request=request,
-                    request_fingerprint=request.fingerprint(),
-                    intent_fingerprint=request.intent_fingerprint(),
-                    capabilities=capabilities,
-                    policy=live_polling_policy(),
-                    created_at=timestamp,
-                    updated_at=timestamp,
-                    shot_ref=ShotRef(
-                        storyboard_id=record.id,
-                        storyboard_version=version,
-                        shot_id=shot.id,
-                        shot_version_id=shot_version_id,
-                    ),
-                    cost=CostRecordV3(estimate=estimate, limits=limits),
+                shot_ref = ShotRef(
+                    storyboard_id=record.id,
+                    storyboard_version=version,
+                    shot_id=shot.id,
+                    shot_version_id=shot_version_id,
                 )
+                if isinstance(request, VideoRequestV6):
+                    job = JobV6(
+                        id=job_id,
+                        context=context,
+                        operation_key=context.operation_key,
+                        request=request,
+                        request_fingerprint=request.fingerprint(),
+                        intent_fingerprint=request.intent_fingerprint(),
+                        capabilities=capabilities,
+                        policy=live_polling_policy(),
+                        created_at=timestamp,
+                        updated_at=timestamp,
+                        shot_ref=shot_ref,
+                        cost=self._job_cost_v6(capabilities, request, limits),
+                    )
+                else:
+                    job = (JobV5 if isinstance(request, VideoRequestV5) else JobV3)(
+                        id=job_id,
+                        context=context,
+                        operation_key=context.operation_key,
+                        request=request,
+                        request_fingerprint=request.fingerprint(),
+                        intent_fingerprint=request.intent_fingerprint(),
+                        capabilities=capabilities,
+                        policy=live_polling_policy(),
+                        created_at=timestamp,
+                        updated_at=timestamp,
+                        shot_ref=shot_ref,
+                        cost=CostRecordV3(estimate=estimate, limits=limits),
+                    )
             else:
                 job = Job(
                     id=job_id,
@@ -1120,13 +1424,14 @@ class JobService:
                 }
             shots.append({**entry, "mode": shot.mode, "durationSeconds": shot.duration_seconds})
         total = sum((Decimal(item["estimate"]["amount"]) for item in shots if item["estimate"]), Decimal(0))
+        currency = next((item["estimate"]["currency"] for item in shots if item["estimate"]), "CNY")
         return {
             "storyboardId": record.id,
             "storyboardVersion": version,
             "simulated": not live,
             "mediaAvailable": False,
             "shots": shots,
-            "totalEstimate": {"currency": "CNY", "amount": money(total)} if live else None,
+            "totalEstimate": {"currency": currency, "amount": money(total)} if live else None,
             "limits": limits.model_dump(mode="json", by_alias=True) if live else None,
         }
 
