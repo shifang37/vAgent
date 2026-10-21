@@ -56,6 +56,13 @@ class ShotRedoInput(BaseModel):
     expectedRevision: int = Field(ge=0)
 
 
+class FilmAssembleInput(BaseModel):
+    model_config = ConfigDict(extra="forbid", strict=True)
+    clientRequestId: str = Field(pattern=r"^[a-zA-Z0-9_-]{1,64}$")
+    storyboardId: Identifier
+    expectedRevision: int = Field(ge=0)
+
+
 def create_app(config, *, port=3210, model=None, policy=None):
     token = secrets.token_urlsafe(32)
     allowed_hosts = {f"127.0.0.1:{port}", f"localhost:{port}"}
@@ -287,6 +294,14 @@ def create_app(config, *, port=3210, model=None, policy=None):
     @app.post("/api/sessions/{session_id}/shots/{shot_id}/redo", status_code=202)
     async def shots_redo(session_id: str, shot_id: str, body: ShotRedoInput):
         return await file_io(app.state.service.redo_shot, session_id, shot_id, body.model_dump())
+
+    @app.get("/api/films/{storyboard_id}")
+    async def film_detail(storyboard_id: str, projectId: str):
+        return await file_io(app.state.service.film, projectId, storyboard_id)
+
+    @app.post("/api/sessions/{session_id}/films/assemble", status_code=202)
+    async def films_assemble(session_id: str, body: FilmAssembleInput):
+        return await app.state.service.assemble_film(session_id, body.model_dump())
 
     @app.get("/api/media/{media_id}")
     async def media(media_id: str):

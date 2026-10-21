@@ -20,6 +20,7 @@ from vagent.usage import summarize_usage
 from vagent.video import clients
 from vagent.video.assets import asset_reference_loader
 from vagent.video.contracts import ImageInputRule
+from vagent.video.film_service import FilmService
 from vagent.video.jobs import JobService
 from vagent.video.media import DownloadRetry
 from vagent.video.providers.mock import MockVideoAdapter
@@ -374,6 +375,55 @@ async def local_redo(config, store, args) -> int:
     return 0
 
 
+class LocalActionHost:
+    """The ApplicationService surface a local client action needs, without Workers."""
+
+    def __init__(self, store, films, config):
+        self.store, self.films, self.config = store, films, config
+
+    def generation_mode(self):
+        return self.config.video_mode
+
+    def capabilities(self, mode):
+        if mode not in {"mock", "live"}:
+            return []
+        try:
+            return self.films.jobs.capabilities(mode)
+        except AppError:
+            # A purely local film action records provenance without a provider.
+            return []
+
+
+async def local_film(config, store, args) -> int:
+    """Local film read/assembly; never starts a model, Worker or provider submission."""
+    assert_id(args.project)
+    service = FilmService(JobService(store, [MockVideoAdapter(store)], config=config))
+    storyboard_id = args.storyboard_id
+    if args.action == "show":
+        if storyboard_id is None:
+            view = current_storyboard_view(store.snapshot(), args.project)
+            if view is None:
+                raise AppError("NOT_FOUND", "当前项目还没有结构化分镜，请先保存。")
+            storyboard_id = view["storyboardId"]
+        assert_id(storyboard_id)
+        print_json(service.view(args.project, storyboard_id))
+        return 0
+    if not storyboard_id:
+        raise AppError("INVALID_ARGUMENTS", "缺少 --storyboard，未拼接成片。")
+    assert_id(storyboard_id)
+    if args.expected_revision < 0:
+        raise AppError("INVALID_ARGUMENTS", "--expected-revision 必须是不小于 0 的整数。")
+    result = await clients.assemble_film(
+        LocalActionHost(store, service, config),
+        session_id=args.project,
+        client_request_id=args.request_id or str(uuid4()),
+        storyboard_id=storyboard_id,
+        expected_revision=args.expected_revision,
+    )
+    print_json(result)
+    return 0
+
+
 def parser() -> argparse.ArgumentParser:
     root = argparse.ArgumentParser(prog="vagent", description="DeepSeek + LangGraph 视频创作 Agent 原型")
     root.add_argument("--version", action="version", version=__version__)
@@ -434,6 +484,18 @@ def parser() -> argparse.ArgumentParser:
     importer = asset_actions.add_parser("import", help="导入一张或多张本地图片，按哈希去重")
     importer.add_argument("paths", nargs="+")
     importer.add_argument("-s", "--project", default="default")
+    film = commands.add_parser("film", help="本地拼接成片：组装已交付镜头，不调用供应商、不产生费用")
+    film_actions = film.add_subparsers(dest="action", required=True)
+    film_assemble = film_actions.add_parser("assemble", help="按分镜顺序本地拼接当前版本的成片")
+    film_assemble.add_argument("-s", "--project", default="default")
+    film_assemble.add_argument("--storyboard", dest="storyboard_id", required=True)
+    film_assemble.add_argument(
+        "--expected-revision", dest="expected_revision", type=int, required=True, help="分镜的当前 revision"
+    )
+    film_assemble.add_argument("--request-id", dest="request_id", help="同一请求 ID 重放原结果，不重复拼接")
+    film_show = film_actions.add_parser("show", help="读取当前成片、历史版本与受控媒体地址")
+    film_show.add_argument("-s", "--project", default="default")
+    film_show.add_argument("--storyboard", dest="storyboard_id", help="指定分镜；省略时读取最新分镜")
     web = commands.add_parser("web", help="启动本地 Web 与真实 Agent 编排")
     web.add_argument("--port", type=int, default=3210)
     web.add_argument("--no-open", action="store_true")
@@ -494,6 +556,9 @@ def main() -> None:
         elif args.command == "assets":
             with FileStore.open(config.home) as store:
                 raise SystemExit(local_assets(config, store, args))
+        elif args.command == "film":
+            with FileStore.open(config.home) as store:
+                raise SystemExit(asyncio.run(local_film(config, store, args)))
         elif args.command == "usage" and args.project is not None:
             with FileStore.open(config.home) as store:
                 print_json(local_usage(store.snapshot(), args.project))

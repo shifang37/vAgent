@@ -362,6 +362,15 @@ class AgentRunner:
         if record.get("videoMode", "off") == "off":
             restored.base_tools = self.base_tools.without_feature("video")
         restored.tools = restored.base_tools.for_execution_version(restored.execution_version)
+        # E1 keeps execution 3 while tools move 4/4 -> 5/5, so the saved identity,
+        # not the execution version alone, decides which frozen tool set is rebuilt.
+        recorded = record.get("toolFeatures") or {}
+        matched = restored.base_tools.for_record_features(recorded)
+        if matched is not None and (not recorded or matched.features == recorded):
+            restored.tools = matched
+        # Delegating resume() to a rebuilt runner must happen at most once: if the
+        # frozen set cannot be reproduced, the restored runner refuses the resume.
+        restored._record_restored = True
         return restored
 
     def validate_resume(self, record: dict, state: dict) -> None:
@@ -387,9 +396,15 @@ class AgentRunner:
         saved = self.store.snapshot()["runs"].get(run_id)
         if saved and saved["status"] == "completed":
             return saved
-        if saved and (
-            saved.get("executionVersion") != self.execution_version
-            or (saved.get("videoMode", "off") == "off" and self.video_mode != "off")
+        if (
+            saved
+            and not getattr(self, "_record_restored", False)
+            and (
+                saved.get("executionVersion") != self.execution_version
+                or (saved.get("videoMode", "off") == "off" and self.video_mode != "off")
+                # Same execution version but a different frozen tool set (E1 4/4 -> 5/5).
+                or (saved.get("toolFeatures") or {}) != self.tools.features
+            )
         ):
             return await self.for_record(saved).resume(run_id, cancelled=cancelled, shutdown=shutdown)
         if execution_control(self.store).lock.locked():

@@ -298,15 +298,17 @@ M2 在 M1 之上加入结构化分镜、多镜头生成、逐镜头重做、图�
 **D2/D3 实现状态（2026-10-17）**：D2 交付多镜头批量原子登记、三重上限与额度快照、集合等待（execution v3 的 `jobset` 绑定）、部分失败隔离、逐镜头重做，并把 live 切换到 4/4 与 `wan27-shot-beijing-v2`（`wan-http-v2`，受控 HTTP）. D3 在同一 4/4 版本内新增只读素材工具 `asset_read`、素材库导入/读取接口与文件恢复、用量聚合读取侧、以及 CLI（`storyboard show`、`shots redo`、`assets list|import`、`usage --project`）与 Web 分镜界面（分镜面板、批量确认、序列连播、素材库页、用量面板）；显式用户动作使用独立的“客户端 Run”，不占用对话 Run 的 latest 与额度。由于 M2 视图在 4/4 内新增工具，D2 构建录制的 M2 Run 不承诺跨 D3 恢复（显式恢复返回 `RESUME_CONFIG_CHANGED`，与 D1 记录的边界一致；D2 签名哈希保存在 `tests/test_m2_compatibility.py`），`for_execution_version(1/2/3)` 继续排除全部 M2 工具，pre-M2 签名逐字节不变。证据见 [D2 验收](./docs/M2_D2_ACCEPTANCE.md)与 [D3 验收](./docs/M2_D3_ACCEPTANCE.md)。
 **D4 实现状态（2026-10-17）**：新增 `scripts/evaluate_m2.py`（默认离线的 M2 端到端套件：live 模式 + 受控上游 + 本地测试媒体 + 加速夹具时钟，7 用例）与 `tests/test_m2_evaluation.py`；`scripts/wheel_smoke.py` 扩展到安装态 M2 工作台（分镜/素材 CLI 与 HTTP 面）与离线套件。D4 未改动任何工具签名、规则文本、执行/上下文版本、能力版本、价格、来源策略或校验版本——只新增脚本与测试，因此 D3 记录的恢复边界与 pre-M2 逐字节签名证据保持不变。证据见 [M2 验收](./docs/M2_ACCEPTANCE.md)。D4 亦完成真实成本受控多镜头联调：一次登记两个镜头、集合等待后逐镜头本地交付，随后一次显式单镜头重做，共 3 次提交、9.00 CNY 估算，结果主机仍在 `wan-result-hosts-v2` 内；i2v/首尾帧与镜头延长未做真实样本。
 
-### 8.6 M3 成片、多供应商与 headless（E0 冻结）
+### 8.6 M3 成片、多供应商与 headless（E0 冻结，E1 已实施）
 
-2026-10-21 完成 E0，实施契约见 [M3 契约](./docs/M3_CONTRACTS.md)，研究和合成证据见 [E0 验收](./docs/M3_E0_ACCEPTANCE.md)。E0 仅冻结要求与基线，E1–E4 尚未实施，视频 submit=0。
+2026-10-21 完成 E0，实施契约见 [M3 契约](./docs/M3_CONTRACTS.md)，研究和合成证据见 [E0 验收](./docs/M3_E0_ACCEPTANCE.md)。E0 仅冻结要求与基线；**E1 已按下列规则实施**（见 [E1 验收](./docs/M3_E1_ACCEPTANCE.md)），E2–E4 尚未实施，视频 submit=0。
 
 E1 新增 `Film`/只增不改的 `FilmVersion`，以分镜当前版本与最新已交付 ShotVersion 的有序快照生成本地成片；缺失或未完成镜头整体拒绝。`film_assemble` 为可取消的本地异步写工具：锁内取快照与登记意图，锁外执行受限子进程，锁内复核来源 revision/哈希并原子登记版本、FilmMedia 与完成操作。不能在现有同步工具锁内运行 FFmpeg。它不创建 generation Job、不增加 submit；`film_read` 只读。schema v5 仅新增空 `films` 与外壳版本，旧记录不补字段；`media` 使用独立 FilmMedia union 分支，禁止伪造生成 Job。
 
 拼接采用固定 `imageio-ffmpeg==0.6.0` 包内二进制 concat + stream copy。新 `mp4-copy-signature-v1` 检查编码配置和样本时间线，旧结构检查不能证明兼容；E0 已保留 AAC 非单调 DTS 反例。E1 须完成样本推导、停止/崩溃补偿、浏览器解码及平台二进制/许可证验收。
 
 工具与规则在 E1 为 **5/5**，E2 为 **6/6**；execution/context/checkpoint 保持 **3/2/1**。恢复以保存的完整 toolFeatures 身份选择冻结工具表、规则与能力，即使 execution 未变也须还原后核对签名；旧 4/4 与 E1 5/5 的真实检查点恢复均为后续门槛，未知组合拒绝。E2 新 Job/Request v6 与 `multi-provider-v3` 增加 Kling Singapore t2v 直连和 fal Kling standard 静音中转，历史 1–5 精确分派不变。各 provider/currency 及 Kling units 独立预算、Run 共享至多 4 个新 Job；新来源策略绑定认证任务的完整 URL，并校验/固定公网连接地址，Wan 旧允许集不变。
+
+E1 实施的三个实现要点：①接缝时长由每输入的样本表/预卷推导（`max(视频原始结束, 音频原始结束)`），不接受夹具常量；②FFmpeg 在接缝处拉长一帧属于允许的封装偏移，须落在 `max(一帧视频, 一帧 AAC)` 内并逐条写入 `assembly.timeline`，出现 DTS 回退/损坏告警即拒绝；③新增 `async_write_execute` 执行类别承载锁外本地写，工具恢复改为按 `toolFeatures` 身份匹配（`register_tools_variant`/`for_record_features`），不再只按 executionVersion 分派。
 
 E3 headless 复用 ApplicationService/Runner/Store 与原等待/恢复机制：默认生成 planned 产物，后以 Run ID、计划指纹、明确确认及各预算授权固定请求集合，resume 复用原授权。默认用户 skills 目录合并到内置根之后，保留显式环境变量全量替换语义、raw 哈希版本与按需读取；用户坏文件隔离、内置名保留，旧 Run 不注入新增 skills。它不开放可执行插件。
 

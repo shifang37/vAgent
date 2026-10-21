@@ -1701,3 +1701,52 @@ footer {
     width: calc(100% - 52px);
   }
 }
+
+/* M3 E1: assembled film section of the storyboard panel. */
+.film-section {
+  border: 1px solid rgba(148, 163, 184, 0.28);
+  border-radius: 14px;
+  padding: 12px 14px;
+  margin: 4px 0 18px;
+  background: rgba(15, 23, 42, 0.35);
+}
+.film-head {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 10px;
+  margin-bottom: 8px;
+}
+.film-video {
+  width: 100%;
+  max-height: 260px;
+  border-radius: 10px;
+  background: #0b1220;
+  display: block;
+}
+.film-versions {
+  list-style: none;
+  padding: 0;
+  margin: 10px 0 0;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+.film-versions li {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+  font-size: 12px;
+  color: #cbd5e1;
+}
+.film-actions {
+  display: flex;
+  gap: 8px;
+  margin-top: 10px;
+  flex-wrap: wrap;
+}
+.film-error {
+  color: #fca5a5;
+  margin-top: 8px;
+}

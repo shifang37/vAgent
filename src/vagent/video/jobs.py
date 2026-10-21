@@ -437,6 +437,11 @@ class JobService:
 
         self.media = MediaService(self)
         self.assets = AssetService(store)
+        from vagent.video.film_service import FilmService
+
+        # Local assembly shares this service's store and media index; it never
+        # registers a Job or calls a provider.
+        self.films = FilmService(self)
         self._adapters = {}
         self._capabilities = {}
         self._published = []

@@ -63,8 +63,8 @@ def test_a_client_run_is_durable_but_never_the_conversation(store, video_clock):
     assert record["model"] == clients.CLIENT_RUN_MODEL and record["resumable"] is False
     assert record["contextVersion"] == 2 and record["executionVersion"] == 3
     features = record["toolFeatures"]["video"]
-    assert features["toolsVersion"] == VIDEO_TOOLS_VERSION == 4
-    assert features["rulesVersion"] == VIDEO_RULES_VERSION == 4
+    assert features["toolsVersion"] == VIDEO_TOOLS_VERSION == 5
+    assert features["rulesVersion"] == VIDEO_RULES_VERSION == 5
     assert features["mode"] == "mock" and features["capabilities"] == [
         item.model_dump(mode="json", by_alias=True) for item in service.capabilities("mock")
     ]

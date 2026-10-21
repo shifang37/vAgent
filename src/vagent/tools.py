@@ -90,6 +90,9 @@ class ToolDefinition:
     effect: Literal["read", "write"]
     execute: Callable[[dict, dict, str], object] | None = None
     async_execute: Callable[[dict], Awaitable[object]] | None = None
+    # A local write that must not run while the Store lock is held (film assembly):
+    # the handler opens its own short transactions around the long operation.
+    async_write_execute: Callable[[dict, FileStore, ToolExecutionContext], Awaitable[dict]] | None = None
     identity: str | None = None
     # Context handlers own their journal/transaction and may return a deferred
     # marker. Legacy handlers still return raw data for FileStore.operation.
@@ -114,6 +117,9 @@ class ToolRegistry:
         self.wait_resolvers: dict[str, Callable] = {}
         self._resolver_features: dict[str, str | None] = {}
         self._execution_variants: dict[int, tuple[list[ToolFeature], dict[str, str], frozenset[str]]] = {}
+        # Frozen tool-set views addressed by published toolsVersion, independent of
+        # the execution version: E1 keeps execution 3 while the tools move 4 -> 5.
+        self._tool_variants: dict[int, tuple[list[ToolFeature], frozenset[str]]] = {}
 
     def register_wait_resolver(self, kind: str, resolve: Callable, *, feature=None) -> "ToolRegistry":
         if kind in self.wait_resolvers:
@@ -158,15 +164,54 @@ class ToolRegistry:
                 registry._definitions[name] = copy.deepcopy(definition)
         return registry
 
+    def register_tools_variant(self, tools_version: int, *, features, exclude=()) -> None:
+        """Freeze the tool set published under one toolsVersion for later restores."""
+        frozen_features, frozen_exclude = self._tool_variants.get(tools_version, ([], frozenset()))
+        self._tool_variants[tools_version] = (
+            [*frozen_features, *copy.deepcopy(features)],
+            frozen_exclude | frozenset(exclude),
+        )
+
+    def for_tools_version(self, tools_version: int) -> "ToolRegistry":
+        if tools_version not in self._tool_variants:
+            return self
+        features, excluded = self._tool_variants[tools_version]
+        registry = self._filtered(lambda definition: definition.name not in excluded)
+        for feature in features:
+            if feature.name in registry._features:
+                registry._features[feature.name] = copy.deepcopy(feature)
+        return registry
+
+    def for_record_features(self, recorded: dict) -> "ToolRegistry | None":
+        """Match a saved toolFeatures snapshot, never just the execution version.
+
+        Returns None when no frozen tool set reproduces the record, so the caller
+        keeps the execution-version view and the signature check can refuse.
+        """
+        if not recorded or recorded == self.features:
+            return self
+        for version in sorted(self._tool_variants):
+            candidate = self.for_tools_version(version)
+            if candidate.features == recorded:
+                return candidate
+        return None
+
     def register(self, definition: ToolDefinition) -> "ToolRegistry":
         if definition.name in self._definitions:
             raise ValueError(f"Duplicate tool: {definition.name}")
         if definition.async_execute and definition.effect != "read":
             raise ValueError("External tools must be explicitly read-only")
+        if definition.async_write_execute and definition.effect != "write":
+            raise ValueError("Async local tools must be explicit writes")
         if (
             sum(
                 handler is not None
-                for handler in (definition.execute, definition.async_execute, definition.context_execute)
+                for handler in (
+                    definition.execute,
+                    definition.async_execute,
+                    definition.async_write_execute,
+                    definition.context_execute,
+                )
             )
             != 1
         ):
@@ -237,6 +282,7 @@ class ToolRegistry:
         registry = ToolRegistry()
         registry._features = copy.deepcopy(self._features)
         registry._execution_variants = copy.deepcopy(self._execution_variants)
+        registry._tool_variants = copy.deepcopy(self._tool_variants)
         for definition in self._definitions.values():
             if include(definition):
                 registry.register(definition)
@@ -273,6 +319,15 @@ class ToolRegistry:
         context: ToolExecutionContext | None = None,
     ) -> dict | DeferredToolResult:
         definition = self._definitions.get(name)
+        if definition is not None and definition.async_write_execute is not None:
+            return await self._aexecute_write(
+                definition,
+                args,
+                store=store,
+                project_id=project_id,
+                operation_key=operation_key,
+                context=context,
+            )
         if definition is None or definition.async_execute is None:
             return self.execute(
                 name, args, store=store, project_id=project_id, operation_key=operation_key, context=context
@@ -296,6 +351,36 @@ class ToolRegistry:
             return store.operation(operation_key, name, payload, fail)
         return store.operation(operation_key, name, payload, lambda _: result)
 
+    async def _aexecute_write(
+        self,
+        definition: ToolDefinition,
+        args: object,
+        *,
+        store: FileStore,
+        project_id: str,
+        operation_key: str,
+        context: ToolExecutionContext | None,
+    ) -> dict:
+        """Validate scope under the lock, then run the local write without holding it."""
+        if context is None:
+            return failure("TOOL_CONTEXT_INVALID", "工具缺少服务端执行上下文。")
+        if not isinstance(args, dict):
+            return failure("INVALID_ARGUMENTS", "工具参数必须是 JSON 对象。")
+        if next(
+            Draft202012Validator(definition.schema.model_json_schema(by_alias=True)).iter_errors(args), None
+        ):
+            return failure("INVALID_ARGUMENTS", "工具参数不符合已公布的 JSON Schema。")
+        with store.locked():
+            snapshot = store.snapshot()
+            self._check_context(context, snapshot, project_id, operation_key)
+            if snapshot["runs"][context.run_id].get("readOnly"):
+                return failure("READ_ONLY", "只读 Run 不能调用写工具。")
+        try:
+            return await definition.async_write_execute(copy.deepcopy(args), store, context)
+        except Exception as error:
+            safe = public_error(error)
+            return failure(safe.code, str(safe))
+
     def execute(
         self,
         name: str,
@@ -311,6 +396,8 @@ class ToolRegistry:
             return failure("UNKNOWN_TOOL", "该工具未注册。")
         if definition.async_execute:
             return failure("ASYNC_TOOL", "外部工具必须通过异步执行入口调用。")
+        if definition.async_write_execute:
+            return failure("ASYNC_TOOL", "本地写工具必须通过异步执行入口调用。")
         if definition.context_execute and not isinstance(args, dict):
             return failure("INVALID_ARGUMENTS", "工具参数必须是 JSON 对象。")
         if definition.context_execute and next(

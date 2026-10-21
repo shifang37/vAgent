@@ -29,6 +29,7 @@ $env:VAGENT_HOME = Join-Path $PWD '.vagent/web'
 - 等待态可停止 Agent，Job 继续跟踪；查询暂停时可恢复原任务查询。刷新保留已保存的等待与任务状态。
 - 素材库（左栏「素材库」）：列出整个数据目录的参考图（含其他项目，便于复用）与本地预览、按当前项目过滤、上传导入（PNG/JPEG/WebP，≤20 MB，按项目与哈希去重）；文件缺失或损坏时可重新导入同一张图片按原记录恢复，M2 不提供删除。
 - 分镜面板（左栏「分镜与镜头」，会话已有分镜时自动打开；也可在对话里点「分镜」）：按 order 的镜头卡（景别、时长、模式、参考图缩略图、shotId）、逐镜头版本历史与状态、播放与下载本地 MP4、逐镜头重做、按镜头分组的 Job 卡；工具条提供全选、刷新、批量生成与序列连播。
+- 成片区（分镜面板顶部，M3 E1）：显示当前成片版本、成片播放器（支持拖动）、历史版本列表（逐版本下载）与「拼接成片 / 重新拼接」按钮。拼接只使用当前分镜 revision 与已交付镜头，请求带 `clientRequestId`（同一 ID 重放原结果）；成功后成片追加新版本，旧版本与文件保留，镜头重做后不会自动重拼。错误按 `FILM_INPUT_MISSING`/`FILM_INPUT_NOT_READY`/`FILM_INPUT_INCOMPATIBLE`/`FILM_MEDIA_INVALID`/`VERSION_CONFLICT` 等给出可操作说明。
 - 批量生成确认对话框：先请求只读估算，逐镜头列出模式/时长/估算与合计，并显示本 Run 已用与剩余额度；确认后整批登记，超出上限时服务端整批拒绝。
 - 序列连播：客户端按顺序播放各镜头本地 MP4（不做服务端拼接），可暂停、下一个或停止；尚无本地媒体的镜头在面板上明确标注并被跳过。
 - 用量面板（左栏「用量统计」）：按项目聚合任务计数与状态、登记估算与账单状态（未取得账单保持未知）、分镜与镜头版本数、素材数、模型 Token 覆盖率与按日记录；只读本地数据，不做外部调用。
@@ -65,6 +66,8 @@ live Job 视图包含 `lastProviderStatus`、`queryPauseReason`、冻结费用�
 | `GET /api/assets?projectId=`、`POST /api/assets` | 素材元数据列表 / multipart 上传（CSRF、`projectId` + `file`，正文上限 20 MB + 64 KiB） |
 | `GET /api/assets/{id}`、`GET/HEAD /api/assets/{id}/content` | 元数据与可用性 / 单 Range 图片内容（`?download=1` 附件）；不存在 404、文件缺失或损坏 410 |
 | `GET /api/usage?projectId=` | 读取侧聚合（任务、估算与账单状态、分镜、素材、Token 覆盖率、按日）；不调用模型或供应商 |
+| `GET /api/films/{storyboardId}?projectId=` | 当前成片与历史版本、逐输入镜头、有理数时间线偏移、受控 `mediaUrl` 与 `mediaAvailable`；无成片时 `film` 为 null；跨项目 404 |
+| `POST /api/sessions/{id}/films/assemble` | CSRF + JSON `{clientRequestId, storyboardId, expectedRevision}`，202 返回成片视图；本地流复制，不登记 Job、不调用供应商；过期 revision 409、输入未交付 409/422、拼接失败 500 但状态不变；同一请求 ID 重放原结果 |
 
 CLI/Web 的显式重做与批量登记各自创建一条“客户端 Run”（`model="local-client"`，不更新会话的 latest Run，也不占用对话 Run 的额度），因此对话 Run 的恢复路径不受影响；同一 `clientRequestId` 重放原结果，不会重复登记。素材只经本地受信入口写入，读取接口不返回本地路径或私有 URL，工具 `asset_read` 同样只返回元数据。
 

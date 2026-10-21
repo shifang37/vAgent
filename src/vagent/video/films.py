@@ -340,6 +340,8 @@ def validate_film_changes(previous: dict[str, dict], state: dict) -> None:
                 raise AppError("FILM_CONFLICT", "新成片必须先保存第 1 版。")
             continue
         old = Film.model_validate(old_raw)
+        if film == old:
+            continue
         if (
             film.project_id != old.project_id
             or film.storyboard_id != old.storyboard_id
@@ -352,6 +354,37 @@ def validate_film_changes(previous: dict[str, dict], state: dict) -> None:
     for raw in state["media"].values():
         if raw.get("kind") == "film":
             verify_film_media(state, FilmMedia.model_validate(raw))
+
+
+def cleanup_stale_parts(home, state: dict) -> int:
+    """Remove crash leftovers from assembly; committed files and the index stay intact.
+
+    A ``.part`` file is never indexed, so it cannot represent a delivered film. Files
+    still owned by a Job download (``download.mediaId``) belong to the M1-C download
+    window and are left untouched, because that window may resume from prepared bytes.
+    An unreferenced *final* file left by a failed commit is deliberately kept: the store
+    must not infer success from an orphan, and a later assembly simply uses a new ID.
+    """
+    media = home / "media"
+    if not media.is_dir():
+        return 0
+    owned = {
+        raw["download"]["mediaId"]
+        for raw in state.get("jobs", {}).values()
+        if isinstance(raw.get("download"), dict) and raw["download"].get("mediaId")
+    }
+    removed = 0
+    for path in sorted(media.glob("*/*.mp4.part")):
+        if path.name[: -len(".mp4.part")] in owned:
+            continue
+        try:
+            info = path.lstat()
+            if info.st_size >= 0 and not path.is_symlink() and path.is_file():
+                path.unlink()
+                removed += 1
+        except OSError:
+            continue
+    return removed
 
 
 def film_view(state: dict, film: Film) -> dict:

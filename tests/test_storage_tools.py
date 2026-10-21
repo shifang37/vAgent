@@ -98,7 +98,7 @@ def test_exclusive_writer_and_reopen(store):
     home = store.home
     store.close()
     with FileStore.open(home) as reopened:
-        assert reopened.snapshot()["schemaVersion"] == 4
+        assert reopened.snapshot()["schemaVersion"] == 5
 
 
 def test_corrupt_state_is_preserved(tmp_path):

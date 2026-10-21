@@ -354,11 +354,26 @@ class MediaService:
         self.jobs, self.store = jobs, jobs.store
         self.files = MediaFiles(self.store.home)
 
+    def record(self, media_id, *, project_id=None):
+        """The media index is a union: a generation clip or an assembled film."""
+        from vagent.video.films import FilmMedia, parse_media
+
+        state = self.store.snapshot()
+        raw = state["media"].get(media_id)
+        if raw is None or (project_id is not None and raw["projectId"] != project_id):
+            raise AppError("MEDIA_NOT_FOUND", "当前项目中没有这个媒体。")
+        media = parse_media(raw)
+        if isinstance(media, FilmMedia):
+            return media
+        return self.asset(media_id, project_id=project_id)
+
     def asset(self, media_id, *, project_id=None):
         state = self.store.snapshot()
         raw = state["media"].get(media_id)
         if raw is None or (project_id is not None and raw["projectId"] != project_id):
             raise AppError("MEDIA_NOT_FOUND", "当前项目中没有这个媒体。")
+        if raw.get("kind") == "film":
+            raise AppError("MEDIA_NOT_FOUND", "成片媒体不属于生成任务的媒体索引。")
         asset = MediaAsset.model_validate(raw)
         job = parse_job(state["jobs"][asset.job_id])
         if (
@@ -412,20 +427,50 @@ class MediaService:
             self.refresh(job)
 
     def view(self, media_id, *, project_id=None):
-        asset = self.asset(media_id, project_id=project_id)
-        job = self.refresh(self.jobs.get(asset.job_id))
+        from vagent.video.films import FilmMedia, verify_film_media
+
+        media = self.record(media_id, project_id=project_id)
+        if isinstance(media, FilmMedia):
+            state = self.store.snapshot()
+            verify_film_media(state, media)
+            status, reason = self._availability(media)
+            return {
+                "mediaId": media.id,
+                "kind": "film",
+                "filmId": media.film_id,
+                "filmVersion": media.film_version,
+                "sizeBytes": media.size_bytes,
+                "sha256": media.sha256,
+                "metadata": media.metadata.model_dump(mode="json", by_alias=True),
+                "createdAt": media.created_at,
+                "availability": {"status": status, "reason": reason},
+                "mediaAvailable": status == "available",
+                "contentUrl": f"/api/media/{media.id}/content" if status == "available" else None,
+            }
+        job = self.refresh(self.jobs.get(media.job_id))
         return {
-            "mediaId": asset.id,
-            **asset.model_dump(mode="json", by_alias=True, exclude={"id", "relative_path"}),
+            "mediaId": media.id,
+            **media.model_dump(mode="json", by_alias=True, exclude={"id", "relative_path"}),
             "availability": job.media_availability.model_dump(mode="json", by_alias=True),
             "mediaAvailable": job.media_availability.status == "available",
-            "contentUrl": f"/api/media/{asset.id}/content"
+            "contentUrl": f"/api/media/{media.id}/content"
             if job.media_availability.status == "available"
             else None,
         }
 
     def open_content(self, media_id):
-        asset = self.asset(media_id)
+        from vagent.video.films import FilmMedia, verify_film_media
+
+        media = self.record(media_id)
+        if isinstance(media, FilmMedia):
+            verify_film_media(self.store.snapshot(), media)
+            try:
+                return media, self.files.verified(media.relative_path, media)
+            except (OSError, MediaError):
+                raise AppError(
+                    "JOB_MEDIA_UNAVAILABLE", "本地成片文件缺失或损坏，请检查后重新拼接。"
+                ) from None
+        asset = media
         try:
             lease = self.files.verified(asset.relative_path, asset)
         except (OSError, MediaError):

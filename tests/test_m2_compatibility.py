@@ -163,12 +163,19 @@ async def test_pre_m2_live_signature_and_toolset_restore_unchanged(store, contex
     assert sorted(spec["function"]["name"] for spec in runner.tools.specs()) == expected_names
 
 
-def test_current_mock_toolset_adds_storyboard_tools_at_version_four(store):
+def test_current_mock_toolset_is_five_five_and_keeps_the_frozen_four_four_view(store):
     tools = mock_tools(store)
     names = sorted(spec["function"]["name"] for spec in tools.specs())
-    assert {"storyboard_read", "storyboard_save"}.issubset(set(names))
+    assert {"storyboard_read", "storyboard_save", "shot_generate", "asset_read"}.issubset(set(names))
+    assert {"film_assemble", "film_read"}.issubset(set(names))
     features = tools.features["video"]
-    assert features["mode"] == "mock" and features["toolsVersion"] == 4 and features["rulesVersion"] == 4
+    assert features["mode"] == "mock" and (features["toolsVersion"], features["rulesVersion"]) == (5, 5)
+    frozen = tools.for_tools_version(4)
+    assert (frozen.features["video"]["toolsVersion"], frozen.features["video"]["rulesVersion"]) == (4, 4)
+    assert frozen.features["video"]["capabilities"] == features["capabilities"]
+    frozen_names = sorted(spec["function"]["name"] for spec in frozen.specs())
+    assert {"storyboard_read", "storyboard_save", "shot_generate", "asset_read"}.issubset(set(frozen_names))
+    assert not {"film_assemble", "film_read"}.intersection(frozen_names)
     restored = tools.for_execution_version(2)
     assert restored.features == PRE_M2_MOCK_FEATURES
     assert sorted(spec["function"]["name"] for spec in restored.specs()) == PRE_M2_TOOL_NAMES
@@ -236,17 +243,18 @@ D2_M2_INSTRUCTIONS = {
 }
 
 
-def test_the_m2_view_adds_one_read_only_asset_tool_without_moving_its_version(store):
-    tools = mock_tools(store)
+def test_the_frozen_m2_view_still_adds_one_read_only_asset_tool(store):
+    tools = mock_tools(store).for_tools_version(4)
     names = sorted(spec["function"]["name"] for spec in tools.specs())
     assert names == sorted([*D2_M2_TOOL_NAMES, "asset_read"])
     features = tools.features["video"]
     assert (features["mode"], features["toolsVersion"], features["rulesVersion"]) == ("mock", 4, 4)
     assert hashlib.sha256(tools.instructions.encode("utf-8")).hexdigest() != D2_M2_INSTRUCTIONS["mock"]
     assert "asset_read" in tools.instructions
+    assert "film_assemble" not in tools.instructions
 
 
-async def test_the_live_m2_view_extends_its_rules_at_the_same_version(store):
+async def test_the_frozen_live_m2_view_extends_its_rules_at_the_same_version(store):
     async with WanAdapter(
         api_key="capture-fixture",
         workspace_id="capture-workspace",
@@ -255,12 +263,16 @@ async def test_the_live_m2_view_extends_its_rules_at_the_same_version(store):
         tools = register_video_tools(
             create_project_tools(), JobService(store, [MockVideoAdapter(store), wan]), mode="live"
         )
-        features = tools.features["video"]
+        current = tools.features["video"]
+        assert (current["toolsVersion"], current["rulesVersion"]) == (5, 5)
+        frozen = tools.for_tools_version(4)
+        features = frozen.features["video"]
         assert (features["toolsVersion"], features["rulesVersion"], features["mode"]) == (4, 4, "live")
-        assert len(features["capabilities"]) == 2
-        assert "asset_read" in {spec["function"]["name"] for spec in tools.specs()}
-        assert hashlib.sha256(tools.instructions.encode("utf-8")).hexdigest() != D2_M2_INSTRUCTIONS["live"]
-        # The frozen M1-C view still hides every M2 tool.
+        assert len(features["capabilities"]) == 2 == len(current["capabilities"])
+        assert "asset_read" in {spec["function"]["name"] for spec in frozen.specs()}
+        assert "film_assemble" not in {spec["function"]["name"] for spec in frozen.specs()}
+        assert hashlib.sha256(frozen.instructions.encode("utf-8")).hexdigest() != D2_M2_INSTRUCTIONS["live"]
+        # The frozen M1-C view still hides every M2 and M3 tool.
         assert sorted(spec["function"]["name"] for spec in tools.for_execution_version(2).specs()) == (
             PRE_M2_TOOL_NAMES
         )
@@ -272,7 +284,8 @@ async def test_a_d2_era_m2_run_is_refused_instead_of_resuming_differently(store)
 
     model = ScriptedModel(interrupted)
     model.name = "m2-restore-fixture"
-    runner = AgentRunner(store=store, model=model, tools=mock_tools(store), execution_version=3)
+    frozen = mock_tools(store).for_tools_version(4)
+    runner = AgentRunner(store=store, model=model, tools=frozen, execution_version=3)
     recorded = await runner.run("coffee", "确认模拟能力")
     assert recorded["status"] == "failed" and recorded["resumable"]
     assert recorded["toolFeatures"]["video"]["toolsVersion"] == 4
@@ -286,3 +299,37 @@ async def test_a_d2_era_m2_run_is_refused_instead_of_resuming_differently(store)
     with pytest.raises(AppError) as caught:
         await current.resume(recorded["id"])
     assert caught.value.code == "RESUME_CONFIG_CHANGED"
+
+
+async def test_e1_restores_a_four_four_run_with_its_frozen_tools_and_starts_five_five(store):
+    def begin(messages, step):
+        if step == 0:
+            return tool_call("video_capabilities")
+        raise RuntimeError("offline interruption")
+
+    model = ScriptedModel(begin)
+    model.name = "e1-restore-fixture"
+    frozen = mock_tools(store).for_tools_version(4)
+    runner = AgentRunner(store=store, model=model, tools=frozen, execution_version=3)
+    first = await runner.run("coffee", "先确认模拟能力")
+    assert first["status"] == "failed" and first["resumable"]
+    assert first["toolFeatures"]["video"]["toolsVersion"] == 4
+    home = store.home
+    store.close()
+    with FileStore.open(home) as reopened:
+        resumed_model = ScriptedModel(lambda *_: AIMessage(content="按原 4/4 工具集继续完成"))
+        resumed_model.name = "e1-restore-fixture"
+        current = AgentRunner(store=reopened, model=resumed_model, tools=mock_tools(reopened))
+        assert current.tools.features["video"]["toolsVersion"] == 5
+        restored = current.for_record(reopened.snapshot()["runs"][first["id"]])
+        restored_names = {spec["function"]["name"] for spec in restored.tools.specs()}
+        assert "film_assemble" not in restored_names and "storyboard_save" in restored_names
+        final = await current.resume(first["id"])
+        assert final["status"] == "completed"
+        assert final["toolFeatures"]["video"]["toolsVersion"] == 4
+        assert final["answer"] == "按原 4/4 工具集继续完成"
+        fresh_model = ScriptedModel(lambda *_: AIMessage(content="新 Run 使用 5/5"))
+        fresh_model.name = "e1-restore-fixture"
+        fresh = AgentRunner(store=reopened, model=fresh_model, tools=mock_tools(reopened))
+        assert fresh.tools.features["video"]["toolsVersion"] == 5
+        assert {spec["function"]["name"] for spec in fresh.tools.specs()} >= {"film_assemble", "film_read"}

@@ -36,16 +36,20 @@ from vagent.waiting import (
 )
 
 # Mock moves to the M2 toolset (storyboard tools); live keeps its frozen M1-C
-# 3/3 identity until the M2 Wan protocol lands in D2.
-VIDEO_TOOLS_VERSION = 4
-VIDEO_RULES_VERSION = 4
-LIVE_VIDEO_TOOLS_VERSION = 4
-LIVE_VIDEO_RULES_VERSION = 4
+# 3/3 identity until the M2 Wan protocol lands in D2. E1 raises both to 5/5 by
+# appending the film tools, and registers 4/4 variants so pre-E1 Runs restore.
+VIDEO_TOOLS_VERSION = 5
+VIDEO_RULES_VERSION = 5
+LIVE_VIDEO_TOOLS_VERSION = 5
+LIVE_VIDEO_RULES_VERSION = 5
 WAIT_TIMEOUT_SECONDS = 600
 WAIT_SET_LIMIT = 16
 # Every tool this file adds after the frozen pre-M2 versions 1/2/3.
 M2_TOOL_NAMES = ("storyboard_read", "storyboard_save", "shot_generate", "asset_read")
 M2_STORYBOARD_TOOL_NAMES = ("storyboard_read", "storyboard_save")
+# E1 appends the film tools; the frozen 4/4 variants must hide them again.
+M3_TOOL_NAMES = ("film_assemble", "film_read")
+PRE_M3_TOOL_NAMES = (*M2_TOOL_NAMES, *M3_TOOL_NAMES)
 
 LEGACY_VIDEO_RULES = """当前启用 mock 视频模式，只能登记模拟任务；所有结果均为 simulated=true、mediaAvailable=false。
 需要生成时先调用 video_capabilities，根据返回的模型、能力版本和完整规格组合构造 video_generate。
@@ -134,6 +138,14 @@ shot_generate 必须显式确认，一次登记全部选中镜头；结果固定
 缺配置、提交不确定、查询暂停、下载失败或等待超时，应报告原 jobId 和具体原因；修复沿用原任务，不能再次生成。停止 Agent 不代表云端取消。
 不要索取、读取或展示视频 Key、签名 URL 或素材私有路径。"""
 
+FILM_RULES = """所有镜头都交付本地 MP4 后，可用 film_assemble 生成本地拼接成片：它按分镜顺序做流复制，不调用供应商、不登记生成任务、不产生费用。
+拼接需要分镜的 expectedRevision（取自 storyboard_read 的 revision）与 storyboardId；接口会核对每个镜头最新版本是否已交付、编码配置是否可拼接，任一不满足则整体拒绝并列出镜头。
+同一组输入重复拼接返回原版本，不新增版本或文件；镜头重做后不会自动重拼，只有用户显式要求时才再次拼接，旧版本与文件保留。
+film_read 只读返回当前成片、历史版本与受控媒体 URL；状态以工具返回为准，不要声称未交付的成片可播放或可下载。"""
+
+VIDEO_RULES_V5 = VIDEO_RULES_V4 + "\n" + FILM_RULES
+LIVE_VIDEO_RULES_V5 = LIVE_VIDEO_RULES_V4 + "\n" + FILM_RULES
+
 
 def legacy_live_capabilities() -> list[dict]:
     """Exact M1-C live capability JSON, pinned so restored 3/3 Runs keep their signature."""
@@ -193,6 +205,15 @@ class StoryboardSave(Arguments):
 
 
 class StoryboardRead(Arguments):
+    storyboard_id: CanonicalId | None = None
+
+
+class FilmAssemble(Arguments):
+    storyboard_id: CanonicalId
+    expected_revision: int = Field(ge=0)
+
+
+class FilmRead(Arguments):
     storyboard_id: CanonicalId | None = None
 
 
@@ -374,7 +395,7 @@ def register_video_tools(registry: ToolRegistry, service: JobService, *, mode="m
                 "rulesVersion": LIVE_VIDEO_RULES_VERSION if live else VIDEO_RULES_VERSION,
                 "capabilities": capabilities,
             },
-            instructions=LIVE_VIDEO_RULES_V4 if live else VIDEO_RULES_V4,
+            instructions=LIVE_VIDEO_RULES_V5 if live else VIDEO_RULES_V5,
             bypass_answer_cache=True,
         )
     )
@@ -422,6 +443,31 @@ def register_video_tools(registry: ToolRegistry, service: JobService, *, mode="m
             "job_get",
             args,
             lambda _: job_snapshot(job),
+        )
+
+    films = service.films
+
+    def read_film(args, store, context):
+        check_store(store)
+        state = store.snapshot()
+        storyboard_id = args.get("storyboardId")
+        if storyboard_id is None:
+            candidates = [
+                item for item in state["storyboards"].values() if item["projectId"] == context.project_id
+            ]
+            if not candidates:
+                return {"storyboardId": None, "film": None}
+            storyboard_id = max(candidates, key=lambda item: (item["createdAt"], item["id"]))["id"]
+        return films.view(context.project_id, storyboard_id)
+
+    async def assemble_film(args, store, context):
+        check_store(store)
+        return await films.assemble(
+            project_id=context.project_id,
+            storyboard_id=args["storyboardId"],
+            expected_revision=args["expectedRevision"],
+            operation_key=context.operation_key,
+            args=args,
         )
 
     def await_single(job_id: str, args: dict, store: FileStore, context: ToolExecutionContext):
@@ -643,6 +689,27 @@ def register_video_tools(registry: ToolRegistry, service: JobService, *, mode="m
             save_storyboard,
             feature="video",
         ),
+        ToolDefinition(
+            "film_read",
+            "读取当前分镜的本地拼接成片：返回 filmId、当前版本、历史版本摘要、逐输入镜头与时间线偏移，"
+            "以及受控媒体 URL。省略 storyboardId 时读取本项目最新分镜。只读，不拼接、不创建任务。",
+            FilmRead,
+            "read",
+            context_execute=read_film,
+            feature="video",
+        ),
+        ToolDefinition(
+            "film_assemble",
+            "把当前分镜版本里每个镜头的最新已交付 MP4 按顺序本地拼接成单一成片：使用包内 FFmpeg 流复制，"
+            "不调用供应商、不登记生成任务、不产生费用。必须提供分镜 revision 作为 expectedRevision；"
+            "任一镜头最新版本未交付或编码不可拼接则整体拒绝。同一组输入重复拼接返回原版本；"
+            "镜头重做后不会自动重拼。拼接在 Store 锁外执行，可被停止。",
+            FilmAssemble,
+            "write",
+            None,
+            async_write_execute=assemble_film,
+            feature="video",
+        ),
     ]
     await_definition = next(item for item in definitions if item.name == "await_job")
     for definition in definitions:
@@ -668,8 +735,25 @@ def register_video_tools(registry: ToolRegistry, service: JobService, *, mode="m
                 )
             ],
             descriptions={},
-            exclude=M2_TOOL_NAMES,
+            exclude=PRE_M3_TOOL_NAMES,
             definitions={"await_job": frozen_await(AWAIT_DESCRIPTION_M1C)},
+        )
+        registry.register_tools_variant(
+            4,
+            features=[
+                ToolFeature(
+                    name="video",
+                    configuration={
+                        "mode": "live",
+                        "toolsVersion": 4,
+                        "rulesVersion": 4,
+                        "capabilities": capabilities,
+                    },
+                    instructions=LIVE_VIDEO_RULES_V4,
+                    bypass_answer_cache=True,
+                )
+            ],
+            exclude=M3_TOOL_NAMES,
         )
     else:
         legacy_capabilities = legacy_mock_capabilities()
@@ -689,7 +773,7 @@ def register_video_tools(registry: ToolRegistry, service: JobService, *, mode="m
                 )
             ],
             descriptions={},
-            exclude=M2_TOOL_NAMES,
+            exclude=PRE_M3_TOOL_NAMES,
             definitions={"await_job": frozen_await(LEGACY_AWAIT_DESCRIPTION)},
         )
         registry.register_execution_variant(
@@ -708,8 +792,25 @@ def register_video_tools(registry: ToolRegistry, service: JobService, *, mode="m
                 )
             ],
             descriptions={},
-            exclude=M2_TOOL_NAMES,
+            exclude=PRE_M3_TOOL_NAMES,
             definitions={"await_job": frozen_await(AWAIT_DESCRIPTION_M1C)},
+        )
+        registry.register_tools_variant(
+            4,
+            features=[
+                ToolFeature(
+                    name="video",
+                    configuration={
+                        "mode": "mock",
+                        "toolsVersion": 4,
+                        "rulesVersion": 4,
+                        "capabilities": capabilities,
+                    },
+                    instructions=VIDEO_RULES_V4,
+                    bypass_answer_cache=True,
+                )
+            ],
+            exclude=M3_TOOL_NAMES,
         )
     registry.register_wait_resolver(
         "job", lambda binding: resolve_job_wait(service.store, binding, service=service), feature="video"

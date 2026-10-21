@@ -366,6 +366,9 @@ class FileStore:
                 recover_interrupted_jobs(draft, now())
 
             store.transaction(recover)
+            from vagent.video.films import cleanup_stale_parts
+
+            cleanup_stale_parts(store.home, store.snapshot())
             return store
         except BaseException:
             lock.unlink(missing_ok=True)

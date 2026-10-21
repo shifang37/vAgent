@@ -27,8 +27,9 @@ CLIENT_RUN_MODEL = "local-client"
 CLIENT_PROMPTS = {
     "shot_generate": "本地界面发起的镜头批量登记（不调用模型）。",
     "shot_redo": "本地界面发起的镜头重做（不调用模型）。",
+    "film_assemble": "本地界面发起的成片拼接（不调用模型）。",
 }
-CLIENT_GROUPS = ("shot_generate", "shot_redo")
+CLIENT_GROUPS = ("shot_generate", "shot_redo", "film_assemble")
 
 
 def client_run_id(session_id: str, client_request_id: str) -> str:
@@ -50,12 +51,12 @@ def client_features(service, mode: str) -> dict:
     }
 
 
-def client_context(service, *, session_id: str, client_request_id: str, group: str):
+def client_context(service, *, session_id: str, client_request_id: str, group: str, require_mode_config=True):
     """Create or reuse the Run that owns one explicit local action."""
     if group not in CLIENT_GROUPS:
         raise AppError("INVALID_ARGUMENTS", "未知的本地动作。")
     mode = service.generation_mode()
-    if mode == "live":
+    if mode == "live" and require_mode_config:
         service.check_live_configuration()
     store = service.store
     run_id = client_run_id(session_id, client_request_id)
@@ -233,6 +234,41 @@ def redo_shot(
         service, session_id=session_id, client_request_id=client_request_id, group="shot_redo"
     )
     result = service.redo_shot(args, context=context)
+    if not result.get("ok"):
+        raise AppError(result["error"]["code"], result["error"]["message"])
+    return _result(service, result["data"], context.run_id, storyboard_id)
+
+
+async def assemble_film(
+    service,
+    *,
+    session_id: str,
+    client_request_id: str,
+    storyboard_id: str,
+    expected_revision: int,
+) -> dict:
+    """Concatenate the current delivered clips as an explicit local user action."""
+    args = {"storyboardId": storyboard_id, "expectedRevision": expected_revision}
+    replayed = _replay_or_conflict(service, session_id, client_request_id, "film_assemble", args)
+    if replayed is not None:
+        return replayed
+    record = storyboard_in_state(service.store.snapshot(), session_id, storyboard_id)
+    if record.revision != expected_revision:
+        raise AppError("VERSION_CONFLICT", "分镜记录已变化，请重新读取后再拼接。")
+    context = client_context(
+        service,
+        session_id=session_id,
+        client_request_id=client_request_id,
+        group="film_assemble",
+        require_mode_config=False,
+    )
+    result = await service.films.assemble(
+        project_id=session_id,
+        storyboard_id=storyboard_id,
+        expected_revision=expected_revision,
+        operation_key=_operation_key(context.run_id, "film_assemble"),
+        args=args,
+    )
     if not result.get("ok"):
         raise AppError(result["error"]["code"], result["error"]["message"])
     return _result(service, result["data"], context.run_id, storyboard_id)

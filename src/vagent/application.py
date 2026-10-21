@@ -76,6 +76,7 @@ class ApplicationService:
         self.job_worker = None
         self.media = None
         self.media_worker = None
+        self.films = None
         self._event_loop = None
         self._job_revisions = {key: job["revision"] for key, job in store.snapshot()["jobs"].items()}
         self.on_event = on_event
@@ -131,6 +132,7 @@ class ApplicationService:
             service.video_jobs = video_jobs
             service.wan_adapter = wan
             service.media = video_jobs.media
+            service.films = video_jobs.films
             service._event_loop = asyncio.get_running_loop()
             video_jobs.on_change = service._job_event
             service.job_worker = JobWorker(video_jobs)
@@ -291,6 +293,23 @@ class ApplicationService:
             storyboard_id=request["storyboardId"],
             storyboard_version=request["storyboardVersion"],
             shot_id=shot_id,
+            expected_revision=request["expectedRevision"],
+        )
+
+    def film(self, session_id, storyboard_id):
+        """Current assembled film of one storyboard, or an empty projection."""
+        assert_id(session_id)
+        assert_id(storyboard_id)
+        return self.films.view(session_id, storyboard_id)
+
+    async def assemble_film(self, session_id, request: dict) -> dict:
+        """Explicit local concatenation from the CLI/Web; zero provider calls."""
+        assert_id(session_id)
+        return await clients.assemble_film(
+            self.video_jobs,
+            session_id=session_id,
+            client_request_id=request["clientRequestId"],
+            storyboard_id=request["storyboardId"],
             expected_revision=request["expectedRevision"],
         )
 

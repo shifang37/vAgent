@@ -1,5 +1,16 @@
 import { mediaContentPath, mergeJobs, upsertJob } from "./job-state.js";
 import {
+  assembleBody,
+  filmDownloadUrl,
+  filmErrorLabel,
+  filmPlayback,
+  filmRequestPath,
+  filmSummary,
+  filmTimelineLabel,
+  filmVersions,
+  hasFilm,
+} from "./film-state.js";
+import {
   assetContentPath,
   batchSummary,
   estimateQuery,
@@ -623,6 +634,11 @@ function renderStoryboardPanel() {
       .then(() => renderStoryboardPanel())
       .catch((error) => toast(error.message));
   }
+  const filmKey = `${board.storyboardId}:${board.revision}`;
+  if (filmKey !== filmLoadedKey) {
+    filmLoadedKey = filmKey;
+    loadFilm(board).catch((error) => toast(error.message));
+  }
   const grouped = groupJobsByShot(snapshot?.jobs || [], board.shots);
   const playlist = playList(board.shots, snapshot?.jobs || []);
   const playing = sequence.index >= 0 ? sequence.items?.[sequence.index] : null;
@@ -637,6 +653,7 @@ function renderStoryboardPanel() {
     </div>
     ${playing ? sequencePlayer(playing, playlist) : ""}
     ${playlist.missing.length ? `<p class="meta">${playlist.missing.length} 个镜头还没有本地媒体，连播会跳过：${playlist.missing.map((item) => escapeHTML(item.label)).join("、")}</p>` : ""}
+    ${filmSection(board)}
     <div class="shot-list">${board.shots.map((shot) => shotCard(shot, grouped.byShot[shot.id] || [])).join("")}</div>
     ${grouped.ungrouped.length ? `<h3>其他视频任务</h3>${grouped.ungrouped.map((job) => jobCard(job, false)).join("")}` : ""}`;
   icons(panel);
@@ -650,6 +667,81 @@ function renderStoryboardPanel() {
   }
   bindPanelMedia(panel);
   bindShotThumbnails(panel);
+}
+
+// Film state is fetched per storyboard revision; assembling never changes the
+// revision, so a successful merge only replaces the film view.
+let filmState = null;
+let filmLoadedKey = null;
+let filmBusy = false;
+let filmError = null;
+
+async function loadFilm(board) {
+  const path = filmRequestPath(board, activeId);
+  if (!path) return;
+  try {
+    const result = await api(path);
+    filmState = result.film || null;
+    filmError = null;
+  } catch (error) {
+    filmError = { code: error.code, message: error.message };
+  }
+  if (panelMode === "storyboard") renderStoryboardPanel();
+}
+
+function filmSection(board) {
+  const film = filmState;
+  const playback = filmPlayback(film);
+  const versions = filmVersions(film);
+  const canAssemble = Boolean(assembleBody(board, "probe"));
+  const rows = versions
+    .map((version) => {
+      const download = filmDownloadUrl(version);
+      return `<li><span>${escapeHTML(version.label)}${version.current ? "（当前）" : "（历史）"} · ${version.shots} 个镜头 · ${escapeHTML(filmTimelineLabel(version))}</span>
+        <span class="job-state ${version.mediaAvailable ? "succeeded" : "attention"}">${version.mediaAvailable ? "可播放" : "文件不可用"}</span>
+        ${download ? `<a class="secondary" href="${escapeHTML(download)}" download="film-${escapeHTML(film.filmId)}-${version.index}.mp4">下载</a>` : ""}</li>`;
+    })
+    .join("");
+  const player = playback.url
+    ? `<video id="film-video" class="film-video" src="${escapeHTML(playback.url)}" controls preload="metadata" playsinline aria-label="成片播放"></video>`
+    : `<p class="meta">${hasFilm(film) ? "成片文件当前不可用；可以重新拼接生成新版本。" : "还没有成片。所有镜头交付后，可以在这里本地拼接为单一 MP4。"}</p>`;
+  return `<section class="film-section" aria-label="成片">
+    <div class="film-head"><strong>成片</strong><span class="meta">${escapeHTML(filmSummary(film))}</span></div>
+    ${player}
+    ${rows ? `<ul class="film-versions">${rows}</ul>` : ""}
+    <div class="film-actions">
+      <button class="primary" data-action="assemble-film" ${filmBusy || !canAssemble ? "disabled" : ""}>${filmBusy ? "正在本地拼接…" : hasFilm(film) ? "重新拼接成片" : "拼接成片"}</button>
+      <button class="secondary" data-action="refresh-film" ${filmBusy ? "disabled" : ""}>刷新成片</button>
+    </div>
+    ${filmError ? `<p class="meta film-error">${escapeHTML(filmErrorLabel(filmError))}</p>` : ""}
+  </section>`;
+}
+
+async function assembleFilm() {
+  const board = storyboard();
+  const body = assembleBody(board, crypto.randomUUID());
+  if (!body) {
+    toast("还没有可拼接的分镜。");
+    return;
+  }
+  if (filmBusy) return;
+  filmBusy = true;
+  filmError = null;
+  renderStoryboardPanel();
+  try {
+    filmState = await post(
+      `/api/sessions/${encodeURIComponent(activeId)}/films/assemble`,
+      body,
+    );
+    filmLoadedKey = `${board.storyboardId}:${board.revision}`;
+    toast("已在本地拼接成片。");
+  } catch (error) {
+    filmError = { code: error.code, message: error.message };
+    toast(filmErrorLabel(filmError));
+  } finally {
+    filmBusy = false;
+    if (panelMode === "storyboard") renderStoryboardPanel();
+  }
 }
 
 function shotCard(shot, jobs) {
@@ -1343,6 +1435,13 @@ document.addEventListener("click", async (event) => {
     if (action === "refresh-storyboard")
       await refreshSession(activeId).catch((error) => toast(error.message));
     if (action === "toggle-all-shots") toggleAllShots();
+    if (action === "assemble-film") await assembleFilm();
+    if (action === "refresh-film") {
+      filmLoadedKey = null;
+      filmState = null;
+      filmError = null;
+      if (panelMode === "storyboard") renderStoryboardPanel();
+    }
     if (action === "batch-selected") await confirmBatch();
     if (action === "confirm-batch") await submitBatch();
     if (action === "redo-shot") await redoShot(shotIdOf(event));
