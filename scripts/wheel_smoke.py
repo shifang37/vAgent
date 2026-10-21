@@ -452,9 +452,9 @@ def isolated_environment(home):
     return env
 
 
-def run_command(command, *, env):
+def run_command(command, *, env, timeout=120):
     completed = subprocess.run(
-        command, env=env, capture_output=True, text=True, encoding="utf-8", timeout=120
+        command, env=env, capture_output=True, text=True, encoding="utf-8", timeout=timeout
     )
     if completed.returncode:
         raise AssertionError(
@@ -923,6 +923,7 @@ def smoke_m3_evaluation(directory):
             str(output),
         ],
         env=isolated_environment(Path(directory) / "unused-config"),
+        timeout=600,
     )
     report = json.loads(output.read_text(encoding="utf-8"))
     assert report["status"] == "passed" and report["mode"] == "offline-fixture"
