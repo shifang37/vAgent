@@ -81,3 +81,4 @@ node --test tests/test_job_state.mjs tests/test_storyboard_state.mjs tests/test_
 - Ubuntu 与 macOS 的安装态拼接只用 Linux wheel 哈希记录，尚未在本机执行；Linux/Windows CI 会在 E4 覆盖。
 - 未引用过的遗留最终文件（事务失败后 rename 成功的孤儿）不自动删除：启动只清理 `.part`，避免从孤立文件推造成功；如需人工清理，须在服务退出后按 `media/<project>/<uuid>.mp4` 核对 `state.json` 的 `media` 索引。
 - 本机 `.vagent/web` 与 `output/` 中的历史真实媒体未被本次改动迁移或重写；E4 计划用真实数据目录做零新增费用的成片验收。
+- **E4 已完成**：离线成片套件、安装态 wheel、受控浏览器成片播放（v1/v2、拖动、下载）与 M2 真实三个万相镜头的零新增费用成片（42 项检查）均通过；E4 还修正了 AAC `esds` 码率描述被误当拼接配置的兼容性问题。见 [M3 验收](./M3_ACCEPTANCE.md)。

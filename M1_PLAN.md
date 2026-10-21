@@ -3,9 +3,9 @@
 > 更新日期：2026-10-21
 > 状态：M1-A、M1-B、M1-C 已全部验收完成（M1-C 真实单镜头已交付本地 MP4），并已整体合入 master（`cc3628e`，2026-10-16）；当前已完成内容、验证与限制以 [README](./README.md) 为准。
 > M2：**D0–D4 全部完成（2026-10-17），含真实成本受控多镜头联调（2 镜头 + 1 次单镜头重做，submit=3、估算 9.00 CNY，三个真实 MP4 本地交付）**，并已整体合入 master（`8776482`，2026-10-17）；计划见 [M2 任务规划](./docs/M2_PLAN.md)，进度见 [D2 验收](./docs/M2_D2_ACCEPTANCE.md)、[D3 验收](./docs/M2_D3_ACCEPTANCE.md) 与 [D4 验收](./docs/M2_ACCEPTANCE.md)。
-> M3：**E0–E3 已完成，E4 待实施（2026-10-21）**。已冻结本地拼接、Kling/fal、headless 两阶段授权与用户 skills 契约；E1 交付本地成片，E2 接入多供应商与中转，E3 交付 headless 与用户 skills，视频 submit=0；两 Key 直用 K0–K3 已独立完成。见 [M3 任务规划](./docs/M3_PLAN.md)、[M3 契约](./docs/M3_CONTRACTS.md) 与 [E3 验收](./docs/M3_E3_ACCEPTANCE.md)。
+> M3：**E0–E4 已完成（2026-10-21）**。已冻结本地拼接、Kling/fal、headless 两阶段授权与用户 skills 契约；E1 交付本地成片，E2 接入多供应商与中转，E3 交付 headless 与用户 skills，E4 完成离线端到端、安装态 wheel、受控浏览器、四组 CI 与零新增费用的真实数据成片，视频 submit=0；两 Key 直用 K0–K3 已独立完成。见 [M3 任务规划](./docs/M3_PLAN.md)、[M3 契约](./docs/M3_CONTRACTS.md) 与 [M3 验收](./docs/M3_ACCEPTANCE.md)。
 > 设计依据：[产品设计](./DESIGN.md)、[Agent 选型与 Harness 设计](./AGENT_HARNESS_DESIGN.md)。  
-> 当前优先级：**M3 E4 端到端验收与打包**，按已冻结的 [M3 契约](./docs/M3_CONTRACTS.md) 实施并保持 submit=0。M1-C 真实单镜头历史证据见 [M1-C 验收](./docs/M1C_ACCEPTANCE.md)，M2 多镜头证据见 [M2 验收](./docs/M2_ACCEPTANCE.md)，K 轨证据见 [K3 验收](./docs/KEYS_ONLY_K3_ACCEPTANCE.md)；实际账单仍未知。
+> 当前优先级：**M3 已全部完成**；E4 用 M2 真实三个万相 MP4 以零新增费用完成成片（42 项检查），新增付费样本未执行，Kling/fal 真实账号保持「未做真实样本」标注。M1-C 真实单镜头历史证据见 [M1-C 验收](./docs/M1C_ACCEPTANCE.md)，M2 多镜头证据见 [M2 验收](./docs/M2_ACCEPTANCE.md)，K 轨证据见 [K3 验收](./docs/KEYS_ONLY_K3_ACCEPTANCE.md)，M3 结论见 [M3 验收](./docs/M3_ACCEPTANCE.md)；实际账单仍未知。
 
 当前已补齐 SQLite 图检查点和 `vagent resume RUN_ID`，包含部分工具提交后的重放保护与累计预算验证，记录见 [持久恢复验收](./docs/RECOVERY_ACCEPTANCE.md)。2026-10-08 新增共享应用服务、本地 Web API/SSE 与只读 MCP；首组真实 DeepSeek 多轮编排已验证，发现记忆冗余与文本长度约束问题，详见 [编排验收](./docs/AGENT_ORCHESTRATION_ACCEPTANCE.md)。
 
@@ -297,6 +297,6 @@ M1-B 增加 `GET /api/jobs/:id` 和 Job 事件；M1-C 增加媒体接口和下�
 
 M1-A 的 Agent 技术基线、Harness、DeepSeek 工具循环、最小 CLI/Web 和验收记录已交付。M1-B 的 B0–B5 已完成，完整应用、真实 DeepSeek + Mock 套件与独立安装均已验收；M1-C 的 C0–C3.2 已完成：真实单镜头视频已交付本地 MP4，并通过媒体接口与浏览器播放、拖动和下载验证。
 
-M2 已完成多镜头生成、逐镜头重做、素材库与客户端序列连播，并合入 master；两 Key 直用 K0–K3 已完成。M3 E0 已冻结契约；E1 交付 schema v5、成片域与本地拼接，E2 接入 Kling 直连与 fal 中转，E3 交付 headless 两阶段授权与用户 skills 扩展点，下一工作包 E4 执行离线端到端、wheel/CI 与经明确授权的真实样本；范围与门槛见 [M3 任务规划](./docs/M3_PLAN.md)。公共 PyPI 发布仍独立于本地 wheel 验收，可执行插件与插件市场继续顺延。
+M2 已完成多镜头生成、逐镜头重做、素材库与客户端序列连播，并合入 master；两 Key 直用 K0–K3 已完成。M3 E0 已冻结契约；E1 交付 schema v5、成片域与本地拼接，E2 接入 Kling 直连与 fal 中转，E3 交付 headless 两阶段授权与用户 skills 扩展点，E4 完成离线端到端 6/6、安装态 wheel、受控浏览器 7/7、四组 CI 与零新增费用的真实数据成片（42 项检查）；新增付费样本未执行。范围与结论见 [M3 任务规划](./docs/M3_PLAN.md) 与 [M3 验收](./docs/M3_ACCEPTANCE.md)。公共 PyPI 发布仍独立于本地 wheel 验收，可执行插件与插件市场继续顺延。
 
 参考资料和框架对比见 [Agent 选型与 Harness 设计](./AGENT_HARNESS_DESIGN.md)。原始设计中与本计划不一致的 M1 顺序、首个视频候选和首次 Key 要求，以本计划的分阶段定义为准。

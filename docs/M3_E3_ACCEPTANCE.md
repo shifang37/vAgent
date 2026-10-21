@@ -64,6 +64,7 @@ node --check web/app.js && node --test tests/test_job_state.mjs tests/test_story
 - 真实 Kling/fal/Wan 账号的鉴权、地域可达性、编码兼容、CDN 下载与账单仍未验证；headless 的真实付费路径留给 E4 的显式额度样本。
 - 受控浏览器中的 headless 交互（计划核对界面）不在 M3 范围；Web 只同步了用户 skill 诊断说明。
 - `scripts/evaluate_m3.py`、wheel smoke 扩展、四组 CI、`docs/M3_ACCEPTANCE.md` 与 README 全量验收数据属于 **E4**。
+- **E4 已完成**：离线套件的 headless 计划（submit=0）与显式授权交付（2 Job→本地成片、重放不重提）均通过，安装态 6 用例套件 PASS；真实编排模型与真实付费授权仍未执行。见 [M3 验收](./M3_ACCEPTANCE.md)。
 
 ## 5. 失败与偏差记录
 

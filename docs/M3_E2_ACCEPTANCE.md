@@ -66,6 +66,7 @@ node --check web/app.js && node --test tests/test_job_state.mjs tests/test_story
 - `VAGENT_HOME/skills/` 用户扩展点与 `vagent headless` 属 **E3**；离线端到端脚本、wheel smoke、四组 CI 与 `docs/M3_ACCEPTANCE.md` 属 **E4**。
 - 跨供应商镜头的真实编码兼容性未做真实样本；`mp4-copy-signature-v1` 已在 E1 拒绝不兼容输入，但「Kling 与 fal 的实际输出可拼接」不作承诺。
 - 未在受控浏览器中重跑设置页多供应商交互；Web 端只做了 Node 状态测试与 HTTP 层回归，浏览器证据留待 E4。
+- **E4 已完成**：受控浏览器已验证 Kling/fal Key 保存与「鉴权/模型权限未验证」标注（并修复切换供应商后输入框仍禁用的问题），安装态 wheel 也验证了多供应商设置投影；真实 Kling/fal 账号与账单仍未做样本。见 [M3 验收](./M3_ACCEPTANCE.md)。
 
 ## 5. 失败与偏差记录
 

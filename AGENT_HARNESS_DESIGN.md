@@ -298,9 +298,9 @@ M2 在 M1 之上加入结构化分镜、多镜头生成、逐镜头重做、图�
 **D2/D3 实现状态（2026-10-17）**：D2 交付多镜头批量原子登记、三重上限与额度快照、集合等待（execution v3 的 `jobset` 绑定）、部分失败隔离、逐镜头重做，并把 live 切换到 4/4 与 `wan27-shot-beijing-v2`（`wan-http-v2`，受控 HTTP）. D3 在同一 4/4 版本内新增只读素材工具 `asset_read`、素材库导入/读取接口与文件恢复、用量聚合读取侧、以及 CLI（`storyboard show`、`shots redo`、`assets list|import`、`usage --project`）与 Web 分镜界面（分镜面板、批量确认、序列连播、素材库页、用量面板）；显式用户动作使用独立的“客户端 Run”，不占用对话 Run 的 latest 与额度。由于 M2 视图在 4/4 内新增工具，D2 构建录制的 M2 Run 不承诺跨 D3 恢复（显式恢复返回 `RESUME_CONFIG_CHANGED`，与 D1 记录的边界一致；D2 签名哈希保存在 `tests/test_m2_compatibility.py`），`for_execution_version(1/2/3)` 继续排除全部 M2 工具，pre-M2 签名逐字节不变。证据见 [D2 验收](./docs/M2_D2_ACCEPTANCE.md)与 [D3 验收](./docs/M2_D3_ACCEPTANCE.md)。
 **D4 实现状态（2026-10-17）**：新增 `scripts/evaluate_m2.py`（默认离线的 M2 端到端套件：live 模式 + 受控上游 + 本地测试媒体 + 加速夹具时钟，7 用例）与 `tests/test_m2_evaluation.py`；`scripts/wheel_smoke.py` 扩展到安装态 M2 工作台（分镜/素材 CLI 与 HTTP 面）与离线套件。D4 未改动任何工具签名、规则文本、执行/上下文版本、能力版本、价格、来源策略或校验版本——只新增脚本与测试，因此 D3 记录的恢复边界与 pre-M2 逐字节签名证据保持不变。证据见 [M2 验收](./docs/M2_ACCEPTANCE.md)。D4 亦完成真实成本受控多镜头联调：一次登记两个镜头、集合等待后逐镜头本地交付，随后一次显式单镜头重做，共 3 次提交、9.00 CNY 估算，结果主机仍在 `wan-result-hosts-v2` 内；i2v/首尾帧与镜头延长未做真实样本。
 
-### 8.6 M3 成片、多供应商与 headless（E0 冻结，E1/E2/E3 已实施）
+### 8.6 M3 成片、多供应商与 headless（E0 冻结，E1–E4 已实施）
 
-2026-10-21 完成 E0，实施契约见 [M3 契约](./docs/M3_CONTRACTS.md)，研究和合成证据见 [E0 验收](./docs/M3_E0_ACCEPTANCE.md)。E0 仅冻结要求与基线；**E1、E2 与 E3 已按下列规则实施**（见 [E1 验收](./docs/M3_E1_ACCEPTANCE.md)、[E2 验收](./docs/M3_E2_ACCEPTANCE.md)、[E3 验收](./docs/M3_E3_ACCEPTANCE.md)），E4 尚未实施，视频 submit=0。
+2026-10-21 完成 E0，实施契约见 [M3 契约](./docs/M3_CONTRACTS.md)，研究和合成证据见 [E0 验收](./docs/M3_E0_ACCEPTANCE.md)。E0 仅冻结要求与基线；**E1–E4 已按下列规则实施**（见 [E1 验收](./docs/M3_E1_ACCEPTANCE.md)、[E2 验收](./docs/M3_E2_ACCEPTANCE.md)、[E3 验收](./docs/M3_E3_ACCEPTANCE.md) 与 [M3 验收](./docs/M3_ACCEPTANCE.md)），视频 submit=0。E4 的端到端验收修复了 `film_assemble` 的 Runner 执行上下文、`film-state.js` 静态资源、设置页供应商切换与 AAC `esds` 码率归一化四个缺陷；新增付费样本未执行。
 
 E1 新增 `Film`/只增不改的 `FilmVersion`，以分镜当前版本与最新已交付 ShotVersion 的有序快照生成本地成片；缺失或未完成镜头整体拒绝。`film_assemble` 为可取消的本地异步写工具：锁内取快照与登记意图，锁外执行受限子进程，锁内复核来源 revision/哈希并原子登记版本、FilmMedia 与完成操作。不能在现有同步工具锁内运行 FFmpeg。它不创建 generation Job、不增加 submit；`film_read` 只读。schema v5 仅新增空 `films` 与外壳版本，旧记录不补字段；`media` 使用独立 FilmMedia union 分支，禁止伪造生成 Job。
 
