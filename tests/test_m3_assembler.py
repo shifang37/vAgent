@@ -20,6 +20,7 @@ from vagent.video.assembler import (
 )
 from vagent.video.copy_signature import (
     SignatureError,
+    _aac_config,
     compatibility,
     read_copy_signature,
 )
@@ -75,6 +76,59 @@ def test_compatibility_explains_the_first_encoding_difference():
     with pytest.raises(SignatureError) as error:
         compatibility([parsed, changed])
     assert "video.avcC" in str(error.value)
+
+
+def _esds(max_bitrate, avg_bitrate, audio_specific=bytes.fromhex("121056e500")):
+    """One ES descriptor whose decoder config carries the given bitrate metadata."""
+    decoder = (
+        bytes([0x40, 0x15])
+        + b"\x00\x00\x00"
+        + max_bitrate.to_bytes(4, "big")
+        + avg_bitrate.to_bytes(4, "big")
+        + bytes([0x05, len(audio_specific)])
+        + audio_specific
+        + bytes([0x06, 0x01, 0x02])
+    )
+    body = b"\x00\x00\x00" + bytes([0x04, len(decoder)]) + decoder
+    return b"\x00\x00\x00\x00" + bytes([0x03, len(body)]) + body
+
+
+def test_audio_bitrate_metadata_is_not_part_of_the_copy_configuration():
+    """Providers vary the esds max/avg bitrate; the AAC decoder config is unchanged."""
+    first = _aac_config(_esds(128_043, 128_043))
+    second = _aac_config(_esds(127_719, 127_719))
+    assert first == second
+    assert first == {
+        "objectTypeIndication": 0x40,
+        "streamType": 0x15,
+        "audioSpecificConfig": "121056e500",
+    }
+    changed = _aac_config(_esds(128_043, 128_043, audio_specific=bytes.fromhex("118856e500")))
+    assert changed["audioSpecificConfig"] != first["audioSpecificConfig"]
+
+    parsed = signature()
+    compatible = replace(
+        parsed,
+        config={**parsed.config, "audio": {**parsed.config["audio"], "esds": first}},
+    )
+    assert compatibility([compatible, compatible])[0]["configs"] == [
+        compatible.config_sha256(),
+        compatible.config_sha256(),
+    ]
+    incompatible = replace(
+        parsed,
+        config={**parsed.config, "audio": {**parsed.config["audio"], "esds": changed}},
+    )
+    with pytest.raises(SignatureError) as error:
+        compatibility([compatible, incompatible])
+    assert "audio.esds" in str(error.value)
+
+
+def test_unknown_esds_structure_is_refused():
+    with pytest.raises(SignatureError):
+        _aac_config(b"\x00\x00\x00\x00\x03\x00")
+    with pytest.raises(SignatureError):
+        _aac_config(b"\x00\x00\x00\x00" + bytes([0x03, 0x03, 0, 0, 0]))
 
 
 def test_unknown_top_level_box_is_refused(tmp_path):

@@ -251,7 +251,11 @@ class ToolRegistry:
 
     def requires_context(self, name: str) -> bool:
         definition = self._definitions.get(name)
-        return definition is not None and definition.context_execute is not None
+        if definition is None:
+            return False
+        # An async local write (M3 film assembly) executes outside the Store lock,
+        # but it still needs the server-side scope to validate and replay.
+        return definition.context_execute is not None or definition.async_write_execute is not None
 
     def specs(self) -> list[dict]:
         return [

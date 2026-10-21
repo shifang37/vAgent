@@ -12,7 +12,7 @@ import sysconfig
 import tempfile
 import zlib
 from contextlib import chdir
-from datetime import datetime
+from datetime import datetime, timedelta
 from pathlib import Path
 
 import httpx
@@ -675,6 +675,264 @@ def smoke_m2_evaluation(directory):
     return report
 
 
+async def smoke_m3_film(directory):
+    """Installed M3 surface: local assembly, film media HTTP, CLI and provider settings."""
+    import vagent.application as application
+
+    home = Path(directory) / "m3-workbench"
+    sample = Path(__file__).resolve().parent.parent / "tests" / "fixtures" / "m1c" / "sample-720p.mp4"
+    data = sample.read_bytes()
+    video_url = "https://dashscope-result-sh.oss-accelerate.aliyuncs.com/wheel-film.mp4?Signature=wheel"
+    fixture = {"submissions": 0, "queries": 0, "downloads": 0}
+    clock = [datetime.fromisoformat("2030-01-01T00:00:00+00:00")]
+
+    def upstream(request):
+        if request.method == "POST":
+            fixture["submissions"] += 1
+            task_id = f"wheel-film-task-{fixture['submissions']}"
+            return httpx.Response(
+                200,
+                json={
+                    "request_id": "wheel-film-submit",
+                    "output": {"task_id": task_id, "task_status": "PENDING"},
+                },
+            )
+        fixture["queries"] += 1
+        task = request.url.path.rsplit("/", 1)[-1]
+        return httpx.Response(
+            200,
+            json={
+                "request_id": "wheel-film-query",
+                "output": {"task_id": task, "task_status": "SUCCEEDED", "video_url": video_url},
+            },
+        )
+
+    async def media(request):
+        fixture["downloads"] += 1
+        return httpx.Response(
+            200, content=data, headers={"Content-Type": "video/mp4", "Content-Length": str(len(data))}
+        )
+
+    def advance(service):
+        deadlines = []
+        active = []
+        for job in service.video_jobs.list():
+            if job.status in {"pending_submit", "submitting", "queued", "running", "downloading"}:
+                active.append(job)
+            if job.next_poll_at and not job.query_started_at:
+                deadlines.append(datetime.fromisoformat(job.next_poll_at))
+            download = getattr(job, "download", None)
+            if download is not None and download.next_attempt_at:
+                deadlines.append(datetime.fromisoformat(download.next_attempt_at))
+        if not active:
+            return
+        target = min(deadlines) if deadlines else clock[0] + timedelta(seconds=1)
+        if target <= clock[0]:
+            target = clock[0] + timedelta(seconds=1)
+        clock[0] = target
+
+    originals = (
+        application.WanAdapter,
+        application.MediaHttpClient,
+        application.JobService,
+        application.JobWorker,
+        application.MediaWorker,
+    )
+    application.WanAdapter = lambda **kwargs: WanAdapter(**kwargs, transport=httpx.MockTransport(upstream))
+    application.MediaHttpClient = lambda: MediaHttpClient(transport=httpx.MockTransport(media))
+    application.JobService = lambda *args, **kwargs: JobService(*args, **kwargs, clock=lambda: clock[0])
+    application.JobWorker = lambda service: JobWorker(service, idle_interval_seconds=0.05)
+    application.MediaWorker = lambda media_service, client: MediaWorker(
+        media_service, client, idle_interval_seconds=0.05
+    )
+    try:
+        config = load_config(
+            {
+                "VAGENT_HOME": str(home),
+                "VAGENT_VIDEO_MODE": "live",
+                "VAGENT_DASHSCOPE_KEY": "wheel-wan-placeholder",
+                "VAGENT_DASHSCOPE_WORKSPACE_ID": "wheel-fixture",
+                "VAGENT_KLING_API_KEY": "wheel-kling-placeholder",
+                "FAL_KEY": "wheel-fal-placeholder",
+            }
+        )
+        async with ApplicationService.open(config, model=DemoModel()) as service:
+            service.store.ensure_session("wheel-film")
+            saved = service.tools.execute(
+                "storyboard_save",
+                {
+                    "title": "wheel 成片",
+                    "shots": [
+                        {"description": "镜头一：雨夜街道", "framing": "wide", "durationSeconds": 5},
+                        {"description": "镜头二：推门入店", "framing": "medium", "durationSeconds": 5},
+                    ],
+                },
+                store=service.store,
+                project_id="wheel-film",
+                operation_key="m3-wheel-storyboard",
+            )
+            assert saved["ok"], saved
+            storyboard_id = saved["data"]["storyboardId"]
+            shot_ids = saved["data"]["shotIds"]
+            registered = service.generate_shots(
+                "wheel-film",
+                {
+                    "clientRequestId": "m3-wheel-batch",
+                    "storyboardId": storyboard_id,
+                    "storyboardVersion": saved["data"]["version"],
+                    "shotIds": shot_ids,
+                    "confirm": True,
+                },
+            )
+            assert [entry["jobId"] for entry in registered["shots"]]
+            async with asyncio.timeout(30):
+                while True:
+                    jobs = [service.video_jobs.get(entry["jobId"]) for entry in registered["shots"]]
+                    if all(job.status == "succeeded" for job in jobs):
+                        break
+                    advance(service)
+                    await asyncio.sleep(0.01)
+            revision = service.store.snapshot()["storyboards"][storyboard_id]["revision"]
+            film = await service.assemble_film(
+                "wheel-film",
+                {
+                    "clientRequestId": "m3-wheel-assemble",
+                    "storyboardId": storyboard_id,
+                    "expectedRevision": revision,
+                },
+            )
+            assert film["currentVersion"] == 1 and len(film["latest"]["inputs"]) == 2
+            assert film["latest"]["width"] == 1280 and film["latest"]["hasAudio"] is True
+            assert abs(film["latest"]["durationSeconds"] - 10.021289) <= 0.05
+            film_media_id = film["latest"]["outputMediaId"]
+            film_path = home / "media" / "wheel-film" / f"{film_media_id}.mp4"
+            assert film_path.is_file()
+            assert hashlib.sha256(film_path.read_bytes()).hexdigest() == film["latest"]["sha256"]
+            assert fixture["submissions"] == 2
+
+            app = create_app(config)
+            app.state.service = service
+            async with httpx.AsyncClient(
+                transport=httpx.ASGITransport(app=app), base_url="http://127.0.0.1:3210"
+            ) as client:
+                view = (
+                    await client.get(f"/api/films/{storyboard_id}", params={"projectId": "wheel-film"})
+                ).json()
+                assert view["film"]["currentVersion"] == 1
+                detail = (await client.get(f"/api/media/{film_media_id}")).json()
+                assert detail["mediaAvailable"] and detail["sizeBytes"] == film["latest"]["sizeBytes"]
+                content = await client.get(detail["contentUrl"])
+                assert content.status_code == 200 and content.headers["content-type"] == "video/mp4"
+                ranged = await client.get(detail["contentUrl"], headers={"Range": "bytes=0-99"})
+                assert ranged.status_code == 206 and len(ranged.content) == 100
+                attachment = await client.get(detail["contentUrl"] + "?download=1")
+                assert attachment.headers["content-disposition"] == (
+                    f'attachment; filename="{film_media_id}.mp4"'
+                )
+            providers = {entry["provider"]: entry for entry in service.provider_configuration()}
+            assert providers["kling"]["keyConfigured"] is True
+            assert providers["fal"]["keyConfigured"] is True
+            assert providers["kling"]["permissionStatus"] == "unverified"
+            assert "wheel-kling-placeholder" not in json.dumps(service.provider_configuration())
+        assert not (home / "instance.lock").exists()
+
+        cli = Path(sysconfig.get_path("scripts")) / ("vagent.exe" if os.name == "nt" else "vagent")
+        env = {**isolated_environment(home), "VAGENT_VIDEO_MODE": "off"}
+        shown = json.loads(
+            run_command(
+                [str(cli), "film", "show", "-s", "wheel-film", "--storyboard", storyboard_id],
+                env=env,
+            )
+        )
+        assert shown["film"]["currentVersion"] == 1
+        assembled = json.loads(
+            run_command(
+                [
+                    str(cli),
+                    "film",
+                    "assemble",
+                    "-s",
+                    "wheel-film",
+                    "--storyboard",
+                    storyboard_id,
+                    "--expected-revision",
+                    str(revision),
+                    "--request-id",
+                    "m3-wheel-cli",
+                ],
+                env=env,
+            )
+        )
+        assert assembled["latest"]["outputMediaId"] == film_media_id
+        replay = json.loads(
+            run_command(
+                [
+                    str(cli),
+                    "film",
+                    "assemble",
+                    "-s",
+                    "wheel-film",
+                    "--storyboard",
+                    storyboard_id,
+                    "--expected-revision",
+                    str(revision),
+                    "--request-id",
+                    "m3-wheel-cli",
+                ],
+                env=env,
+            )
+        )
+        assert replay == assembled
+        assert not (home / "instance.lock").exists()
+        return {
+            "storyboardId": storyboard_id,
+            "shotIds": shot_ids,
+            "jobIds": [entry["jobId"] for entry in registered["shots"]],
+            "filmId": film["filmId"],
+            "filmMediaId": film_media_id,
+            "filmSha256": film["latest"]["sha256"],
+            "filmSizeBytes": film["latest"]["sizeBytes"],
+            "filmDurationSeconds": film["latest"]["durationSeconds"],
+            "submitCalls": fixture["submissions"],
+            "downloadCalls": fixture["downloads"],
+            "filmHttpVerified": True,
+            "providerSettingsVerified": True,
+            "cliFilmShowAndReplay": True,
+            "lockReleased": True,
+        }
+    finally:
+        (
+            application.WanAdapter,
+            application.MediaHttpClient,
+            application.JobService,
+            application.JobWorker,
+            application.MediaWorker,
+        ) = originals
+
+
+def smoke_m3_evaluation(directory):
+    output = Path(directory) / "m3-evaluation.json"
+    run_command(
+        [
+            sys.executable,
+            "-I",
+            str(Path(__file__).with_name("evaluate_m3.py").resolve()),
+            "--home",
+            str(Path(directory) / "m3-state"),
+            "--output",
+            str(output),
+        ],
+        env=isolated_environment(Path(directory) / "unused-config"),
+    )
+    report = json.loads(output.read_text(encoding="utf-8"))
+    assert report["status"] == "passed" and report["mode"] == "offline-fixture"
+    assert report["totals"]["passedCases"] == report["totals"]["plannedCases"] == 6
+    assert report["totals"]["submitCalls"] == 11
+    assert report["totals"]["filmVersions"] == 6
+    assert not (Path(report["dataDirectory"]) / "instance.lock").exists()
+    return report
+
+
 def seed_keys_only_storyboard(home):
     """One fresh project with a single 5 s t2v shot; nothing else exists yet."""
     home.mkdir(parents=True, exist_ok=True)
@@ -917,7 +1175,15 @@ async def main(output=None):
                 async with httpx.AsyncClient(
                     transport=httpx.ASGITransport(app=app), base_url="http://127.0.0.1:3210"
                 ) as client:
-                    for path in ["/", "/app.js", "/styles.css", "/mark.svg"]:
+                    for path in [
+                        "/",
+                        "/app.js",
+                        "/film-state.js",
+                        "/job-state.js",
+                        "/storyboard-state.js",
+                        "/styles.css",
+                        "/mark.svg",
+                    ]:
                         assert (await client.get(path)).status_code == 200
                     health = (await client.get("/api/health")).json()
                     assert len(health["mcp"][0]["tools"]) == 2
@@ -983,6 +1249,8 @@ async def main(output=None):
             m1c_report = smoke_m1c_evaluation(directory)
             m2_workbench = await smoke_m2_workbench(directory)
             m2_report = smoke_m2_evaluation(directory)
+            m3_film = await smoke_m3_film(directory)
+            m3_report = smoke_m3_evaluation(directory)
             keys_only_report = await smoke_keys_only_live(directory)
             report = {
                 "status": "passed",
@@ -1002,6 +1270,8 @@ async def main(output=None):
                     "sevenCaseM1cSuite": True,
                     "m2WorkbenchCliAndHttp": True,
                     "sevenCaseM2Suite": True,
+                    "m3FilmWorkbenchCliAndHttp": True,
+                    "sixCaseM3Suite": True,
                     "keysOnlyLiveSharedHost": True,
                 },
                 "videoRestart": video_report,
@@ -1010,6 +1280,8 @@ async def main(output=None):
                 "m1cEvaluation": m1c_report,
                 "m2Workbench": m2_workbench,
                 "m2Evaluation": m2_report,
+                "m3Film": m3_film,
+                "m3Evaluation": m3_report,
                 "keysOnlyLive": keys_only_report,
             }
     report["temporaryDataCleaned"] = not Path(directory).exists()
@@ -1017,7 +1289,7 @@ async def main(output=None):
         output.parent.mkdir(parents=True, exist_ok=True)
         output.write_text(json.dumps(report, ensure_ascii=False, indent=2), encoding="utf-8")
     print(
-        "PASS: installed wheel, Web assets, config, streaming, text/quality, MCP, mock video tools, durable wait, original Run restart/automatic continuation, readonly delivery, unchanged budgets, CLI list/get/usage, five M1-B cases, live protocol with local media restart and CLI media evidence, seven M1-C cases, M2 storyboard/asset CLI and HTTP surface, seven M2 cases, keys-only live shared-host fixture with zero-cost save probe and hot registration, cleanup."
+        "PASS: installed wheel, Web assets, config, streaming, text/quality, MCP, mock video tools, durable wait, original Run restart/automatic continuation, readonly delivery, unchanged budgets, CLI list/get/usage, five M1-B cases, live protocol with local media restart and CLI media evidence, seven M1-C cases, M2 storyboard/asset CLI and HTTP surface, seven M2 cases, M3 local film assembly with film media HTTP/CLI replay and provider settings, six M3 cases, keys-only live shared-host fixture with zero-cost save probe and hot registration, cleanup."
     )
     return report
 

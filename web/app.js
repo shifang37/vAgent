@@ -1209,6 +1209,9 @@ function renderSettings(config, notice = "") {
       const videoInput = $("#config-video-key");
       videoInput.value = "";
       videoInput.placeholder = entry && entry.keyConfigured ? "已配置，留空保持" : "输入该供应商的 API Key";
+      // The field is rendered for the startup provider; switching providers must
+      // re-evaluate its own editability instead of keeping the previous one's state.
+      videoInput.disabled = !config.editable[keyFields[provider]] || config.busy;
       $("#config-video-probe").textContent = "视频权限：" + videoProbeText(config, provider);
       $("#config-video-estimate").textContent = "固定规格：5 秒 · 720P · 16:9。" + providerEstimateText(config, provider);
     });

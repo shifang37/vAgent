@@ -236,3 +236,26 @@ async def test_web_exposes_saved_length_check_and_rejects_oversize_revision(tmp_
         artifact = (await client.get(f"/api/artifacts/{artifact_id}")).json()
         assert len(artifact["versions"]) == 1
         assert artifact["versions"][0]["content"] == "雨夜咖啡"
+
+
+async def test_web_serves_every_frontend_module_and_import(tmp_path):
+    """The shell and every module it imports must be served; a missing one breaks the UI."""
+    import re
+
+    async with client_for(tmp_path) as (client, _service):
+        shell = await client.get("/app.js")
+        assert shell.status_code == 200
+        imported = set(re.findall(r'from "\./([^"]+)"', shell.text))
+        assert "film-state.js" in imported
+        for name in {
+            "index.html",
+            "app.js",
+            "film-state.js",
+            "job-state.js",
+            "storyboard-state.js",
+            "styles.css",
+            "mark.svg",
+        } | imported:
+            response = await client.get(f"/{name}")
+            assert response.status_code == 200, name
+            assert response.content, name

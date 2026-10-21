@@ -380,7 +380,15 @@ def create_app(config, *, port=3210, model=None, policy=None):
         name = asset or "index.html"
         if (
             name
-            not in {"index.html", "app.js", "job-state.js", "storyboard-state.js", "styles.css", "mark.svg"}
+            not in {
+                "index.html",
+                "app.js",
+                "job-state.js",
+                "storyboard-state.js",
+                "film-state.js",
+                "styles.css",
+                "mark.svg",
+            }
             or not (root / name).is_file()
         ):
             raise AppError("NOT_FOUND", "页面不存在。")

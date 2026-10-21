@@ -236,6 +236,82 @@ def _optional_hex(mp4: MP4, boxes, kind: bytes) -> str | None:
     return None if box is None else mp4.data(box).hex()
 
 
+def _read_descriptor(data: bytes, offset: int) -> tuple[int, bytes, int]:
+    """One ISO/IEC 14496-1 descriptor, with its 1–4 byte size."""
+    if offset >= len(data):
+        raise SignatureError("Unsupported AAC descriptor")
+    tag, offset = data[offset], offset + 1
+    size = 0
+    for _ in range(4):
+        if offset >= len(data):
+            raise SignatureError("Unsupported AAC descriptor length")
+        byte, offset = data[offset], offset + 1
+        size = (size << 7) | (byte & 0x7F)
+        if not byte & 0x80:
+            break
+    else:
+        raise SignatureError("Unsupported AAC descriptor length")
+    end = offset + size
+    if end > len(data):
+        raise SignatureError("Unsupported AAC descriptor length")
+    return tag, data[offset:end], end
+
+
+def _aac_config(payload: bytes) -> dict:
+    """Keep the decoder configuration; buffer/bitrate metadata is not copy config.
+
+    ``esds`` carries the AudioSpecificConfig (which must match for stream copy) and
+    also max/avg bitrate fields that providers legitimately vary between outputs.
+    Those descriptive fields do not change the AAC decoder configuration, so the
+    signature records only the object type, stream type and AudioSpecificConfig;
+    sample rate and channels are compared separately. The optional SL configuration
+    describes stream delivery rather than decoding, so it is not compared either.
+    """
+    if len(payload) < 5:
+        raise SignatureError("Unsupported AAC esds")
+    tag, descriptor, _ = _read_descriptor(payload[4:], 0)
+    if tag != 3 or len(descriptor) < 3:
+        raise SignatureError("Unsupported AAC esds")
+    flags, offset = descriptor[2], 3
+    if flags & 0x80:
+        offset += 2
+    if flags & 0x40:
+        if offset >= len(descriptor):
+            raise SignatureError("Unsupported AAC esds")
+        offset += 1 + descriptor[offset]
+    if flags & 0x20:
+        offset += 2
+    if offset > len(descriptor):
+        raise SignatureError("Unsupported AAC esds")
+    decoder = None
+    while offset < len(descriptor):
+        tag, body, offset = _read_descriptor(descriptor, offset)
+        if tag == 6:
+            continue
+        if tag != 4 or decoder is not None or len(body) < 13:
+            raise SignatureError("Unsupported AAC esds")
+        inner = 13  # object type, stream type, buffer size, max/avg bitrate
+        audio_specific = None
+        while inner < len(body):
+            child, child_body, inner = _read_descriptor(body, inner)
+            if child == 5 and audio_specific is None:
+                audio_specific = child_body.hex()
+            elif child == 6:
+                continue
+            else:
+                raise SignatureError("Unsupported AAC decoder descriptor")
+        if audio_specific is None:
+            raise SignatureError("AAC decoder configuration is missing")
+        decoder = {
+            "objectTypeIndication": body[0],
+            "streamType": body[1],
+            "audioSpecificConfig": audio_specific,
+        }
+    if decoder is None:
+        raise SignatureError("AAC decoder configuration is missing")
+    return decoder
+
+
 def _sample_entry(mp4: MP4, entry, handler: bytes) -> dict:
     if handler == b"vide":
         if entry.kind != b"avc1":
@@ -259,11 +335,12 @@ def _sample_entry(mp4: MP4, entry, handler: bytes) -> dict:
         raise SignatureError("Only AAC audio is supported")
     value = mp4.data(entry, 28)
     children = _boxes(mp4, entry.start + 28, entry.end, AUDIO_ENTRY)
+    esds = _only(children, b"esds", required=False)
     return {
         "kind": "aac",
         "channels": struct.unpack_from(">H", value, 16)[0],
         "sampleRate": struct.unpack_from(">I", value, 24)[0] >> 16,
-        "esds": _optional_hex(mp4, children, b"esds"),
+        "esds": None if esds is None else _aac_config(mp4.data(esds)),
         "wave": _optional_hex(mp4, children, b"wave"),
     }
 
