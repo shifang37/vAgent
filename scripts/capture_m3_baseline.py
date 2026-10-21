@@ -164,7 +164,8 @@ async def current_snapshot(home):
             assert deferred.kind == "deferred", deferred
             store.transaction(
                 lambda draft: draft["runs"][shared_context.run_id].update(
-                    status="waiting_external", activeWaitId=deferred.wait_id,
+                    status="waiting_external",
+                    activeWaitId=deferred.wait_id,
                     externalWaitStartedAt=TIMESTAMP,
                 )
             )
@@ -179,9 +180,7 @@ def describe(filename, raw, state, signatures=None, source=None):
         "source": source or "synthetic-public-builders-registration-only",
         "rawSha256": hashlib.sha256(raw).hexdigest(),
         "canonicalSha256": canonical_fingerprint(state),
-        "expectedV5CanonicalSha256": canonical_fingerprint(
-            {**state, "schemaVersion": 5, "films": {}}
-        ),
+        "expectedV5CanonicalSha256": canonical_fingerprint({**state, "schemaVersion": 5, "films": {}}),
         "collectionsSha256": {
             key: canonical_fingerprint(value) for key, value in state.items() if key != "schemaVersion"
         },

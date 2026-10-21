@@ -1,9 +1,10 @@
 import asyncio
+import os
 
 import httpx
 import pytest
 
-from vagent.http import ModelHttpClient
+from vagent.http import ModelHttpClient, normalize_no_proxy
 from vagent.models import DeepSeekModel
 from vagent.runner import AgentRunner, RunPolicy
 from vagent.tools import create_project_tools
@@ -113,6 +114,35 @@ async def test_cancellation_during_backoff_stops_further_connections():
         with pytest.raises(asyncio.CancelledError):
             await task
         assert attempts == 1 and client.connection_retries == 0
+
+
+@pytest.mark.parametrize(
+    ("value", "expected"),
+    [
+        ("localhost,[::1]", "localhost,::1"),
+        ("[::1]:8080", "::1"),
+        ("10.*, 192.168.*", "10.*,192.168.*"),
+        ("", ""),
+    ],
+)
+def test_no_proxy_normalization_drops_ipv6_brackets(value, expected):
+    assert normalize_no_proxy(value) == expected
+
+
+@pytest.mark.parametrize("name", ["NO_PROXY", "no_proxy"])
+async def test_bracketed_no_proxy_no_longer_blocks_client_construction(monkeypatch, name):
+    monkeypatch.setenv(name, "localhost,127.0.0.1,[::1],*.local")
+    async with ModelHttpClient() as client:
+        assert client.connection_retries == 0
+    assert "[" not in os.environ[name]
+
+
+async def test_valid_no_proxy_entry_is_left_byte_identical(monkeypatch):
+    value = "localhost,127.0.0.1,::1,*.local,10.*"
+    monkeypatch.setenv("NO_PROXY", value)
+    async with ModelHttpClient() as client:
+        assert client.connection_retries == 0
+    assert os.environ["NO_PROXY"] == value
 
 
 async def test_redirected_requests_are_not_replayed_after_connect_failure():

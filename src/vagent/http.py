@@ -1,12 +1,47 @@
 """Retry connection establishment only, never a request that may have reached the model."""
 
 import asyncio
+import os
 
 import httpx
 
 
+def normalize_no_proxy(value: str) -> str:
+    """Remove IPv6 brackets from ``NO_PROXY`` entries.
+
+    httpx turns every ``NO_PROXY`` entry into a URL pattern, so a bracketed
+    literal such as ``[::1]`` raises ``httpx.InvalidURL`` while constructing any
+    client. Brackets are not part of a host name, so dropping them preserves the
+    intent of the list. A bracketed port suffix is widened to its host, which
+    keeps the bypass for that host instead of failing every request.
+    """
+    entries = []
+    for raw in value.split(","):
+        entry = raw.strip()
+        if entry.startswith("[") and "]" in entry:
+            entry = entry[1:].split("]", 1)[0]
+        entries.append(entry)
+    return ",".join(entries)
+
+
+def repair_proxy_environment(environ=None) -> None:
+    """Rewrite malformed ``NO_PROXY`` values in place so httpx can parse them."""
+    values = os.environ if environ is None else environ
+    for name in ("NO_PROXY", "no_proxy"):
+        value = values.get(name)
+        if not value:
+            continue
+        repaired = normalize_no_proxy(value)
+        if repaired != value:
+            values[name] = repaired
+
+
 class ModelHttpClient(httpx.AsyncClient):
     def __init__(self, **kwargs):
+        # httpx parses the proxy environment while constructing a client, so a
+        # malformed NO_PROXY from the host shell would otherwise make every
+        # model request impossible before the first connection is attempted.
+        repair_proxy_environment()
         super().__init__(**kwargs)
         self.connection_retries = 0
 

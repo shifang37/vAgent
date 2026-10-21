@@ -375,8 +375,17 @@ def validate_media_changes(previous: dict[str, dict], state: dict) -> None:
     media = state.get("media", {})
     if previous.keys() - media.keys() or any(media[key] != raw for key, raw in previous.items()):
         raise AppError("MEDIA_IMMUTABLE", "已交付媒体的身份、来源和完整性记录不可删除或修改。")
+    from vagent.video.films import FilmMedia, verify_film_media
+
     seen_jobs = set()
     for media_id, raw in media.items():
+        if raw.get("kind") == "film":
+            # The film branch owns its own invariants: it never fakes a generation Job.
+            film_media = FilmMedia.model_validate(raw)
+            if film_media.id != media_id:
+                raise AppError("MEDIA_CONFLICT", "成片媒体 ID 不匹配。")
+            verify_film_media(state, film_media)
+            continue
         asset = MediaAsset.model_validate(raw)
         job_raw = state["jobs"].get(asset.job_id)
         job = parse_job(job_raw) if job_raw else None

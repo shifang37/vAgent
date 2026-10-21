@@ -7,7 +7,7 @@ from pathlib import Path
 import pytest
 
 from vagent.errors import AppError
-from vagent.storage import Database, FileStore
+from vagent.storage import Database, DatabaseV4, FileStore
 from vagent.video.contracts import canonical_fingerprint, parse_job
 from vagent.waiting import parse_wait
 
@@ -26,12 +26,13 @@ def test_v4_baseline_integrity_and_frozen_identities(entry):
     state = json.loads(raw)
     assert hashlib.sha256(raw).hexdigest() == entry["rawSha256"]
     assert state["schemaVersion"] == entry["schemaVersion"] == 4
-    Database.model_validate(state)
+    DatabaseV4.model_validate(state)
     assert canonical_fingerprint(state) == entry["canonicalSha256"]
-    # Freeze the future envelope hash without calling or implementing a v5 migration.
-    assert canonical_fingerprint({**state, "schemaVersion": 5, "films": {}}) == entry[
-        "expectedV5CanonicalSha256"
-    ]
+    # The frozen future-envelope hash is now produced by the real migration below.
+    assert (
+        canonical_fingerprint({**state, "schemaVersion": 5, "films": {}})
+        == entry["expectedV5CanonicalSha256"]
+    )
     assert {key: canonical_fingerprint(state[key]) for key in entry["collectionsSha256"]} == entry[
         "collectionsSha256"
     ]
@@ -73,7 +74,7 @@ def test_v4_baseline_integrity_and_frozen_identities(entry):
 
 
 @pytest.mark.parametrize("entry", SNAPSHOTS, ids=lambda entry: entry["file"])
-def test_v4_baseline_opens_without_migration_or_checkpoint_changes(tmp_path, entry):
+def test_v4_baseline_migrates_to_the_frozen_v5_envelope(tmp_path, entry):
     raw = (FIXTURES / entry["file"]).read_bytes()
     original = json.loads(raw)
     (tmp_path / "state.json").write_bytes(raw)
@@ -83,14 +84,20 @@ def test_v4_baseline_opens_without_migration_or_checkpoint_changes(tmp_path, ent
     }
     for name, content in sentinels.items():
         (tmp_path / name).write_bytes(content)
-    for _ in range(2):
-        with FileStore.open(tmp_path) as store:
-            assert store.snapshot() == original
-        assert not (tmp_path / "instance.lock").exists()
-        assert not list(tmp_path.glob("state-v*.json"))
-        assert not list(tmp_path.glob("*.tmp"))
-        for name, content in sentinels.items():
-            assert (tmp_path / name).read_bytes() == content
+    with FileStore.open(tmp_path) as store:
+        migrated = store.snapshot()
+    expected = {**original, "schemaVersion": 5, "films": {}}
+    assert migrated == expected
+    # E0 froze this hash before any migration existed; the real migration reproduces it.
+    assert canonical_fingerprint(migrated) == entry["expectedV5CanonicalSha256"]
+    Database.model_validate(migrated)
+    backups = list(tmp_path.glob("state-v4-*.json"))
+    assert len(backups) == 1 and backups[0].read_bytes() == raw
+    for name, content in sentinels.items():
+        assert (tmp_path / name).read_bytes() == content
+    with FileStore.open(tmp_path) as reopened:
+        assert reopened.snapshot() == expected
+    assert len(list(tmp_path.glob("state-v*.json"))) == 1
 
 
 @pytest.mark.parametrize("mode", ["mock", "live"])
@@ -109,7 +116,8 @@ def test_baseline_covers_historical_contracts_and_current_linked_history():
     states = [load(entry) for entry in SNAPSHOTS]
     assert {job["contractVersion"] for state in states for job in state["jobs"].values()} == {1, 2, 3, 4, 5}
     assert {run["status"] for state in states for run in state["runs"].values()} >= {
-        "waiting_external", "completed"
+        "waiting_external",
+        "completed",
     }
     assert any(state["media"] for state in states)
     for state in states:

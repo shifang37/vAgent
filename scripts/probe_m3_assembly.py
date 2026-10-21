@@ -58,11 +58,32 @@ def main():
             segment += f"duration {duration}\n"
         listing.write_text(segment * 2, encoding="utf-8")
         output = destination / f"{name}.mp4"
-        result = run([
-            "-hide_banner", "-nostdin", "-n", "-protocol_whitelist", "file",
-            "-f", "concat", "-safe", "0", "-auto_convert", "0", "-i", str(listing),
-            "-map", "0:v:0", "-map", "0:a:0?", "-c", "copy", "-movflags", "+faststart", str(output),
-        ])
+        result = run(
+            [
+                "-hide_banner",
+                "-nostdin",
+                "-n",
+                "-protocol_whitelist",
+                "file",
+                "-f",
+                "concat",
+                "-safe",
+                "0",
+                "-auto_convert",
+                "0",
+                "-i",
+                str(listing),
+                "-map",
+                "0:v:0",
+                "-map",
+                "0:a:0?",
+                "-c",
+                "copy",
+                "-movflags",
+                "+faststart",
+                str(output),
+            ]
+        )
         (destination / f"{name}.stderr.txt").write_text(result.stderr, encoding="utf-8")
         report = {
             "variant": name,

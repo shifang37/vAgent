@@ -19,6 +19,7 @@ from pydantic.alias_generators import to_camel
 from vagent.config import assert_id
 from vagent.errors import AppError, failure
 from vagent.video.contracts import Job, MediaAsset, StoredJob
+from vagent.video.films import Film, FilmMedia
 from vagent.video.storyboards import Asset, Storyboard
 from vagent.waiting import WAIT_EXECUTION_VERSIONS, StoredWait, WaitBinding, parse_wait
 
@@ -210,7 +211,7 @@ class DatabaseV3(DatabaseV2):
     media: dict[str, MediaAsset]
 
 
-class Database(DatabaseV3):
+class DatabaseV4(DatabaseV3):
     schema_version: Literal[4]
     storyboards: dict[str, Storyboard]
     assets: dict[str, Asset]
@@ -218,10 +219,18 @@ class Database(DatabaseV3):
     waits: dict[str, StoredWait]
 
 
+class Database(DatabaseV4):
+    """Schema 5 adds the film domain; the media index becomes a typed union."""
+
+    schema_version: Literal[5]
+    media: dict[str, MediaAsset | FilmMedia]
+    films: dict[str, Film]
+
+
 def migrated_state(state: dict) -> dict:
     """Mechanical envelope upgrade; never re-encode historical domain objects."""
     version = state["schemaVersion"]
-    if type(version) is not int or version not in {1, 2, 3, 4}:
+    if type(version) is not int or version not in {1, 2, 3, 4, 5}:
         raise ValueError("Unsupported schema version")
     upgraded = copy.deepcopy(state)
     if version == 1:
@@ -229,7 +238,9 @@ def migrated_state(state: dict) -> dict:
     if version < 3:
         upgraded.update(media={})
     if version < 4:
-        upgraded.update(schemaVersion=4, storyboards={}, assets={})
+        upgraded.update(storyboards={}, assets={})
+    if version < 5:
+        upgraded.update(schemaVersion=5, films={})
     return upgraded
 
 
@@ -258,7 +269,7 @@ class FileStore:
                 raw = (home / "state.json").read_bytes()
             except FileNotFoundError:
                 state = {
-                    "schemaVersion": 4,
+                    "schemaVersion": 5,
                     "projects": {},
                     "sessions": {},
                     "artifacts": {},
@@ -269,14 +280,17 @@ class FileStore:
                     "media": {},
                     "storyboards": {},
                     "assets": {},
+                    "films": {},
                 }
             else:
                 try:
                     state = json.loads(raw)
                     version = state["schemaVersion"]
-                    if type(version) is not int or version not in {1, 2, 3, 4}:
+                    if type(version) is not int or version not in {1, 2, 3, 4, 5}:
                         raise ValueError("Unsupported schema version")
-                    {1: DatabaseV1, 2: DatabaseV2, 3: DatabaseV3, 4: Database}[version].model_validate(state)
+                    {1: DatabaseV1, 2: DatabaseV2, 3: DatabaseV3, 4: DatabaseV4, 5: Database}[
+                        version
+                    ].model_validate(state)
                     for collection in (state["sessions"], state["runs"]):
                         for item in collection.values():
                             messages_from_dict(item["messages"])
@@ -286,7 +300,7 @@ class FileStore:
                         validate_storyboard_changes,
                     )
 
-                    checked = migrated_state(state) if version < 4 else state
+                    checked = migrated_state(state) if version < 5 else state
                     validate_job_changes(checked["jobs"], checked)
                     validate_storyboard_changes(checked["storyboards"], checked)
                     validate_asset_changes(checked["assets"], checked)
@@ -294,7 +308,7 @@ class FileStore:
                     raise AppError(
                         "INVALID_STORE", "本地状态损坏或版本不支持，已保留原文件，未重置数据。"
                     ) from None
-                if version < 4:
+                if version < 5:
                     # Keep the exact pre-migration bytes, including legacy message encoding.
                     atomic_write_bytes(home / f"state-v{version}-{uuid4()}.json", raw)
                     state = migrated_state(state)
@@ -370,6 +384,7 @@ class FileStore:
             yield
 
     def transaction(self, mutate: Callable[[dict], T]) -> T:
+        from vagent.video.films import validate_film_changes
         from vagent.video.jobs import validate_job_changes, validate_media_changes
         from vagent.video.storyboards import validate_asset_changes, validate_storyboard_changes
 
@@ -381,6 +396,7 @@ class FileStore:
             validate_media_changes(self._state["media"], draft)
             validate_storyboard_changes(self._state["storyboards"], draft)
             validate_asset_changes(self._state["assets"], draft)
+            validate_film_changes(self._state["films"], draft)
             atomic_write_json(self.home / "state.json", draft)
             self._state = draft
             return copy.deepcopy(value)
