@@ -109,6 +109,6 @@
 - [x] E2：更多供应商与中转接入与两 Key 直用配置完成（受控 HTTP；submit=0；见 [E2 验收](./M3_E2_ACCEPTANCE.md)）。
 - [x] E3：headless 全流程与用户 skills 扩展点完成（离线证据；submit=0；见 [E3 验收](./M3_E3_ACCEPTANCE.md)）。
 - [x] E4：离线端到端套件、wheel smoke、受控浏览器、四组 CI 与 `docs/M3_ACCEPTANCE.md` 完成（2026-10-21；6/6 离线、安装态 PASS、浏览器 7/7、真实数据 42 项检查；新增付费样本未执行，submit=0；见 [M3 验收](./M3_ACCEPTANCE.md)）。
-- [x] E0 的 README、M1_PLAN、Harness 设计与验收文档同步；E1–E3 已逐包更新，M3 未完成前不宣称「单文件成片交付」。
+- [x] E0 的 README、M1_PLAN、Harness 设计与验收文档同步；E1–E4 已逐包更新，E4 完成后可宣称「单文件成片交付」及安装态/浏览器/真实数据结论。
 
 E0 已冻结实施依据，E1 已按契约交付本地拼接成片，E2 已接入 Kling 直连与 fal 中转（Job/Request v6、`multi-provider-v3`、逐 provider/currency 预算桶、认证结果来源绑定、tools/rules 6/6 与冻结 5/5 恢复），E3 已交付 headless 两阶段授权、集合等待与本地拼接交付以及用户 skills 合并发现（Run 记录内 `headless` 状态、冻结退出码、坏文件隔离）；E4 已完成离线端到端、wheel/CI、受控浏览器与零新增费用的真实数据成片（6/6 离线、安装态 PASS、浏览器 7/7、42 项真实数据检查），并在验收中修复 `film_assemble` 执行上下文、`film-state.js` 静态资源、设置页供应商切换与 AAC `esds` 码率归一化四个缺陷。新增付费样本未执行，Kling/fal 真实账号能力保持「未做真实样本」标注；后续协议变更仍须另行版本化。
