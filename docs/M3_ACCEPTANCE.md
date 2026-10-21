@@ -79,7 +79,7 @@ PASS: installed wheel, Web assets, config, streaming, text/quality, MCP, mock vi
 
 ### 5.2 结果（42 项检查全部通过）
 
-- **迁移与保留**：schema 4→5，原始字节备份 `state-v4-96662069-6178-436e-acda-24bc543f8065.json` 与迁移前一致；`jobs`、`storyboards`、`waits`、`projects`、`artifacts`、`assets` 逐字节不变；三个真实媒体记录与文件哈希不变；旧 Run/Operation 保留；新增一个 `local-client` 成片 Run 与成片 Operation。
+- **迁移与保留**：schema 4→5，原始字节备份 `state-v4-96662069-6178-436e-acda-24bc543f8065.json` 与迁移前一致；`jobs`、`storyboards`、`waits`、`projects`、`artifacts`、`assets` 的既有值逐字段不变；三个真实媒体记录与文件哈希不变；旧 Run/Operation 保留；新增一个 `local-client` 成片 Run 与成片 Operation。
 - **成片 v1**：`filmId` 记录于 `output/m3-e4-real-verify.json`；4,501,422 字节、SHA-256 `b3bd32ce8b5210b2878b5ae8bf4dfaf8d42b2e946c3b079eacfa84af03207df2`、1280×720/H.264/AAC、10.096549 秒；两个输入按镜头顺序引用最新 ShotVersion；时间线 5.06322 + 5.06322 秒、接缝连续；引擎 `imageio-ffmpeg 0.6.0`、Windows 二进制 SHA-256 `2ce797a0…71a3`。
 - **媒体分支**：`kind="film"`、`contractVersion=2`、`validationVersion="mp4-avc-v1"`，`filmId/filmVersion` 与版本一致，文件大小/哈希与版本一致。
 - **HTTP**：`/api/films/{storyboard}?projectId=…` 返回该成片；媒体详情、GET、HEAD、单 Range 206、不可满足 416、附件名、ETag 全部通过。
