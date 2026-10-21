@@ -152,6 +152,8 @@ class RunRecordV1(Record):
     read_only: bool = False
     answer_cache: dict[str, int] = Field(default_factory=dict)
     events: list[dict[str, Any]] = Field(default_factory=list)
+    # E3 headless plan/authorization/delivery, or None for every ordinary Run.
+    headless: dict[str, Any] | None = None
 
 
 class RunRecordV2(RunRecordV1):

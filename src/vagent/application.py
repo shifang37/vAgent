@@ -21,7 +21,7 @@ from vagent.http import ModelHttpClient
 from vagent.mcp_bridge import connect_mcp, server_configs
 from vagent.models import DeepSeekModel
 from vagent.runner import AgentRunner, RunPolicy
-from vagent.skills import SkillCatalog, register_skill_tool
+from vagent.skills import discover_for, register_skill_tool
 from vagent.storage import FileStore, now
 from vagent.tools import create_project_tools
 from vagent.usage import summarize_usage
@@ -93,7 +93,7 @@ class ApplicationService:
         async with AsyncExitStack() as stack:
             store = existing_store or stack.enter_context(FileStore.open(config.home))
             client = await stack.enter_async_context(ModelHttpClient(timeout=60))
-            catalog = SkillCatalog.discover(config.skills_root)
+            catalog = discover_for(config)
             tools = register_skill_tool(create_project_tools(), catalog)
             # A separate HTTP pool is closed after Workers release all in-flight calls.
             wan = await stack.enter_async_context(
@@ -406,6 +406,37 @@ class ApplicationService:
             on_event=on_event,
         )
 
+    def headless_runner(self, *, model=None, on_event=None, video_mode=None):
+        """The planning-only view: storyboard tools stay, generation tools do not.
+
+        The Run keeps the published tools/rules version and its own signature; only
+        the callable set is narrowed, so a real model can draft but never register a
+        paid Job before the user authorizes the fixed plan. ``video_mode`` lets a
+        resume rebuild the recorded planning view even when the current mode differs.
+        """
+        from vagent.headless import PLANNING_EXCLUDED_TOOLS, PLANNING_RULES
+
+        mode = self.config.video_mode if video_mode is None else video_mode
+        if mode not in {"mock", "live"}:
+            raise AppError("VIDEO_MODE_OFF", "headless 需要 mock 或 live 视频模式；当前为 off。")
+        tools = self.tool_views[mode].without_tools(PLANNING_EXCLUDED_TOOLS)
+        chosen = (
+            model
+            or self.model
+            or DeepSeekModel(self.config.api_key, self.config.model, http_client=self.http_client)
+        )
+        return AgentRunner(
+            store=self.store,
+            model=chosen,
+            tools=tools,
+            policy=self.policy,
+            context=ContextBuilder(self.config.context_bytes),
+            skills=self.catalog.list(),
+            answer_cache=self.cache,
+            on_event=on_event,
+            extra_rules=PLANNING_RULES,
+        )
+
     def capabilities(self):
         return {
             "model": self.model.name if self.model else self.config.model,
@@ -418,6 +449,7 @@ class ApplicationService:
             and not self.tools.bypass_answer_cache,
             "mcp": self.mcp_status,
             "skills": self.catalog.list(),
+            "skillDiagnostics": self.catalog.diagnostics,
             "tools": self.tools.inventory(),
             "limits": {
                 "modelSteps": self.policy.max_steps,

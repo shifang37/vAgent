@@ -198,10 +198,12 @@ class AgentRunner:
         stream_output: bool = True,
         execution_version: int | None = None,
         clock=utc_now,
+        extra_rules: str | None = None,
     ):
         self.store, self.model = store, model
         self.read_only = read_only
         self.answer_cache = answer_cache
+        self.extra_rules = extra_rules
         self.base_tools = tools.read_only() if read_only else tools
         self.execution_version = (
             execution_version
@@ -232,6 +234,8 @@ class AgentRunner:
         )
         if self.read_only and self.video_mode != "off":
             prompt += "\n本次也不能创建视频 Job；可以读取已有 Job，等待记账不能修改其请求或状态。"
+        if self.extra_rules:
+            prompt += "\n" + self.extra_rules
         return prompt
 
     @property

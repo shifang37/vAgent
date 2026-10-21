@@ -274,6 +274,15 @@ class ToolRegistry:
     def without_feature(self, name: str) -> "ToolRegistry":
         return self._filtered(lambda definition: definition.feature != name)
 
+    def without_tools(self, names) -> "ToolRegistry":
+        """The same published tool set with named capabilities removed.
+
+        Used by headless planning, which keeps the storyboard/read tools but must not
+        register or assemble anything before the two-phase authorization.
+        """
+        excluded = frozenset(names)
+        return self._filtered(lambda definition: definition.name not in excluded)
+
     def copy(self) -> "ToolRegistry":
         return self._filtered(lambda _: True)
 

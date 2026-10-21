@@ -1,6 +1,7 @@
 import argparse
 import asyncio
 import json
+import re
 import sys
 from contextlib import AsyncExitStack
 from dataclasses import asdict, replace
@@ -9,12 +10,13 @@ from uuid import uuid4
 from dotenv import load_dotenv
 
 from vagent import __version__
+from vagent import headless as headless_service
 from vagent.application import ApplicationService
 from vagent.config import assert_id, load_config
 from vagent.console import read_prompt
 from vagent.errors import AppError, public_error
 from vagent.models import DemoModel
-from vagent.skills import SkillCatalog
+from vagent.skills import discover_for
 from vagent.storage import FileStore
 from vagent.usage import summarize_usage
 from vagent.video import clients
@@ -432,6 +434,178 @@ async def local_film(config, store, args) -> int:
     return 0
 
 
+def headless_mode(args) -> str:
+    """Validate the frozen headless argument combinations before opening services."""
+    plan_mode = args.plan_run is not None or args.plan_fingerprint is not None
+    resume_mode = args.resume_run is not None
+    if plan_mode and resume_mode:
+        raise AppError("INVALID_ARGUMENTS", "--plan 与 --resume 不能同时使用。")
+    if plan_mode:
+        if not args.plan_run or not args.plan_fingerprint:
+            raise AppError("INVALID_ARGUMENTS", "授权需要同时提供 --plan RUN_ID 与 --plan-fingerprint SHA。")
+        if args.prompt is not None or args.request_id is not None:
+            raise AppError("INVALID_ARGUMENTS", "授权模式不接受新的需求或请求 ID。")
+        if not re.fullmatch(r"[0-9a-f]{64}", args.plan_fingerprint):
+            raise AppError("INVALID_ARGUMENTS", "计划指纹必须是 64 位小写十六进制字符串。")
+        return "plan"
+    if resume_mode:
+        if (
+            args.prompt is not None
+            or args.confirm
+            or args.max_cost
+            or args.max_units
+            or args.max_jobs is not None
+        ):
+            raise AppError("INVALID_ARGUMENTS", "--resume 不能同时给出需求或新的授权参数。")
+        return "resume"
+    if not args.prompt or not args.prompt.strip():
+        raise AppError("INVALID_ARGUMENTS", "缺少需求；headless 需要 PROMPT、--plan 或 --resume。")
+    if args.confirm or args.max_cost or args.max_units or args.max_jobs is not None:
+        raise AppError(
+            "HEADLESS_AUTHORIZATION_REQUIRED",
+            "不能在尚未生成计划的 PROMPT 上预先授权；先运行 vagent headless PROMPT。",
+        )
+    return "draft"
+
+
+def headless_events(json_mode: bool):
+    """Progress goes to stderr in JSON mode so stdout stays one object."""
+    if not json_mode:
+        return EventDisplay()
+
+    def publish(event):
+        if event["type"] in {"run.started", "run.resumed"}:
+            print(f"[运行] {event['runId']}", file=sys.stderr, flush=True)
+        elif event["type"] == "tool.completed":
+            status = "成功" if event["ok"] else f"失败 {event.get('errorCode') or ''}".strip()
+            print(f"[工具] {event['name']}: {status}", file=sys.stderr, flush=True)
+        elif event["type"] == "run.waiting":
+            print("[等待] Agent 已挂起，等待外部结果。", file=sys.stderr, flush=True)
+        elif event["type"] == "headless.registered":
+            print(f"[登记] {len(event['jobIds'])} 个镜头任务", file=sys.stderr, flush=True)
+        elif event["type"] == "headless.waiting":
+            print("[等待] 正在等待镜头任务与本地媒体交付。", file=sys.stderr, flush=True)
+        elif event["type"] == "run.completed":
+            print(f"[结束] {event['status']}", file=sys.stderr, flush=True)
+
+    return publish
+
+
+def emit_headless(result: dict, json_mode: bool) -> None:
+    if json_mode:
+        print(json.dumps(result, ensure_ascii=False, default=str))
+        return
+    error = result.get("error")
+    if error:
+        print(f"[{error['code']}] {error['message']}", file=sys.stderr)
+    status = result["status"]
+    if status == "planned":
+        print(
+            f"[计划] Run {result['runId']} · 分镜 {result['storyboardId']} "
+            f"v{result['storyboardVersion']} · revision {result['storyboardRevision']}"
+        )
+        for item in result["estimates"]:
+            units = f" · {item['units']} VIDEO_UNIT" if item["units"] is not None else ""
+            print(
+                f"  预计 {item['provider']} {item['currency']} {item['amount']} · "
+                f"{item['jobCount']} 个镜头{units}"
+            )
+        print(f"[指纹] {result['planFingerprint']}")
+        print("[下一步] 核对镜头与预算后显式授权：")
+        print(headless_service.authorization_hint(result))
+    elif status == "delivered" and result["output"]:
+        print(f"[已交付] 成片 v{result['filmVersion']} · {result['output']['sizeBytes']} 字节")
+        print(f"[SHA-256] {result['output']['sha256']}")
+        print(f"[文件] {result['output']['path']}")
+    elif status in {"waiting", "failed", "authorized"}:
+        if result["jobIds"]:
+            print(f"[任务] {len(result['jobIds'])} 个已登记：" + "、".join(result["jobIds"]))
+        if status == "waiting":
+            print(f"[等待中] Run {result['runId']} · {len(result['jobIds'])} 个任务已保留")
+        if result["runId"]:
+            print(f"[继续] vagent headless --resume {result['runId']}")
+    elif status == "cancelled":
+        if result["runId"]:
+            print(f"[继续] vagent headless --resume {result['runId']}")
+
+
+def headless_failure(store, project: str, run_id: str | None, error: AppError) -> dict:
+    result = headless_service.blank_result(project)
+    if run_id and store is not None:
+        try:
+            result = headless_service.result_for_run(store, run_id, project)
+        except AppError:
+            pass
+    result["status"] = (
+        "cancelled"
+        if error.code == "CANCELLED"
+        else "waiting"
+        if error.code == "HEADLESS_WAIT_TIMEOUT"
+        else "failed"
+    )
+    result["error"] = {"code": error.code, "message": str(error)}
+    return result
+
+
+async def headless_command(args) -> int:
+    project = args.project
+    run_id = args.plan_run or args.resume_run
+    result = headless_service.blank_result(project)
+    try:
+        mode = headless_mode(args)
+        config = load_config()
+        async with ApplicationService.open(config) as service:
+            try:
+                if mode == "draft":
+                    result = await headless_service.plan(
+                        service,
+                        session_id=project,
+                        prompt=args.prompt,
+                        request_id=args.request_id,
+                        on_event=headless_events(args.json),
+                    )
+                else:
+                    run_id = args.plan_run or args.resume_run
+                    if mode == "plan":
+                        result = headless_service.authorize(
+                            service,
+                            run_id=run_id,
+                            plan_fingerprint=args.plan_fingerprint,
+                            confirm=args.confirm,
+                            max_cost=args.max_cost,
+                            max_units=args.max_units,
+                            max_jobs=args.max_jobs,
+                        )
+                    result = await headless_service.execute(
+                        service, run_id=run_id, on_event=headless_events(args.json)
+                    )
+                code = 0
+            except (AppError, asyncio.CancelledError) as error:
+                if isinstance(error, asyncio.CancelledError):
+                    error = AppError(
+                        "CANCELLED", "headless 已中断；计划与已登记任务已保留，可用 --resume 继续。"
+                    )
+                result = headless_failure(service.store, project, run_id, error)
+                code = headless_service.exit_code(error)
+    except AppError as error:
+        result = headless_failure(None, project, run_id, error)
+        result["status"] = "failed" if error.code != "CANCELLED" else "cancelled"
+        code = headless_service.exit_code(error)
+    emit_headless(result, args.json)
+    return code
+
+
+def headless_main(args) -> int:
+    try:
+        return asyncio.run(headless_command(args))
+    except (KeyboardInterrupt, asyncio.CancelledError):
+        result = headless_service.blank_result(args.project)
+        result["status"] = "cancelled"
+        result["error"] = {"code": "CANCELLED", "message": "headless 已中断，未完成的动作未标记成功。"}
+        emit_headless(result, args.json)
+        return 130
+
+
 def parser() -> argparse.ArgumentParser:
     root = argparse.ArgumentParser(prog="vagent", description="DeepSeek + LangGraph 视频创作 Agent 原型")
     root.add_argument("--version", action="version", version=__version__)
@@ -504,6 +678,34 @@ def parser() -> argparse.ArgumentParser:
     film_show = film_actions.add_parser("show", help="读取当前成片、历史版本与受控媒体地址")
     film_show.add_argument("-s", "--project", default="default")
     film_show.add_argument("--storyboard", dest="storyboard_id", help="指定分镜；省略时读取最新分镜")
+    headless = commands.add_parser("headless", help="无 Web 的计划-授权-交付流程；默认只规划，不登记视频任务")
+    headless.add_argument("prompt", nargs="?", help="创作需求；只用于第一次规划")
+    headless.add_argument("-s", "--project", default="default")
+    headless.add_argument("--request-id", dest="request_id", help="同一请求 ID 重放原规划 Run")
+    headless.add_argument("--json", action="store_true", help="stdout 只输出一个 JSON 对象")
+    headless.add_argument("--plan", dest="plan_run", metavar="RUN_ID", help="授权并执行这个已生成的计划")
+    headless.add_argument(
+        "--plan-fingerprint", dest="plan_fingerprint", metavar="SHA", help="规划返回的 canonical 计划指纹"
+    )
+    headless.add_argument("--confirm", action="store_true", help="显式确认这次固定请求集合与各桶预算")
+    headless.add_argument(
+        "--max-cost",
+        dest="max_cost",
+        action="append",
+        default=[],
+        metavar="PROVIDER:CURRENCY=AMOUNT",
+        help="每个拟用金额桶的授权上限；可重复",
+    )
+    headless.add_argument(
+        "--max-units",
+        dest="max_units",
+        action="append",
+        default=[],
+        metavar="PROVIDER=UNITS",
+        help="Kling VIDEO_UNIT 授权上限；可重复",
+    )
+    headless.add_argument("--max-jobs", dest="max_jobs", type=int, help="收紧本次 Run 的共享新任务上限")
+    headless.add_argument("--resume", dest="resume_run", metavar="RUN_ID", help="继续已授权或等待中的 Run")
     web = commands.add_parser("web", help="启动本地 Web 与真实 Agent 编排")
     web.add_argument("--port", type=int, default=3210)
     web.add_argument("--no-open", action="store_true")
@@ -518,6 +720,8 @@ def main() -> None:
     # Explicit cwd avoids dotenv discovering an unrelated installed package's .env.
     load_dotenv(".env", override=False)
     args = parser().parse_args()
+    if args.command == "headless":
+        raise SystemExit(headless_main(args))
     try:
         config = load_config()
         if args.command == "web":
@@ -554,7 +758,8 @@ def main() -> None:
             safe["redis_configured"] = bool(safe.pop("redis_url"))
             print_json({**safe, "api_key_configured": bool(key and key.strip()), "thinking": "disabled"})
         elif args.command == "skills":
-            print_json(SkillCatalog.discover(config.skills_root).list())
+            catalog = discover_for(config)
+            print_json({"skills": catalog.list(), "diagnostics": catalog.diagnostics})
         elif args.command == "jobs":
             if args.action == "work":
                 raise SystemExit(asyncio.run(work_jobs(config)))

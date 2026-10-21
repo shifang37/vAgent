@@ -70,6 +70,7 @@ from vagent.video.contracts import (
     VideoRequestV6,
     WanParameters,
     WanParametersV3,
+    canonical_fingerprint,
     job_transition_allowed,
     live_job_transition_allowed,
     live_polling_policy,
@@ -211,6 +212,23 @@ def _validate_wait_members(state: dict) -> None:
 
 def money(value) -> str:
     return format(Decimal(value), ".2f")
+
+
+def headless_plan_fingerprint(plan: dict) -> str:
+    """The canonical plan identity: fixed requests only, no local paths or times."""
+    return canonical_fingerprint(
+        {
+            "mode": plan["mode"],
+            "provider": plan["provider"],
+            "storyboardId": plan["storyboardId"],
+            "storyboardVersion": plan["storyboardVersion"],
+            "storyboardRevision": plan["storyboardRevision"],
+            "shots": [
+                {"shotId": row["shotId"], "order": row["order"], "request": row["request"]}
+                for row in plan["shots"]
+            ],
+        }
+    )
 
 
 def _preview_context(project_id: str) -> ToolExecutionContext:
@@ -854,17 +872,21 @@ class JobService:
         except AppError as error:
             return failure(error.code, str(error))
 
-    def shot_generate(self, args: dict, *, context: ToolExecutionContext) -> dict:
+    def shot_generate(self, args: dict, *, context: ToolExecutionContext, authorization=None) -> dict:
         """Register one real Job per confirmed shot; any failure registers nothing.
 
         The per-shot request, the reference-image proof and the quota snapshot are
         all derived inside a single Store transaction, so one call either matches
-        one frozen storyboard version completely or writes nothing at all.
+        one frozen storyboard version completely or writes nothing at all. Headless
+        delivery passes the persisted authorization so the same transaction also
+        re-proves the plan fingerprint and every budget bucket.
         """
         parsed = self._generation_args(ShotGenerationArgs, args)
         if isinstance(parsed, dict):
             return parsed
-        return self._register_batch(context, parsed, "shot_generate", context.operation_key, redo=False)
+        return self._register_batch(
+            context, parsed, "shot_generate", context.operation_key, redo=False, authorization=authorization
+        )
 
     def redo_shot(self, args: dict, *, context: ToolExecutionContext) -> dict:
         """Explicit user redo: a new ShotVersion plus one new Job, nothing else moves."""
@@ -957,11 +979,117 @@ class JobService:
         except (ValidationError, ValueError, TypeError):
             return failure("INVALID_ARGUMENTS", "生成参数不符合 Schema，未创建任务。")
 
-    def _register_batch(self, context, parsed, name, key, *, redo: bool) -> dict:
+    def plan_shots(self, project_id: str, storyboard_id: str, storyboard_version: int) -> dict:
+        """Derive the frozen requests and quotes of one storyboard without writing.
+
+        This is the headless planning primitive: no Job, Operation, revision or
+        provider call is created. Registration later re-derives the same requests in
+        its own transaction and compares them to this frozen plan before writing.
+        """
+        state = self.store.snapshot()
+        mode = self.generation_mode()
+        live = mode == "live"
+        if live:
+            self.check_live_configuration(self.config.video_provider)
+        record = storyboard_in_state(state, project_id, storyboard_id)
+        if record.current_version != storyboard_version:
+            raise AppError("VERSION_CONFLICT", "分镜版本已变化，请重新读取后再生成。")
+        version = next(item for item in record.versions if item.version == storyboard_version)
+        rows, buckets = [], {}
+        for shot in sorted(version.shots, key=lambda item: item.order):
+            capabilities, request = self._derive_shot(state, record, shot, live=live)
+            estimate = self._shot_estimate(capabilities, request) if live else None
+            resource = (
+                resource_estimate(capabilities.resource, request.spec.duration_seconds)
+                if live and getattr(capabilities, "resource", None) is not None
+                else None
+            )
+            previous = latest_shot_version(record, storyboard_version, shot.id)
+            reuse = (
+                previous is not None and stored_request_fingerprint(previous.request) == request.fingerprint()
+            )
+            provider_rate = getattr(capabilities, "rate", None)
+            rows.append(
+                {
+                    "shotId": shot.id,
+                    "order": shot.order,
+                    "mode": shot.mode,
+                    "durationSeconds": shot.duration_seconds,
+                    "provider": capabilities.provider,
+                    "model": capabilities.model,
+                    "capabilitiesVersion": capabilities.capabilities_version,
+                    "endpointProfile": getattr(capabilities, "endpoint_profile", None),
+                    "adapterVersion": getattr(capabilities, "adapter_version", None),
+                    "priceVersion": (
+                        provider_rate.price_version
+                        if provider_rate is not None
+                        else getattr(getattr(capabilities, "price", None), "price_version", None)
+                    ),
+                    "sourcePolicyVersion": getattr(capabilities, "source_policy_version", None),
+                    "request": request.model_dump(mode="json", by_alias=True),
+                    "requestFingerprint": request.fingerprint(),
+                    "estimate": estimate.model_dump(mode="json", by_alias=True) if estimate else None,
+                    "resource": resource.model_dump(mode="json", by_alias=True) if resource else None,
+                    "reused": reuse,
+                    "jobId": previous.job_id if reuse else None,
+                }
+            )
+            if reuse or not live:
+                continue
+            key = (capabilities.provider, estimate.currency)
+            bucket = buckets.setdefault(
+                key,
+                {
+                    "provider": capabilities.provider,
+                    "currency": estimate.currency,
+                    "amount": "0.00",
+                    "units": 0 if resource is not None else None,
+                    "jobCount": 0,
+                    "shots": [],
+                },
+            )
+            bucket["amount"] = money(Decimal(bucket["amount"]) + Decimal(estimate.amount))
+            if resource is not None:
+                bucket["units"] += resource.units
+            bucket["jobCount"] += 1
+            bucket["shots"].append(shot.id)
+        ceilings = []
+        for provider, currency in sorted(buckets, key=lambda item: (item[0], item[1])):
+            max_job_amount, max_run_amount, max_job_units, max_run_units = self._provider_ceiling(provider)
+            ceilings.append(
+                {
+                    "provider": provider,
+                    "currency": currency,
+                    "maxJobAmount": money(max_job_amount),
+                    "maxRunAmount": money(max_run_amount),
+                    "maxJobUnits": max_job_units,
+                    "maxRunUnits": max_run_units,
+                }
+            )
+        return {
+            "mode": mode,
+            "provider": self.config.video_provider,
+            "storyboardId": record.id,
+            "storyboardVersion": storyboard_version,
+            "storyboardRevision": record.revision,
+            "shots": rows,
+            "newJobCount": sum(1 for row in rows if not row["reused"]),
+            "buckets": [buckets[key] for key in sorted(buckets, key=lambda item: (item[0], item[1]))],
+            "limits": {
+                "maxJobs": min(int(self.config.video_max_new_jobs_per_run), LIVE_JOBS_PER_RUN),
+                "buckets": ceilings,
+            },
+        }
+
+    def budget_ceiling(self, provider: str):
+        """The effective per-provider ceilings after configured tightening."""
+        return self._provider_ceiling(provider)
+
+    def _register_batch(self, context, parsed, name, key, *, redo: bool, authorization=None) -> dict:
         raw = parsed.model_dump(mode="json", by_alias=True)
 
         def register(draft):
-            return self._register_generation(draft, context, parsed, redo=redo)
+            return self._register_generation(draft, context, parsed, redo=redo, authorization=authorization)
 
         try:
             with self.store.locked():
@@ -975,7 +1103,7 @@ class JobService:
         except AppError as error:
             return failure(error.code, str(error))
 
-    def _register_generation(self, draft, context, parsed, *, redo: bool) -> dict:
+    def _register_generation(self, draft, context, parsed, *, redo: bool, authorization=None) -> dict:
         _check_context(draft, context)
         run = draft["runs"][context.run_id]
         if run.get("readOnly", False):
@@ -1010,7 +1138,99 @@ class JobService:
             else:
                 plan.append((shot, capabilities, request))
         limits = self._batch_limits(draft, context, plan) if live else None
-        return self._commit_generation(draft, context, record, version, order, plan, reused, limits)
+        if authorization is not None:
+            self._check_headless_authorization(
+                draft, context, record, version, order, plan, reused, limits, authorization
+            )
+        return self._commit_generation(
+            draft,
+            context,
+            record,
+            version,
+            order,
+            plan,
+            reused,
+            limits,
+            headless=authorization is not None,
+        )
+
+    def _check_headless_authorization(
+        self, draft, context, record, version, order, plan, reused, limits, authorization
+    ) -> None:
+        """Re-prove the frozen plan and every budget inside the registration transaction."""
+        run = draft["runs"][context.run_id]
+        headless = run.get("headless") or {}
+        frozen = headless.get("plan")
+        stored = headless.get("authorization")
+        if not frozen or not stored or headless.get("status") != "authorized":
+            raise AppError(
+                "HEADLESS_AUTHORIZATION_REQUIRED", "这个 Run 没有已保存的 headless 授权，未登记任何任务。"
+            )
+        if headless.get("planFingerprint") != headless_plan_fingerprint(frozen):
+            raise AppError("HEADLESS_PLAN_CHANGED", "计划内容与已保存指纹不一致，未登记任何任务。")
+        if authorization.get("fingerprint") != stored.get("fingerprint"):
+            raise AppError("HEADLESS_AUTHORIZATION_MISMATCH", "授权指纹不匹配，未登记任何任务。")
+        if (
+            frozen["storyboardId"] != record.id
+            or frozen["storyboardVersion"] != version
+            or frozen["storyboardRevision"] != record.revision
+        ):
+            raise AppError("HEADLESS_PLAN_STALE", "分镜在计划后已变化，请重新规划并授权。")
+        rows = {row["shotId"]: row for row in frozen["shots"]}
+        if set(rows) != set(order):
+            raise AppError("HEADLESS_PLAN_CHANGED", "请求集合与已授权计划不一致，未登记任何任务。")
+        for shot, capabilities, request in plan:
+            row = rows[shot.id]
+            if row["reused"]:
+                raise AppError("HEADLESS_PLAN_CHANGED", "已授权计划不包含这个新任务，未登记任何任务。")
+            if (
+                request.fingerprint() != row["requestFingerprint"]
+                or capabilities.provider != row["provider"]
+                or capabilities.capabilities_version != row["capabilitiesVersion"]
+            ):
+                raise AppError("HEADLESS_PLAN_CHANGED", "能力、价格或请求在计划后已变化，请重新规划。")
+        for shot_id, previous in reused.items():
+            row = rows.get(shot_id)
+            if row is None or not row["reused"] or row["jobId"] != previous.job_id:
+                raise AppError("HEADLESS_PLAN_CHANGED", "复用结果与已授权请求集合不一致，未登记任何任务。")
+        if len(plan) != frozen["newJobCount"]:
+            raise AppError("HEADLESS_PLAN_CHANGED", "新任务数量与已授权计划不一致，未登记任何任务。")
+        if limits is None:
+            # Mock registration is local and free; it has no paid bucket snapshot.
+            if len(plan) + len(reused) != len(order):
+                raise AppError("HEADLESS_PLAN_CHANGED", "请求集合与已授权计划不一致，未登记任何任务。")
+            if len(plan) > int(authorization["maxJobs"]):
+                raise AppError("HEADLESS_BUDGET_NOT_COVERED", "新任务数量超过授权上限，整批未登记。")
+            return
+        if limits.used_new_jobs > int(authorization["maxJobs"]):
+            raise AppError("HEADLESS_BUDGET_NOT_COVERED", "新任务数量超过授权上限，整批未登记。")
+        authorized_cost = {
+            (item["provider"], item["currency"]): item["amount"] for item in authorization["maxCost"]
+        }
+        authorized_units = {item["provider"]: item["units"] for item in authorization["maxUnits"]}
+        if not isinstance(limits, RunLimitsSnapshotV2):
+            # Wan keeps its frozen single-currency snapshot (CNY only).
+            for expected in frozen["buckets"]:
+                key = (expected["provider"], expected["currency"])
+                if key[0] != "wan" or Decimal(limits.used_amount) != Decimal(expected["amount"]):
+                    raise AppError("HEADLESS_BUDGET_NOT_COVERED", "金额使用与已授权计划不一致，整批未登记。")
+                if Decimal(limits.used_amount) > Decimal(authorized_cost.get(key, "0")):
+                    raise AppError("HEADLESS_BUDGET_NOT_COVERED", "金额超过授权上限，整批未登记。")
+            return
+        by_bucket = {(bucket.provider, bucket.currency): bucket for bucket in limits.buckets}
+        for expected in frozen["buckets"]:
+            key = (expected["provider"], expected["currency"])
+            bucket = by_bucket.get(key)
+            if bucket is None or Decimal(bucket.used_amount) != Decimal(expected["amount"]):
+                raise AppError("HEADLESS_BUDGET_NOT_COVERED", "金额使用与已授权计划不一致，整批未登记。")
+            if Decimal(bucket.used_amount) > Decimal(authorized_cost.get(key, "0")):
+                raise AppError("HEADLESS_BUDGET_NOT_COVERED", "金额超过授权上限，整批未登记。")
+            if expected["units"] is None:
+                continue
+            if bucket.used_units != expected["units"]:
+                raise AppError("HEADLESS_BUDGET_NOT_COVERED", "资源单位使用与计划不一致，整批未登记。")
+            if bucket.used_units > int(authorized_units.get(key[0], -1)):
+                raise AppError("HEADLESS_BUDGET_NOT_COVERED", "资源单位超过授权上限，整批未登记。")
 
     def _shot_capability(self, mode: str, *, live: bool):
         """The published entry that verifies this shot mode for the Run's provider."""
@@ -1321,7 +1541,9 @@ class JobService:
             remaining_amount=money(ceiling_cost - total),
         )
 
-    def _commit_generation(self, draft, context, record, version, order, plan, reused, limits) -> dict:
+    def _commit_generation(
+        self, draft, context, record, version, order, plan, reused, limits, *, headless=False
+    ) -> dict:
         live = limits is not None
         timestamp = self.timestamp()
         entries, created = [], {}
@@ -1423,6 +1645,26 @@ class JobService:
                     else None,
                 }
             shots.append({**entry, "mode": shot.mode, "durationSeconds": shot.duration_seconds})
+        if headless:
+            run = draft["runs"][context.run_id]
+            headless_state = run["headless"]
+            headless_state["registration"] = {
+                "revision": record.revision + (1 if entries else 0),
+                "shots": [
+                    {
+                        "shotId": item["shotId"],
+                        "shotVersionId": item["shotVersionId"],
+                        "jobId": item["jobId"],
+                        "reused": item["reused"],
+                    }
+                    for item in shots
+                ],
+                "jobIds": [item["jobId"] for item in shots],
+                "registeredAt": timestamp,
+            }
+            headless_state["status"] = "authorized"
+            run["headless"] = headless_state
+            run["updatedAt"] = timestamp
         total = sum((Decimal(item["estimate"]["amount"]) for item in shots if item["estimate"]), Decimal(0))
         currency = next((item["estimate"]["currency"] for item in shots if item["estimate"]), "CNY")
         return {

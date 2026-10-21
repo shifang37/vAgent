@@ -1,6 +1,6 @@
 # M3 任务规划：本地拼接成片、更多供应商与 headless 完善
 
-更新日期：2026-10-21。状态：**E0、E1、E2 已完成；E3–E4 待实施**；M1、M2 已全部完成并合入 master（M1 `cc3628e` 于 2026-10-16、M2 `8776482` 于 2026-10-17）。本文确定 M3 的范围、契约方向、工作包与验收要求；E0 的官方核实、选型、版本与预算见 [M3 契约](./M3_CONTRACTS.md) 和 [E0 验收](./M3_E0_ACCEPTANCE.md)，本次 submit=0。工作包编号沿用零基惯例（M1-A→A0–A5、M1-B→B0–B5、M1-C→C0–C3、M2→D0–D4），本阶段记为 **E0–E4**。
+更新日期：2026-10-21。状态：**E0、E1、E2、E3 已完成；E4 待实施**；M1、M2 已全部完成并合入 master（M1 `cc3628e` 于 2026-10-16、M2 `8776482` 于 2026-10-17）。本文确定 M3 的范围、契约方向、工作包与验收要求；E0 的官方核实、选型、版本与预算见 [M3 契约](./M3_CONTRACTS.md) 和 [E0 验收](./M3_E0_ACCEPTANCE.md)，本次 submit=0。工作包编号沿用零基惯例（M1-A→A0–A5、M1-B→B0–B5、M1-C→C0–C3、M2→D0–D4），本阶段记为 **E0–E4**。
 
 依据：[产品设计](../DESIGN.md) 的 M3 定义、[M2 任务规划](./M2_PLAN.md) 的后续边界、[M2 契约](./M2_CONTRACTS.md)、[M2 验收](./M2_ACCEPTANCE.md)、[上游核实记录](./VIDEO_API_NOTES.md)、[Harness 设计](../AGENT_HARNESS_DESIGN.md)。
 
@@ -27,7 +27,7 @@
 | 两 Key 直用（免地域配置） | 设置页以「编排模型 Key + 所选视频供应商 Key」为最小输入；万相沿用已完成 K 轨的共享域名解析与零费用只读探测（见 [VIDEO_API_NOTES](./VIDEO_API_NOTES.md) 第 10 节）；Kling/fal 固定官方 profile，无已核实免费接口时标注「已保存，鉴权/模型权限未验证」；高级覆盖默认隐藏，Key 热更新用于新登记 |
 | headless 全流程 | `vagent headless`：不依赖 Web 与浏览器完成分镜草案、显式预算授权、批量生成、集合等待与本地拼接交付；默认不提交付费任务 |
 | 插件/skills 扩展点 | 用户 skills 目录（元信息发现、按需读取、版本记录沿用内置契约）；扩展点不执行任意可执行代码 |
-| CLI/Web | `vagent film assemble\|show`、`vagent headless`；Web 成片面板（拼接按钮、成片播放/拖动/下载、版本列表）；设置页多供应商 Key；用量面板按供应商分组 |
+| CLI/Web | `vagent film assemble\|show`、`vagent headless`（计划/授权/恢复）；Web 成片面板（拼接按钮、成片播放/拖动/下载、版本列表）；设置页多供应商 Key；用量面板按供应商分组 |
 
 ### 2.2 明确不做（留待后续阶段）
 
@@ -107,8 +107,8 @@
 - [x] E0：官方核实、拼接方案 A 与时间线反例实验、契约/预算/版本冻结、v4 基线与 Harness 同步完成（2026-10-21，submit=0；见 [契约](./M3_CONTRACTS.md) 与 [验收](./M3_E0_ACCEPTANCE.md)）。
 - [x] E1：schema v5、成片域与本地拼接完成（离线证据；submit=0；见 [E1 验收](./M3_E1_ACCEPTANCE.md)）。
 - [x] E2：更多供应商与中转接入与两 Key 直用配置完成（受控 HTTP；submit=0；见 [E2 验收](./M3_E2_ACCEPTANCE.md)）。
-- [ ] E3：headless 全流程与用户 skills 扩展点完成（离线证据）。
+- [x] E3：headless 全流程与用户 skills 扩展点完成（离线证据；submit=0；见 [E3 验收](./M3_E3_ACCEPTANCE.md)）。
 - [ ] E4：离线端到端套件、wheel smoke、受控浏览器、四组 CI 与 `docs/M3_ACCEPTANCE.md` 完成；真实样本按额度执行。
-- [x] E0 的 README、M1_PLAN、Harness 设计与验收文档同步；E1–E4 仍须逐包更新，M3 未完成前不宣称「单文件成片交付」。
+- [x] E0 的 README、M1_PLAN、Harness 设计与验收文档同步；E1–E3 已逐包更新，M3 未完成前不宣称「单文件成片交付」。
 
-E0 已冻结实施依据，E1 已按契约交付本地拼接成片，E2 已接入 Kling 直连与 fal 中转（Job/Request v6、`multi-provider-v3`、逐 provider/currency 预算桶、认证结果来源绑定、tools/rules 6/6 与冻结 5/5 恢复）；E3–E4 以 [M3 契约](./M3_CONTRACTS.md) 的版本、预算与验收边界实施，新增范围或修改已发布协议须另行版本化。
+E0 已冻结实施依据，E1 已按契约交付本地拼接成片，E2 已接入 Kling 直连与 fal 中转（Job/Request v6、`multi-provider-v3`、逐 provider/currency 预算桶、认证结果来源绑定、tools/rules 6/6 与冻结 5/5 恢复），E3 已交付 headless 两阶段授权、集合等待与本地拼接交付以及用户 skills 合并发现（Run 记录内 `headless` 状态、冻结退出码、坏文件隔离）；E4 以 [M3 契约](./M3_CONTRACTS.md) 的版本、预算与验收边界执行离线端到端、wheel/CI 与经明确授权的真实样本，新增范围或修改已发布协议须另行版本化。

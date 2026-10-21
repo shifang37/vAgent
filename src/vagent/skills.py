@@ -9,6 +9,9 @@ from pydantic import BaseModel, ConfigDict, Field, ValidationError
 from vagent.errors import AppError
 from vagent.tools import Arguments, ToolDefinition, ToolRegistry
 
+SKILL_LIMIT = 32
+SKILL_MAX_BYTES = 16384
+
 
 class Metadata(BaseModel):
     model_config = ConfigDict(extra="forbid", strict=True)
@@ -51,52 +54,129 @@ def is_link(path: Path) -> bool:
 
 
 class SkillCatalog:
-    def __init__(self, skills: dict[str, dict]):
+    """One immutable skill snapshot plus the isolated user-root diagnostics."""
+
+    def __init__(self, skills: dict[str, dict], diagnostics: list[dict] | None = None):
         self._skills = skills
+        self.diagnostics = list(diagnostics or [])
 
     @classmethod
-    def discover(cls, root: Path | None = None) -> "SkillCatalog":
-        root = root or builtin_skills_root()
+    def discover(cls, root: Path | None = None, *, user_root: Path | None = None) -> "SkillCatalog":
+        """Discover skills from an explicit root or the default builtin + user roots.
+
+        An explicit root (``VAGENT_SKILLS_DIR``) keeps the original full-replacement
+        and fail-fast semantics. Without it, the packaged root is strict and
+        ``VAGENT_HOME/skills`` is merged after it: builtin names win, bad user
+        files are isolated with a diagnostic, and the combined catalog is bounded.
+        """
+        if root is not None:
+            results = cls._scan(Path(root), strict=True)
+            return cls({result["entry"]["name"]: result["entry"] for result in results if result["entry"]})
+        results = cls._scan(builtin_skills_root(), strict=True)
+        skills = {result["entry"]["name"]: result["entry"] for result in results if result["entry"]}
+        diagnostics = []
+        if user_root is not None:
+            cls._merge_user_root(Path(user_root), skills, diagnostics)
+        return cls(skills, diagnostics)
+
+    @classmethod
+    def _merge_user_root(cls, root: Path, skills: dict[str, dict], diagnostics: list[dict]) -> None:
+        if not root.exists() and not is_link(root):
+            return  # A missing user root is an empty extension point.
+        for result in sorted(cls._scan(root, strict=False), key=lambda item: item["name"]):
+            if result["entry"] is None:
+                if result["code"]:
+                    diagnostics.append(
+                        {"code": result["code"], "name": result["name"], "message": result["message"]}
+                    )
+                continue
+            name = result["entry"]["name"]
+            if name in skills:
+                diagnostics.append(
+                    {
+                        "code": "SKILL_NAME_CONFLICT",
+                        "name": name,
+                        "message": "用户 skill 与已加载的 skill 重名，已忽略；内置名称优先。",
+                    }
+                )
+                continue
+            if len(skills) >= SKILL_LIMIT:
+                diagnostics.append(
+                    {
+                        "code": "SKILL_LIMIT",
+                        "name": name,
+                        "message": f"有效 skill 已达 {SKILL_LIMIT} 个，本条未加载。",
+                    }
+                )
+                continue
+            skills[name] = result["entry"]
+
+    @classmethod
+    def _scan(cls, root: Path, *, strict: bool) -> list[dict]:
+        results: list[dict] = []
         if is_link(root) or not root.is_dir():
-            raise AppError("INVALID_SKILL_ROOT", "Skill 根目录必须是普通目录。")
+            results.append(cls._failure("root", "INVALID_SKILL_ROOT", "Skill 根目录必须是普通目录。"))
+            if strict:
+                raise AppError("INVALID_SKILL_ROOT", "Skill 根目录必须是普通目录。")
+            return results
         directories = []
         for entry in sorted(root.iterdir()):
             if is_link(entry):
-                raise AppError("INVALID_SKILL_FILE", "Skill 目录不允许符号链接或目录联接。")
+                results.append(
+                    cls._failure(entry.name, "INVALID_SKILL_FILE", "Skill 目录不允许符号链接或目录联接。")
+                )
+                if strict:
+                    raise AppError("INVALID_SKILL_FILE", "Skill 目录不允许符号链接或目录联接。")
+                continue
             if entry.is_dir():
                 directories.append(entry)
-        if len(directories) > 32:
-            raise AppError("SKILL_LIMIT", "首版最多加载 32 个 skill。")
-        skills = {}
+        if strict and len(directories) > SKILL_LIMIT:
+            raise AppError("SKILL_LIMIT", f"首版最多加载 {SKILL_LIMIT} 个 skill。")
         for directory in directories:
-            file = directory / "SKILL.md"
-            if is_link(file):
-                raise AppError("INVALID_SKILL_FILE", "Skill 文件不允许符号链接。")
-            if not file.exists():
-                continue
-            if not file.is_file() or file.stat().st_size > 16384:
-                raise AppError("INVALID_SKILL_FILE", "Skill 必须是不超过 16 KiB 的普通文件。")
-            try:
-                raw = file.read_bytes()
-                if len(raw) > 16384:
-                    raise AppError("INVALID_SKILL_FILE", "Skill 文件超过 16 KiB。")
-                source = raw.decode("utf-8")
-                match = re.fullmatch(r"---\r?\n(.*?)\r?\n---\r?\n(.*)", source, re.DOTALL)
-                if not match:
-                    raise ValueError("Missing frontmatter")
-                metadata = Metadata.model_validate(yaml.load(match[1], Loader=UniqueLoader))
-                if metadata.name != directory.name or not match[2].strip():
-                    raise ValueError("Invalid directory name or empty instructions")
-            except (ValueError, TypeError, yaml.YAMLError, ValidationError):
-                raise AppError(
-                    "INVALID_SKILL", "Skill 的 name、description、目录名或正文不符合要求。"
-                ) from None
-            skills[metadata.name] = {
+            results.append(cls._scan_skill(directory, strict=strict))
+        return results
+
+    @classmethod
+    def _scan_skill(cls, directory: Path, *, strict: bool) -> dict:
+        def fail(code: str, message: str) -> dict:
+            if strict:
+                raise AppError(code, message)
+            return cls._failure(directory.name, code, message)
+
+        file = directory / "SKILL.md"
+        if is_link(file):
+            return fail("INVALID_SKILL_FILE", "Skill 文件不允许符号链接。")
+        if not file.exists():
+            return {"name": directory.name, "entry": None, "code": None, "message": None}
+        if not file.is_file() or file.stat().st_size > SKILL_MAX_BYTES:
+            return fail("INVALID_SKILL_FILE", "Skill 必须是不超过 16 KiB 的普通文件。")
+        try:
+            raw = file.read_bytes()
+            if len(raw) > SKILL_MAX_BYTES:
+                raise ValueError("Skill file too large")
+            source = raw.decode("utf-8")
+            match = re.fullmatch(r"---\r?\n(.*?)\r?\n---\r?\n(.*)", source, re.DOTALL)
+            if not match:
+                raise ValueError("Missing frontmatter")
+            metadata = Metadata.model_validate(yaml.load(match[1], Loader=UniqueLoader))
+            if metadata.name != directory.name or not match[2].strip():
+                raise ValueError("Invalid directory name or empty instructions")
+        except (ValueError, TypeError, yaml.YAMLError, ValidationError, OSError):
+            return fail("INVALID_SKILL", "Skill 的 name、description、目录名或正文不符合要求。")
+        return {
+            "name": metadata.name,
+            "entry": {
                 **metadata.model_dump(),
                 "version": hashlib.sha256(raw).hexdigest()[:12],
                 "instructions": match[2].strip(),
-            }
-        return cls(skills)
+            },
+            "code": None,
+            "message": None,
+        }
+
+    @staticmethod
+    def _failure(name: str, code: str, message: str) -> dict:
+        return {"name": name, "entry": None, "code": code, "message": message}
 
     def list(self) -> list[dict]:
         return [{k: v for k, v in skill.items() if k != "instructions"} for skill in self._skills.values()]
@@ -105,6 +185,12 @@ class SkillCatalog:
         if name not in self._skills:
             raise AppError("SKILL_NOT_FOUND", "没有这个已注册的 skill，请从元信息列表中选择。")
         return dict(self._skills[name])
+
+
+def discover_for(config) -> SkillCatalog:
+    """The catalog shared by the CLI, the Web service and headless planning."""
+    user_root = None if config.skills_root else Path(config.home) / "skills"
+    return SkillCatalog.discover(config.skills_root, user_root=user_root)
 
 
 def register_skill_tool(registry: ToolRegistry, catalog: SkillCatalog) -> ToolRegistry:
