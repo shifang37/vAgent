@@ -271,3 +271,62 @@ S2 列出该模型北京免费额度 **50 秒**，有效期自开通百炼/模�
 [S6]: https://help.aliyun.com/zh/model-studio/error-code
 [S7]: https://help.aliyun.com/zh/model-studio/regions#h2_migrate_domain
 [S8]: https://help.aliyun.com/zh/model-studio/text-to-video-guide
+
+## 11. M3 E0：新供应商与中转（2026-10-21）
+
+本节为**公开官方文档核实**，未读取 Key、查询账号任务、上传或生成素材；视频 submit=0。实施范围、预算与来源策略以 [M3_CONTRACTS](./M3_CONTRACTS.md) 为准。所列价格是访问当日的公开估算，不是账号账单；地域可达性、模型授权、真实编码与下载表现均未实测。
+
+### 11.1 来源与证据等级
+
+| 编号 | 官方来源 | 核实用途 |
+|---|---|---|
+| E01 | [Kling Quick Start](https://kling.ai/document-api/guides/get-started/quick-start.md) | 新 API Key、Bearer、Singapore 基址 |
+| E02 | [Kling 3.0 Turbo t2v](https://kling.ai/document-api/api/video/3-0-turbo/text-to-video.md) | 请求、查询、状态、结果与保存期 |
+| E03 | [Kling 视频价格](https://kling.ai/document-api/pricing/base/video.md) | 分辨率、资源单位与公开美元单价 |
+| E04 | [Kling 错误码](https://kling.ai/document-api/api/get-started/error-codes.md) / [并发规则](https://kling.ai/document-api/api/get-started/concurrency-rules.md) | 鉴权、额度、限流与并发口径 |
+| E05 | [fal 所选 standard t2v 模型页](https://fal.ai/models/fal-ai/kling-video/v3/standard/text-to-video) / [API](https://fal.ai/models/fal-ai/kling-video/v3/standard/text-to-video/api) | 精确 endpoint、音频开关、公开价格 |
+| E06 | [fal 官方 OpenAPI](https://fal.ai/api/openapi/queue/openapi.json?endpoint_id=fal-ai/kling-video/v3/standard/text-to-video) | 输入 enum/default、输出 video/File 结构；不作为实际编码保证 |
+| E07 | [fal queue](https://docs.fal.ai/model-apis/model-endpoints/queue.md) | Key 鉴权、异步 request ID、status/result 协议 |
+| E08 | [fal 官方 SDK queue](https://github.com/fal-ai/fal-js/blob/main/libs/client/src/queue.ts) / [endpoint parser](https://github.com/fal-ai/fal-js/blob/main/libs/client/src/utils.ts) | 查询使用 app 根、去除模型子路径；避免照抄 OpenAPI 展示路径 |
+
+E01–E08 均为**文档支持**，E01–E04 直接读取官方 markdown，E05 的价格读取精确模型页面 `pricingInfoOverride`（页面汇总搜索结果不能替代），E06 读取公开 JSON；没有将网页示例升级为「账号已验证」。本次不使用旧 AK/SK JWT 协议，也不以聚合首页价格替代精确 endpoint 价格。
+
+### 11.2 冻结的最小组合
+
+| 项目 | Kling 直连 | fal 中转 |
+|---|---|---|
+| 模型/端点 | `kling-3.0-turbo`；`POST https://api-singapore.klingai.com/text-to-video/kling-3.0-turbo` | `POST https://queue.fal.run/fal-ai/kling-video/v3/standard/text-to-video` |
+| 凭证 | `Authorization: Bearer <API_KEY>` | `Authorization: Key <FAL_KEY>` |
+| 首期模式 | t2v、720p、16:9、5 秒、原生音频 | t2v、standard 档、16:9、5 秒、`generate_audio=false`；不发送不存在的 resolution 字段 |
+| 官方可选范围 | duration 整数 3–15；720p/1080p；16:9/9:16/1:1；本项目只开放上述子集 | duration 字符串 3–15；16:9/9:16/1:1；有音频/多镜头等选项，本项目只开放上述子集 |
+| 公开估算 | 720p Turbo 含音频 **0.8 VIDEO_UNIT/秒，标示 0.112 USD/秒**；5 秒为 **4 units / 0.560 USD**（E03） | 所选 standard endpoint：关闭音频 **0.084 USD/秒**；5 秒 **0.420 USD**（E05） |
+| 不能混用的价格 | 1080p Turbo 为 1 unit / 0.14 USD 每秒，不进入当前组合 | 同一 endpoint 开音频为 0.126 USD/秒；voice control 为 0.154 USD/秒；其他 pro/汇总页面报价不适用于当前组合 |
+| 异步句柄 | 创建响应 `data.id`；`GET /tasks?task_ids=<id>` | 创建响应 `request_id`；status/result 使用 `/fal-ai/kling-video/requests/{id}` app 根 |
+| 状态与结果 | `submitted/processing/succeeded/failed`；`outputs` 中唯一 video 的 URL | `IN_QUEUE/IN_PROGRESS/COMPLETED`；完成后 GET result，校验错误与 `video.url` |
+| 保存/下载 | 文档称生成结果 30 天清理，要求及时本地保存；不保证签名 URL 的同等有效期 | File 字段含 URL、MIME/文件名/大小；不承诺特定实际像素、编码或永久存储 |
+
+Kling 的 `external_task_id` 只有唯一性要求，未据此承诺幂等重投。两者都沿用本地「提交一次、unknown 不自动重提」；远端成功后仍须下载、校验、本地提交后才标为 succeeded。Kling 429 可能表示账号欠费/资源包耗尽（1101/1102）、限流/并发（1302/1303）或 IP 策略（1304），不能把所有 429 都当作可盲重试。fal queue 的 COMPLETED 也不是本地交付完成。
+
+本期只提供文字输入，不引入图片上传/公网图床，也不开放 callback、云端取消、音频控制、供应商内多镜头。Kling 3.0 Turbo 的原生声音与 fal silent 不兼容，跨供应商镜头是否可拼接必须按实际流签名检查，不能依模型名或 720P 标签作保证。
+
+### 11.3 来源、配置与范围裁剪
+
+两个官方协议都未承诺完整稳定的生产结果 CDN allowlist；E06 的 `storage.googleapis.com/falserverless/...` 是样例，不能据此授权整个公共对象存储主机。E0 明确冻结逐 provider 的**认证任务响应 → 精确结果 origin 绑定**策略，下载时公网地址校验与连接地址固定、禁重定向/跨来源/媒体 Authorization，详见契约 §5.2；Wan 的静态允许集不变。此为项目安全设计决定，不是上游保证。
+
+Kling 采用文档指定 Singapore API profile，fal 由 queue 服务路由，不允许用户拼任意 base URL；尚未验证当前网络/账号地域资格。新 Key 保存只做本地格式校验，界面标注权限未验证；没有核实的零费用只读鉴权接口时不伪造探测结果。万相的两 Key、共享域提交及零费用保存探测沿用 K0–K3 已完成证据，不在 E0 重做账号请求。
+
+本期选 Kling + fal；Replicate 为额外中转、Sora/Veo/Seedance 为额外直连，均因最小接入范围顺延，不作可用/停服结论。Kling/fal 的图生、首尾帧等同样顺延；没有核实的能力不发布。真实消费、折扣/资源包抵扣、账号限额、真实结果源与编码、错误响应表现列入 E4 的显式授权样本，不将 E0 文档研究描述为真实接口联通。
+
+## 12. M3 E0：本地拼接选型（2026-10-21）
+
+| 方案 | 官方证据与评估 | 结论 |
+|---|---|---|
+| A：imageio-ffmpeg | [0.6.0 README](https://github.com/imageio/imageio-ffmpeg/blob/v0.6.0/README.md) 说明平台 wheel 携带 FFmpeg；[PyPI 0.6.0 元数据](https://pypi.org/pypi/imageio-ffmpeg/0.6.0/json) 给出平台、大小、哈希；Windows amd64 wheel 31,246,824 字节，Linux x86_64 29,498,237 字节 | **采用**；增加安装体积，换取支持平台安装即有引擎；锁定包与二进制来源，不启用 PATH/环境回退 |
+| B：系统 FFmpeg | 使用相同 concat/copy 原理，项目不分发二进制，但用户与 CI 需外部安装并处理版本差异；本机 PATH 未找到 ffmpeg/ffprobe | 不作默认或自动后备；避免同一安装因 PATH 差异静默改变结果 |
+| C：纯 Python | 需自行重写 MP4 sample tables、chunk offset、edit list 与多轨时间线；现有解析器只是结构验证器，不是 muxer | 延后；自行封装的实现/验证范围超过 E1 的最小拼接目标 |
+
+[FFmpeg concat demuxer](https://ffmpeg.org/ffmpeg-formats.html#concat) 要求输入流兼容，允许逐文件 duration 控制，且说明时长与不同轨道可能造成间隙；[stream copy](https://ffmpeg.org/ffmpeg.html#Streamcopy) 不解码/重编码，但不消除容器/时间线兼容条件。项目因此额外定义 `mp4-copy-signature-v1`，不改变 `mp4-avc-v1` 的历史语义。
+
+许可证分层：Python wrapper 是 [BSD-2-Clause](https://github.com/imageio/imageio-ffmpeg/blob/v0.6.0/LICENSE)，**不能据此把随包二进制也称 BSD**。本机 Windows 包内 FFmpeg 7.1 `-L` 显示 GPL v3-or-later；其他平台必须分别检查构建。依照 [FFmpeg 官方法律说明](https://ffmpeg.org/legal.html)，E1 打包门槛包括第三方许可证/构建信息、对应二进制来源与源码获取方式的清单，必要分发材料随包可取得；不得只列 wrapper 许可证便声称完成。E0 只在被忽略的 output 目录安装实验依赖，不改当前运行依赖，不把第三方二进制提交仓库。
+
+本地合成实验使用已提交的 `tests/fixtures/m1c/sample-720p.mp4` 两次（仓库自生成的测试图+正弦声音，非真实用户视频）。默认 concat 出现非单调 AAC DTS 警告；显式 duration 5.021333333 的夹具实验消除该警告，输出结构校验通过、约 10.021289 秒。失败/修正实验及哈希见 [E0 验收](./M3_E0_ACCEPTANCE.md)。本地实验不证明浏览器解码、通用时间线算法或所有平台，后者仍由 E1/E4 验收。

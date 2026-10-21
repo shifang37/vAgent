@@ -1,0 +1,51 @@
+{
+  "kind": "synthetic-e0-assembly-probe-only",
+  "ffmpegVersion": "ffmpeg version 7.1-essentials_build-www.gyan.dev Copyright (c) 2000-2024 the FFmpeg developers",
+  "binarySha256": "2ce797a0f88d7f067180338fb227f7b1928ea727bd9a4d7a1d022f7c52af71a3",
+  "fixtureSha256": "b179cca0ebb91e2b49a1e212df743037a8e292a3b754ee040c2124b31a3b6a54",
+  "inputCopies": 2,
+  "submitCount": 0,
+  "browserDecodeVerified": false,
+  "variants": [
+    {
+      "variant": "default",
+      "fixtureDurationOverride": null,
+      "returnCode": 0,
+      "nonMonotonicDtsWarning": true,
+      "sizeBytes": 418435,
+      "sha256": "aff98d14483d6fd78df76a47a206d488cb742e2ea6f435a16156769ab6702012",
+      "metadata": {
+        "width": 1280,
+        "height": 720,
+        "durationSeconds": 10.0,
+        "videoCodec": "h264",
+        "hasAudio": true,
+        "audioCodec": "aac",
+        "frameRate": {
+          "numerator": 10,
+          "denominator": 1
+        }
+      }
+    },
+    {
+      "variant": "fixture-padded",
+      "fixtureDurationOverride": "5.021333333",
+      "returnCode": 0,
+      "nonMonotonicDtsWarning": false,
+      "sizeBytes": 418395,
+      "sha256": "41be1ed90fa7abfcdb3b3d46775d96695ca3e441f92adb15363be400ec21fd8a",
+      "metadata": {
+        "width": 1280,
+        "height": 720,
+        "durationSeconds": 10.0212890625,
+        "videoCodec": "h264",
+        "hasAudio": true,
+        "audioCodec": "aac",
+        "frameRate": {
+          "numerator": 512000,
+          "denominator": 51309
+        }
+      }
+    }
+  ]
+}

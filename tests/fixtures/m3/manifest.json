@@ -1,0 +1,366 @@
+{
+  "fixtureVersion": 1,
+  "capturedFrom": "d06dc5f",
+  "capturedOn": "2026-10-21",
+  "kind": "synthetic-v4-domain-baseline-only",
+  "checkpointsIncluded": false,
+  "binaryAssetsIncluded": false,
+  "realProviderRequests": 0,
+  "notes": "E0 baseline before M3. Historical v3 domain JSON is copied unchanged into v4 envelopes. Current fixtures use fixed UUIDs/time and repository test builders; every HTTP call fails. Image records describe synthetic PNG headers; media records reuse the committed M2 synthetic delivery. No application data, credentials, pixels, SQLite checkpoints or resumable Run evidence are included. Legacy signatures/checkpoints remain labelled domain sentinels; computedRunnerProfiles pin real signatures computed from synthetic current registries, built-in skill metadata and model identity. expectedV5CanonicalSha256 is only the mechanical schemaVersion=5, films={} envelope expectation, not a migration result. Do not regenerate to make later changes pass.",
+  "snapshots": [
+    {
+      "file": "legacy-v4-mock.json",
+      "schemaVersion": 4,
+      "source": "../m2/legacy-v3-mock.json",
+      "rawSha256": "f966ed4ebcf694b636bcf24452dc4d96df2a35f42d3b05b728735076d9f73617",
+      "canonicalSha256": "7c8ed5829edbe5d31eb5e393ca0ec057f2e12443989a2db2c70254e8774c26b7",
+      "expectedV5CanonicalSha256": "f211b6a74ca705d83424954a4fe172398e4da7db8c0502435e08ea931bc34d47",
+      "collectionsSha256": {
+        "projects": "0370bd47dfc3e7d661b5d6c718bcf2b75d58ac5db92bcae2942fd7edd5d5cf5a",
+        "sessions": "4b86be6f0e47bc1b893f91423f8bb3c655dae39059f6f9bdaed9208288395b0f",
+        "artifacts": "927270e36b454da4c60f0feeffa8f5fa33feb023787a02bc5522e550bf42bc02",
+        "runs": "f694f54ef4b8cf53e04959f9ff7c811d539af2d7298598d31e6e9f7ca7a8cf70",
+        "operations": "a662665b21e1dd9602d1f256b4095ae313ee3255e77dc647d3b082696388e20c",
+        "jobs": "d2af18d06964c8a813dedba0fceed72c5497ccd8236428334c320a52ab77b718",
+        "waits": "9f7fbf5760b63df12a7b02f93bd1baeeeed7715024ff827e98f16dcab7557dcb",
+        "media": "44136fa355b3678a1146ad16f7e8649e94fb4fc21fe77e8310c060f61caaff8a",
+        "storyboards": "44136fa355b3678a1146ad16f7e8649e94fb4fc21fe77e8310c060f61caaff8a",
+        "assets": "44136fa355b3678a1146ad16f7e8649e94fb4fc21fe77e8310c060f61caaff8a"
+      },
+      "collectionCounts": {
+        "projects": 2,
+        "sessions": 2,
+        "artifacts": 2,
+        "runs": 2,
+        "operations": 7,
+        "jobs": 2,
+        "waits": 2,
+        "media": 0,
+        "storyboards": 0,
+        "assets": 0
+      },
+      "jobContracts": {
+        "fdb86a5a-e4a3-45e0-a31a-e96119b8fb41": 1,
+        "73803b81-d4ac-4726-a529-1ca0114d23d0": 1
+      },
+      "jobRequestFingerprints": {
+        "fdb86a5a-e4a3-45e0-a31a-e96119b8fb41": "513b542472b40954bcf0ba2dd3d05a7ad2d072055be9d8b85abb8d206c612db0",
+        "73803b81-d4ac-4726-a529-1ca0114d23d0": "416b8a7bb5e912311724b3ae29698b168b75bb42206c4f8ca48a5e1cc2ee1771"
+      },
+      "jobIntentFingerprints": {
+        "fdb86a5a-e4a3-45e0-a31a-e96119b8fb41": null,
+        "73803b81-d4ac-4726-a529-1ca0114d23d0": null
+      },
+      "operationFingerprints": {
+        "m2-waiting-mock:source": "af61ed967c818bb26ce2e33115bed87a4345ce8d341131276e0c9709711f30d4",
+        "m2-waiting-mock:1:generate": "5c2cfa7582b78df5b8d8c0f8c538fdd5932babeff7079f5c2d24bafa8b646d50",
+        "m2-waiting-mock:revision": "44cba73ad98c6871499a6c1932219a31658f944e4bf0c2c49a47b06220f217ec",
+        "m2-completed-mock:source": "af61ed967c818bb26ce2e33115bed87a4345ce8d341131276e0c9709711f30d4",
+        "m2-completed-mock:1:generate": "ac24d89ad13888c4e7eb6507c0f8029ebc41c2bf1e0d8737ebf233cb733aa6db",
+        "m2-completed-mock:revision": "5f632e53e085ab1b80bfbfb0c5cb9701f0d2e69b795d212befc2b9c956ca1dc9",
+        "m2-completed-mock:2:await-original": "3b8be23a75bda87ae8eede1f0d6cc6bf9b915b50f88542431d5c89b3c3f627aa"
+      },
+      "mediaSha256": {},
+      "assetsSha256": {},
+      "storyboardVersions": {},
+      "runSignatures": {
+        "m2-waiting-mock": {
+          "contextSignature": "domain-fixture-signature-not-a-checkpoint",
+          "executionVersion": 2,
+          "contextVersion": 2,
+          "toolFeaturesSha256": "3130ba8fcfee5d93c8130c33b40f6ecbb36d79f5bdb900c05f536f7826ef1884"
+        },
+        "m2-completed-mock": {
+          "contextSignature": "domain-fixture-signature-not-a-checkpoint",
+          "executionVersion": 2,
+          "contextVersion": 2,
+          "toolFeaturesSha256": "3130ba8fcfee5d93c8130c33b40f6ecbb36d79f5bdb900c05f536f7826ef1884"
+        }
+      },
+      "computedRunnerProfiles": {}
+    },
+    {
+      "file": "legacy-v4-live.json",
+      "schemaVersion": 4,
+      "source": "../m2/legacy-v3-live.json",
+      "rawSha256": "81cbb62bdd017e1e7a3ff5e9341f796e6e917c77ae01750fa350109d6f400ecf",
+      "canonicalSha256": "51d416752aa7fcad0dfba0bea56a3efbd4728ad6ab33cbeade9f411747fbe021",
+      "expectedV5CanonicalSha256": "09d1f44c1707ffdd91d851d6d65e1e8bd753d63ede363d019f71745c6c8d7069",
+      "collectionsSha256": {
+        "projects": "a7c7ce9984e39a2aff248988a5af1eda62283cf094f3b71a25d1a04e1cedf993",
+        "sessions": "78b1e1eca58b046240ca5ee58c007e1113b5da0f6510e474370e653ed9bfc50c",
+        "artifacts": "44136fa355b3678a1146ad16f7e8649e94fb4fc21fe77e8310c060f61caaff8a",
+        "runs": "21a69b163eb36c87821f5d325007526a5cd93bf500cca74afc876d9aa4cc00c4",
+        "operations": "78d749fa7d681b1e4737def21ae99d53e2730512f673db7bb3a3149bce0abcab",
+        "jobs": "370586ce58a80746e2220ca2b3ae4cbff1b682698d31b38a519b7a532ffedf90",
+        "waits": "44136fa355b3678a1146ad16f7e8649e94fb4fc21fe77e8310c060f61caaff8a",
+        "media": "17d3f2ee081c9013d23d5968b9b5771e01e6d2821520d3552644ca413acb48ab",
+        "storyboards": "44136fa355b3678a1146ad16f7e8649e94fb4fc21fe77e8310c060f61caaff8a",
+        "assets": "44136fa355b3678a1146ad16f7e8649e94fb4fc21fe77e8310c060f61caaff8a"
+      },
+      "collectionCounts": {
+        "projects": 1,
+        "sessions": 1,
+        "artifacts": 0,
+        "runs": 1,
+        "operations": 1,
+        "jobs": 1,
+        "waits": 0,
+        "media": 1,
+        "storyboards": 0,
+        "assets": 0
+      },
+      "jobContracts": {
+        "1875a669-b4bb-401a-9cf8-463ebe99fd14": 2
+      },
+      "jobRequestFingerprints": {
+        "1875a669-b4bb-401a-9cf8-463ebe99fd14": "288e2c859260a0f7fa54eb28f856d3baac4d8f0a936215c8d021504b885e5ae1"
+      },
+      "jobIntentFingerprints": {
+        "1875a669-b4bb-401a-9cf8-463ebe99fd14": "30d42674a6a65d51093b774fa2fc3198cbe5695cc904a9315f2e38d278e3bb6a"
+      },
+      "operationFingerprints": {
+        "live-run:1:generate": "34e1e602da9c88d37f47601839c8763802daf3110ed3f5f3d5b3bf9b5a913fb4"
+      },
+      "mediaSha256": {
+        "51c8bf18-cca2-4582-9c70-fa7d45486b8e": "b179cca0ebb91e2b49a1e212df743037a8e292a3b754ee040c2124b31a3b6a54"
+      },
+      "assetsSha256": {},
+      "storyboardVersions": {},
+      "runSignatures": {
+        "live-run": {
+          "contextSignature": null,
+          "executionVersion": 2,
+          "contextVersion": 1,
+          "toolFeaturesSha256": "44136fa355b3678a1146ad16f7e8649e94fb4fc21fe77e8310c060f61caaff8a"
+        }
+      },
+      "computedRunnerProfiles": {}
+    },
+    {
+      "file": "current-v4-shots.json",
+      "schemaVersion": 4,
+      "source": "synthetic-public-builders-registration-only",
+      "rawSha256": "60d27efbe00e78328d821c0897f9961b98a51cb136b56375111da080e9910ed3",
+      "canonicalSha256": "2cc81975d021734200e968dd598d333c6d029ef75f80d2051950a4700d0d8fb3",
+      "expectedV5CanonicalSha256": "c66dee120eae568bd90aba9b774b30be8f496a5961c818b7cb4e1769211afdfe",
+      "collectionsSha256": {
+        "projects": "a7c7ce9984e39a2aff248988a5af1eda62283cf094f3b71a25d1a04e1cedf993",
+        "sessions": "be67d71a26dc80dbe9c76af2f4c6dd58468f828b9d2cbdc2d2c4e2abc005c308",
+        "artifacts": "44136fa355b3678a1146ad16f7e8649e94fb4fc21fe77e8310c060f61caaff8a",
+        "runs": "74751111c7ba9b43765cf1b6a48335d5bfb4663d03c063b87207de36f4430104",
+        "operations": "cc16de2d20be3da2157edd2deb99d2a39dbe0c494addcc1b92d3261b3a02b7ec",
+        "jobs": "57c94cfa98e6d3fce48fc00280b1b9cc5f1b66c6b1cde176836da992fdf81d6c",
+        "waits": "022440562f88c065f1e1af6fe1d6a60f0a23a52259df2f400fb76b2b714df948",
+        "media": "44136fa355b3678a1146ad16f7e8649e94fb4fc21fe77e8310c060f61caaff8a",
+        "storyboards": "96e5265cd2b85d226a85c80ab32a18a9de198925e488905fdff4fbfe5b25da4d",
+        "assets": "08d38527f3afb91de06e00f61af17d3c1bdf387fe1c999d54ecdf36186ece1b4"
+      },
+      "collectionCounts": {
+        "projects": 1,
+        "sessions": 1,
+        "artifacts": 0,
+        "runs": 5,
+        "operations": 6,
+        "jobs": 6,
+        "waits": 1,
+        "media": 0,
+        "storyboards": 1,
+        "assets": 1
+      },
+      "jobContracts": {
+        "bdf43cc0-ac35-5934-86a4-a8284b20950d": 3,
+        "05012a65-2362-55f0-8fb7-a911c702b0af": 3,
+        "3a4d60af-1d1f-5094-94f5-979b2cecba35": 5,
+        "917e4743-e355-554b-a237-dd5054faabb2": 5,
+        "8271694d-600e-5447-ade4-3c0f939ee909": 5,
+        "ba21e9d9-c9e0-5b2c-bdbf-a8425f9083f2": 4
+      },
+      "jobRequestFingerprints": {
+        "bdf43cc0-ac35-5934-86a4-a8284b20950d": "44abc3ca07d87aaf81ee43d5857b8ad992e2eac9f3f65d1b9773b71611c9ad87",
+        "05012a65-2362-55f0-8fb7-a911c702b0af": "604c28814bd2e865019cd6ffbfa4ef3bcd4cf8f2749dae9ac276baaf9151986f",
+        "3a4d60af-1d1f-5094-94f5-979b2cecba35": "8aaf6dd887c18b39830035f6bcc250d68227e1218d8a52053f9811685841c9c8",
+        "917e4743-e355-554b-a237-dd5054faabb2": "c56d34cf68a377acf69caf2eb74d8c2ab8b85dbf52be51129f073f27989ef7a5",
+        "8271694d-600e-5447-ade4-3c0f939ee909": "8aaf6dd887c18b39830035f6bcc250d68227e1218d8a52053f9811685841c9c8",
+        "ba21e9d9-c9e0-5b2c-bdbf-a8425f9083f2": "da6f17aa76b3c3fbf38e82fddb94339bd981f2f1bbf07f7359f060705d9d19f5"
+      },
+      "jobIntentFingerprints": {
+        "bdf43cc0-ac35-5934-86a4-a8284b20950d": "7adaa65ef4b42352859bf9cd04e985087179db366e112cee32e68a12d1ebaac2",
+        "05012a65-2362-55f0-8fb7-a911c702b0af": "2919f9637a8ff130eec09ae37c1371fb53fd77abaf4e5d05a652cc17a1d8475e",
+        "3a4d60af-1d1f-5094-94f5-979b2cecba35": "14e988571befdd4e1c254b341ef6af72869312b6c23148b67d94f2bd3792c780",
+        "917e4743-e355-554b-a237-dd5054faabb2": "2919f9637a8ff130eec09ae37c1371fb53fd77abaf4e5d05a652cc17a1d8475e",
+        "8271694d-600e-5447-ade4-3c0f939ee909": "14e988571befdd4e1c254b341ef6af72869312b6c23148b67d94f2bd3792c780",
+        "ba21e9d9-c9e0-5b2c-bdbf-a8425f9083f2": "30d42674a6a65d51093b774fa2fc3198cbe5695cc904a9315f2e38d278e3bb6a"
+      },
+      "operationFingerprints": {
+        "storyboard-save": "9b1a9c899fd676de076a32561870f1723681e9bce6563d8e7a00f7213694449a",
+        "workspace-shots:1:batch": "4b5149e3c41fdaab2c94e7fa6d5abf2860c485a36458044383a953fcba69ebc8",
+        "storyboard-revise": "d8f43a5326a7df7bf329506474b76003c4d22298a6e66f6e8b1fbb6e0cc3a013",
+        "shared-shots:1:generate": "07439f8c67d4ed142ccd928b79f3b9cfa755a4603bfd95b1140b9ccd369cb5bb",
+        "shared-redo:1:generate": "e8f668c95a9e1300a596f43624789229ae05c69f14a5b944f0d264a6dc30cfb0",
+        "shared-single:1:generate": "34e1e602da9c88d37f47601839c8763802daf3110ed3f5f3d5b3bf9b5a913fb4"
+      },
+      "mediaSha256": {},
+      "assetsSha256": {
+        "9cba9c02-05b1-5404-9c75-55d89a7de300": "d1b665edf83994190553475a544b01de2f2b26c272f3a051cadb6a1ece0962e8"
+      },
+      "storyboardVersions": {
+        "c80d8285-5c47-5468-bea6-6147eb8caf15": {
+          "currentVersion": 2,
+          "revision": 4,
+          "versionsSha256": "d11acae789ac3ebcbdebb6a1f20c10ea2b8cd608d3b0bf8a8ce05286c9d93a5d",
+          "shotVersionsSha256": "2ce231fe960ab0f35bf83cf56e0e78d7250924880cfafe407d5f7510be48fa27"
+        }
+      },
+      "runSignatures": {
+        "video-run": {
+          "contextSignature": "5197365466388bafdced606d35ce0816613b5138c3c04f2ae7ac0950df69d5c3",
+          "executionVersion": 3,
+          "contextVersion": 2,
+          "toolFeaturesSha256": "f20b0e02645db4ac7fe3dee893f424b74cd85205b6bc4dc982b351faeadd766b"
+        },
+        "workspace-shots": {
+          "contextSignature": "62640ad3dcd91ffd4434bdddc39d720934eec1778755ca47c33b90f63b91b69e",
+          "executionVersion": 3,
+          "contextVersion": 2,
+          "toolFeaturesSha256": "dfe60702a40acd7933949661396943c0e26caaf104354a8f5cc201997df32e9a"
+        },
+        "shared-shots": {
+          "contextSignature": "62640ad3dcd91ffd4434bdddc39d720934eec1778755ca47c33b90f63b91b69e",
+          "executionVersion": 3,
+          "contextVersion": 2,
+          "toolFeaturesSha256": "dfe60702a40acd7933949661396943c0e26caaf104354a8f5cc201997df32e9a"
+        },
+        "shared-redo": {
+          "contextSignature": "62640ad3dcd91ffd4434bdddc39d720934eec1778755ca47c33b90f63b91b69e",
+          "executionVersion": 3,
+          "contextVersion": 2,
+          "toolFeaturesSha256": "dfe60702a40acd7933949661396943c0e26caaf104354a8f5cc201997df32e9a"
+        },
+        "shared-single": {
+          "contextSignature": "62640ad3dcd91ffd4434bdddc39d720934eec1778755ca47c33b90f63b91b69e",
+          "executionVersion": 3,
+          "contextVersion": 2,
+          "toolFeaturesSha256": "dfe60702a40acd7933949661396943c0e26caaf104354a8f5cc201997df32e9a"
+        }
+      },
+      "computedRunnerProfiles": {
+        "video-run": {
+          "kind": "computed-synthetic-runner",
+          "model": "m3-baseline-fixture",
+          "executionVersion": 3,
+          "contextVersion": 2,
+          "contextSignature": "5197365466388bafdced606d35ce0816613b5138c3c04f2ae7ac0950df69d5c3",
+          "toolFeaturesSha256": "f20b0e02645db4ac7fe3dee893f424b74cd85205b6bc4dc982b351faeadd766b",
+          "skills": [
+            {
+              "name": "shot-description",
+              "description": "将已有创作意图写成清晰的镜头描述或视频提示词，适用于主体、场景、运镜、风格和连续性约束的细化与修改。",
+              "version": "dc260f745bde"
+            },
+            {
+              "name": "video-brief",
+              "description": "为短视频、广告或宣传片梳理创作目标、受众、风格与约束，形成可保存和持续修改的创作方案。",
+              "version": "41f01354fd70"
+            }
+          ],
+          "toolSpecsSha256": "a716e55175beb9fa0322ae0da9d2f83d18838f64df0f994873982623547db234",
+          "systemPromptSha256": "cdcfc941f2ab6d53ef02458b432ad406835ef9a408f5c4c08e0b2894849623c2",
+          "maxInputBytes": 65536
+        },
+        "workspace-shots": {
+          "kind": "computed-synthetic-runner",
+          "model": "m3-baseline-fixture",
+          "executionVersion": 3,
+          "contextVersion": 2,
+          "contextSignature": "62640ad3dcd91ffd4434bdddc39d720934eec1778755ca47c33b90f63b91b69e",
+          "toolFeaturesSha256": "dfe60702a40acd7933949661396943c0e26caaf104354a8f5cc201997df32e9a",
+          "skills": [
+            {
+              "name": "shot-description",
+              "description": "将已有创作意图写成清晰的镜头描述或视频提示词，适用于主体、场景、运镜、风格和连续性约束的细化与修改。",
+              "version": "dc260f745bde"
+            },
+            {
+              "name": "video-brief",
+              "description": "为短视频、广告或宣传片梳理创作目标、受众、风格与约束，形成可保存和持续修改的创作方案。",
+              "version": "41f01354fd70"
+            }
+          ],
+          "toolSpecsSha256": "93380eac915a05d82b83a9904ec9c99cc8ee4b1bf6e63b75b1c3f669ced65cd4",
+          "systemPromptSha256": "7b812ae73049c818f4d154e211417423c90fb49df1fd9a427e2c1f0bde721453",
+          "maxInputBytes": 65536
+        },
+        "shared-shots": {
+          "kind": "computed-synthetic-runner",
+          "model": "m3-baseline-fixture",
+          "executionVersion": 3,
+          "contextVersion": 2,
+          "contextSignature": "62640ad3dcd91ffd4434bdddc39d720934eec1778755ca47c33b90f63b91b69e",
+          "toolFeaturesSha256": "dfe60702a40acd7933949661396943c0e26caaf104354a8f5cc201997df32e9a",
+          "skills": [
+            {
+              "name": "shot-description",
+              "description": "将已有创作意图写成清晰的镜头描述或视频提示词，适用于主体、场景、运镜、风格和连续性约束的细化与修改。",
+              "version": "dc260f745bde"
+            },
+            {
+              "name": "video-brief",
+              "description": "为短视频、广告或宣传片梳理创作目标、受众、风格与约束，形成可保存和持续修改的创作方案。",
+              "version": "41f01354fd70"
+            }
+          ],
+          "toolSpecsSha256": "93380eac915a05d82b83a9904ec9c99cc8ee4b1bf6e63b75b1c3f669ced65cd4",
+          "systemPromptSha256": "7b812ae73049c818f4d154e211417423c90fb49df1fd9a427e2c1f0bde721453",
+          "maxInputBytes": 65536
+        },
+        "shared-redo": {
+          "kind": "computed-synthetic-runner",
+          "model": "m3-baseline-fixture",
+          "executionVersion": 3,
+          "contextVersion": 2,
+          "contextSignature": "62640ad3dcd91ffd4434bdddc39d720934eec1778755ca47c33b90f63b91b69e",
+          "toolFeaturesSha256": "dfe60702a40acd7933949661396943c0e26caaf104354a8f5cc201997df32e9a",
+          "skills": [
+            {
+              "name": "shot-description",
+              "description": "将已有创作意图写成清晰的镜头描述或视频提示词，适用于主体、场景、运镜、风格和连续性约束的细化与修改。",
+              "version": "dc260f745bde"
+            },
+            {
+              "name": "video-brief",
+              "description": "为短视频、广告或宣传片梳理创作目标、受众、风格与约束，形成可保存和持续修改的创作方案。",
+              "version": "41f01354fd70"
+            }
+          ],
+          "toolSpecsSha256": "93380eac915a05d82b83a9904ec9c99cc8ee4b1bf6e63b75b1c3f669ced65cd4",
+          "systemPromptSha256": "7b812ae73049c818f4d154e211417423c90fb49df1fd9a427e2c1f0bde721453",
+          "maxInputBytes": 65536
+        },
+        "shared-single": {
+          "kind": "computed-synthetic-runner",
+          "model": "m3-baseline-fixture",
+          "executionVersion": 3,
+          "contextVersion": 2,
+          "contextSignature": "62640ad3dcd91ffd4434bdddc39d720934eec1778755ca47c33b90f63b91b69e",
+          "toolFeaturesSha256": "dfe60702a40acd7933949661396943c0e26caaf104354a8f5cc201997df32e9a",
+          "skills": [
+            {
+              "name": "shot-description",
+              "description": "将已有创作意图写成清晰的镜头描述或视频提示词，适用于主体、场景、运镜、风格和连续性约束的细化与修改。",
+              "version": "dc260f745bde"
+            },
+            {
+              "name": "video-brief",
+              "description": "为短视频、广告或宣传片梳理创作目标、受众、风格与约束，形成可保存和持续修改的创作方案。",
+              "version": "41f01354fd70"
+            }
+          ],
+          "toolSpecsSha256": "93380eac915a05d82b83a9904ec9c99cc8ee4b1bf6e63b75b1c3f669ced65cd4",
+          "systemPromptSha256": "7b812ae73049c818f4d154e211417423c90fb49df1fd9a427e2c1f0bde721453",
+          "maxInputBytes": 65536
+        }
+      }
+    }
+  ]
+}
