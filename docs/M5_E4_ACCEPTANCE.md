@@ -90,7 +90,7 @@ node --test tests/test_episode_state.mjs tests/test_film_state.mjs
 | 实际账单 | `unknown`（未取得账单；免费额度是否抵扣未知） |
 | 文本模型调用 | 0 |
 | 分集 | `episodeId=de84c2ed-ddec-44c9-9cc0-25110e753d6a`，7 场、18 镜头、90 秒 |
-| 成片 | 7 条逐场成片，合计 **32,666,071 字节**；4 条 10.096549 秒（2 镜头/场）、3 条 15.159766 秒（3 镜头/场），全部 1280×720/H.264+AAC |
+| 成片 | 7 条逐场成片，合计 **32,666,071 字节**；3 条 10.096549 秒（2 镜头/场）、4 条 15.159766 秒（3 镜头/场），全部 1280×720/H.264+AAC |
 | 拼接引擎 | 7 条均为 `ffmpeg-concat-copy-v1`（真实输出彼此兼容，未触发 M4 归一化回退） |
 | 浏览器 | 分集面板 18/18、7 条成片可播放；成片解码 1280×720、首条 10.0965 秒；截图 `output/m5-e4-real-episode-panel.png`、`output/m5-e4-real-episode-storyboard.png` |
 
@@ -118,7 +118,7 @@ node --test tests/test_job_state.mjs tests/test_storyboard_state.mjs tests/test_
 见 `output/m5-e4-real/evidence.json`。关键结论：
 
 - 18 个任务均从 Wan 真实提交、查询并下载；18/18 `succeeded`，无失败、无 `unknown`、无重提；结果主机在 `wan-result-hosts-v2` 允许集内。
-- 7 条成片均由当前分镜版本的最新已交付镜头生成；4 条 2 输入 / 10.096549 秒、3 条 3 输入 / 15.159766 秒，全部 1280×720、H.264+AAC；拷贝签名彼此兼容，7 条均走 `ffmpeg-concat-copy-v1`。
+- 7 条成片均由当前分镜版本的最新已交付镜头生成；3 条 2 输入 / 10.096549 秒、4 条 3 输入 / 15.159766 秒，全部 1280×720、H.264+AAC；拷贝签名彼此兼容，7 条均走 `ffmpeg-concat-copy-v1`。
 - 浏览器对分集面板与首条成片的实测：7 个场记、18/18 交付、`54.00 / 60.00 CNY`、成片解码 1280×720 且播放推进；Range 请求返回 200/206；页面错误 0。
 - 实际扣费与账单未取得，因此只记录估算（54.00 CNY）；不把 `usage.duration` 写成实际扣费。
 
