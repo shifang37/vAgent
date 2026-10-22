@@ -1,18 +1,20 @@
 """M5 episode domain: episodes, scenes and the character/style bibles.
 
-E0 freezes the objects that schema v6 keeps. This module holds only strict
-contracts and the Store-commit validators; storage.py owns the four new
-collections and calls these validators on open and in every commit. Text
-splitting, tool arguments, CLI/Web views and provider calls arrive in E1-E3 and
-must not live here.
+E0 froze the objects that schema v6 keeps; E1 adds the deterministic writing path
+(``save_episode``/``read_episode``/``save_bible``/``read_bible``) on top of them,
+following the storyboard module's layout: strict contracts, Store-commit
+validators and journaled handlers in one place. The text-to-draft algorithm lives
+in ``adaptation.py``; tool schemas and registration live in video/tools.py.
 
 A scene owns at most one storyboard (1:1). Shots, reference assets, generation
 Jobs and film assembly therefore keep using the frozen M2/M3/M4 machinery keyed
 by ``storyboardId``; an episode only orders scenes and freezes their versions.
 """
 
+from datetime import UTC, datetime
 from decimal import Decimal
 from typing import Literal
+from uuid import uuid4
 
 from pydantic import Field, model_validator
 
@@ -84,6 +86,19 @@ class ShotBudget(Contract):
         return self
 
 
+class SceneDialogue(Contract):
+    """One line of dialogue kept with its scene so later stages never re-guess it.
+
+    E1 adds this field additively: records written by E0 (or without dialogue)
+    still validate, and the speaker stays the transcript name until E2 links it
+    to a character ID.
+    """
+
+    text: str = Field(min_length=1, max_length=300)
+    speaker: str | None = Field(default=None, min_length=1, max_length=40)
+    paragraph: int = Field(default=0, ge=0, le=100)
+
+
 class SceneVersion(Contract):
     """One planned beat: heading, cast, shot count and its share of the duration."""
 
@@ -93,6 +108,7 @@ class SceneVersion(Contract):
     time_of_day: TimeOfDay = "unknown"
     synopsis: str = Field(min_length=1, max_length=1000)
     character_ids: JsonTuple[Identifier] = Field(default=(), max_length=CHARACTER_RELATION_LIMIT)
+    dialogue: JsonTuple[SceneDialogue] = Field(default=(), max_length=40)
     shot_count: int = Field(ge=1, le=SCENE_MAX_SHOTS)
     duration_seconds: int = Field(ge=SHOT_DURATION_MIN, le=SCENE_MAX_SECONDS)
     created_at: UtcTimestamp
@@ -455,3 +471,430 @@ def validate_style_changes(previous: dict[str, dict], state: dict) -> None:
             or record.versions[: len(old.versions)] != old.versions
         ):
             raise AppError("STYLE_IMMUTABLE", "风格圣经只增不改，旧版本必须保留。")
+
+
+def utc_now() -> str:
+    return datetime.now(UTC).isoformat()
+
+
+def _episode_record(state: dict, episode_id: str) -> Episode:
+    raw = state["episodes"].get(episode_id)
+    if raw is None:
+        raise AppError("EPISODE_NOT_FOUND", f"分集 {episode_id} 不存在，未保存。")
+    return Episode.model_validate(raw)
+
+
+def _candidate_scene(item: dict) -> dict:
+    """The frozen fields of one requested scene, as it would be stored."""
+    dialogue = []
+    for line in item.get("dialogue") or ():
+        dialogue.append((line["text"], line.get("speaker"), int(line.get("paragraph") or 0)))
+    return {
+        "heading": item["heading"],
+        "location": item.get("location"),
+        "time_of_day": item.get("timeOfDay", "unknown"),
+        "synopsis": item["synopsis"],
+        "character_ids": tuple(item.get("characterIds") or ()),
+        "dialogue": tuple(dialogue),
+        "shot_count": int(item["shotCount"]),
+        "duration_seconds": int(item["durationSeconds"]),
+    }
+
+
+def _stored_scene(version: SceneVersion) -> dict:
+    return {
+        "heading": version.heading,
+        "location": version.location,
+        "time_of_day": version.time_of_day,
+        "synopsis": version.synopsis,
+        "character_ids": tuple(version.character_ids),
+        "dialogue": tuple((line.text, line.speaker, line.paragraph) for line in version.dialogue),
+        "shot_count": version.shot_count,
+        "duration_seconds": version.duration_seconds,
+    }
+
+
+def _scene_version(version: int, fields: dict, timestamp: str) -> SceneVersion:
+    if not 1 <= fields["shot_count"] <= SCENE_MAX_SHOTS:
+        raise AppError("EPISODE_SHOT_BUDGET", f"单个场记的镜头数必须在 1–{SCENE_MAX_SHOTS} 之间。")
+    low = SHOT_DURATION_MIN * fields["shot_count"]
+    high = SHOT_DURATION_MAX * fields["shot_count"]
+    if not low <= fields["duration_seconds"] <= high:
+        raise AppError("EPISODE_DURATION_LIMIT", "场记时长必须容得下它自己的镜头数。")
+    try:
+        return SceneVersion(
+            version=version,
+            heading=fields["heading"],
+            location=fields["location"],
+            time_of_day=fields["time_of_day"],
+            synopsis=fields["synopsis"],
+            character_ids=fields["character_ids"],
+            dialogue=tuple(
+                SceneDialogue(text=text, speaker=speaker, paragraph=paragraph)
+                for text, speaker, paragraph in fields["dialogue"]
+            ),
+            shot_count=fields["shot_count"],
+            duration_seconds=fields["duration_seconds"],
+            created_at=timestamp,
+        )
+    except ValueError:
+        raise AppError("INVALID_ARGUMENTS", "场记字段不符合要求（镜头数或时长越界），未保存分集。") from None
+
+
+def _episode_target(args: dict, shots: int) -> int:
+    requested = args.get("targetDurationSeconds")
+    if requested is None:
+        # Five seconds per shot keeps the plan inside 60..90 for 12..18 shots.
+        return max(EPISODE_MIN_SECONDS, min(EPISODE_MAX_SECONDS, shots * 5))
+    if not isinstance(requested, int) or not EPISODE_MIN_SECONDS <= requested <= EPISODE_MAX_SECONDS:
+        raise AppError("EPISODE_DURATION_LIMIT", "分集时长必须在冻结的 60–90 秒之间。")
+    return requested
+
+
+def save_episode(args: dict, state: dict, project_id: str) -> dict:
+    """Create or append one EpisodeVersion, creating or editing its scenes atomically."""
+    episode_id = args.get("episodeId")
+    raw = state["episodes"].get(episode_id) if episode_id else None
+    if episode_id and (raw is None or raw["projectId"] != project_id):
+        raise AppError("EPISODE_NOT_FOUND", "当前项目中没有这个分集。")
+    existing = Episode.model_validate(raw) if raw is not None else None
+    if existing is not None and existing.revision != args.get("expectedRevision", -1):
+        raise AppError("VERSION_CONFLICT", "分集记录已变化，请重新读取后再修改。")
+    if existing is None:
+        episode_id = str(uuid4())
+    style_id = args.get("styleId", existing.style_id if existing else None)
+    if style_id is not None:
+        style = _style_record(state, style_id)
+        if style.project_id != project_id:
+            raise AppError("STYLE_CONFLICT", "风格圣经必须属于同一项目。")
+
+    timestamp = utc_now()
+    scenes: list[Scene] = []
+    for item in args["scenes"]:
+        scene_id = item.get("id")
+        if scene_id:
+            if existing is None:
+                raise AppError("SCENE_NOT_FOUND", "新建分集不能引用尚未保存的场记。")
+            scene_raw = state["scenes"].get(scene_id)
+            if scene_raw is None or scene_raw["projectId"] != project_id:
+                raise AppError("SCENE_NOT_FOUND", "当前项目中没有这个场记。")
+            scene = Scene.model_validate(scene_raw)
+            if scene.episode_id != episode_id:
+                raise AppError("SCENE_CONFLICT", "场记不属于这个分集。")
+            fields = _candidate_scene(item)
+            if _stored_scene(scene.latest) == fields:
+                scenes.append(scene)
+                continue
+            version = _scene_version(scene.current_version + 1, fields, timestamp)
+            scenes.append(
+                scene.model_copy(
+                    update={
+                        "versions": (*scene.versions, version),
+                        "current_version": version.version,
+                        "revision": scene.revision + 1,
+                    }
+                )
+            )
+            continue
+        fields = _candidate_scene(item)
+        scenes.append(
+            Scene(
+                id=str(uuid4()),
+                project_id=project_id,
+                episode_id=episode_id,
+                current_version=1,
+                versions=(_scene_version(1, fields, timestamp),),
+                revision=0,
+                created_at=timestamp,
+            )
+        )
+
+    shots = sum(scene.latest.shot_count for scene in scenes)
+    if not EPISODE_MIN_SHOTS <= shots <= EPISODE_MAX_SHOTS:
+        raise AppError(
+            "EPISODE_SHOT_BUDGET", f"分集共 {shots} 个镜头，必须在 {EPISODE_MIN_SHOTS}–{EPISODE_MAX_SHOTS} 之间。"
+        )
+    target = _episode_target(args, shots)
+    budget = ShotBudget(shot_count=shots, target_duration_seconds=target)
+    if "sourceRefs" in args:
+        sources = args["sourceRefs"]
+    elif existing is not None:
+        sources = [item.model_dump(mode="json", by_alias=True) for item in existing.latest.sources]
+    else:
+        sources = []
+    refs = tuple(ArtifactRef.model_validate(item) for item in sources)
+    validate_source_refs(state, project_id, refs)
+    version = EpisodeVersion(
+        version=(existing.current_version + 1) if existing is not None else 1,
+        target_duration_seconds=target,
+        shot_budget=budget,
+        scenes=tuple(SceneRef(scene_id=scene.id, scene_version=scene.current_version) for scene in scenes),
+        sources=refs,
+        created_at=timestamp,
+    )
+    if existing is None:
+        record = Episode(
+            id=episode_id,
+            project_id=project_id,
+            title=args["title"],
+            style_id=style_id,
+            current_version=1,
+            versions=(version,),
+            revision=0,
+            created_at=timestamp,
+        )
+    else:
+        record = existing.model_copy(
+            update={
+                "title": args["title"],
+                "style_id": style_id,
+                "current_version": version.version,
+                "versions": (*existing.versions, version),
+                "revision": existing.revision + 1,
+            }
+        )
+    for scene in scenes:
+        state["scenes"][scene.id] = scene.model_dump(mode="json", by_alias=True)
+    state["episodes"][record.id] = record.model_dump(mode="json", by_alias=True)
+    return {
+        "episodeId": record.id,
+        "version": record.current_version,
+        "revision": record.revision,
+        "sceneIds": [scene.id for scene in scenes],
+        "shotCount": shots,
+        "targetDurationSeconds": target,
+        "textSplitContract": version.text_split_contract,
+        "shotBudget": budget.model_dump(mode="json", by_alias=True),
+    }
+
+
+def _character_summary(record: Character) -> dict:
+    latest = record.latest
+    return {
+        "characterId": record.id,
+        "name": latest.name,
+        "aliases": list(latest.aliases),
+        "appearance": latest.appearance,
+        "wardrobe": latest.wardrobe,
+        "voice": latest.voice.model_dump(mode="json", by_alias=True) if latest.voice else None,
+        "relationships": [
+            link.model_dump(mode="json", by_alias=True) for link in latest.relationships
+        ],
+        "referenceAssetIds": list(latest.reference_asset_ids),
+        "currentVersion": record.current_version,
+        "revision": record.revision,
+    }
+
+
+def _style_summary(record: Style) -> dict:
+    latest = record.latest
+    return {
+        "styleId": record.id,
+        "name": latest.name,
+        "genre": list(latest.genre),
+        "palette": latest.palette,
+        "cameraLanguage": latest.camera_language,
+        "currentVersion": record.current_version,
+        "revision": record.revision,
+    }
+
+
+def read_episode(args: dict, state: dict, project_id: str) -> dict:
+    """The current episode with its frozen scenes and re-derivable shot drafts."""
+    from vagent.video.adaptation import draft_stored_scene
+
+    summaries = []
+    for raw in state["episodes"].values():
+        if raw["projectId"] != project_id:
+            continue
+        episode = Episode.model_validate(raw)
+        summaries.append(
+            {
+                "episodeId": episode.id,
+                "title": episode.title,
+                "currentVersion": episode.current_version,
+                "revision": episode.revision,
+                "sceneCount": len(episode.latest.scenes),
+                "shotCount": episode.latest.shot_budget.shot_count,
+                "targetDurationSeconds": episode.latest.target_duration_seconds,
+            }
+        )
+    summaries.sort(key=lambda item: (item["title"], item["episodeId"]))
+    episode_id = args.get("episodeId")
+    if episode_id:
+        raw = state["episodes"].get(episode_id)
+        if raw is None or raw["projectId"] != project_id:
+            raise AppError("EPISODE_NOT_FOUND", "当前项目中没有这个分集。")
+        episode = Episode.model_validate(raw)
+    elif not summaries:
+        return {"episodeId": None, "episode": None, "episodes": [], "scenes": []}
+    else:
+        episode = Episode.model_validate(state["episodes"][summaries[0]["episodeId"]])
+
+    scenes = []
+    for reference in episode.latest.scenes:
+        scene = _scene_record(state, reference.scene_id)
+        if scene.episode_id != episode.id:
+            continue
+        frozen = next(item for item in scene.versions if item.version == reference.scene_version)
+        stored = frozen.model_dump(mode="json", by_alias=True)
+        scenes.append(
+            {
+                "sceneId": scene.id,
+                "storyboardId": scene.storyboard_id,
+                "revision": scene.revision,
+                "currentVersion": scene.current_version,
+                "frozenVersion": reference.scene_version,
+                "heading": frozen.heading,
+                "location": frozen.location,
+                "timeOfDay": frozen.time_of_day,
+                "synopsis": frozen.synopsis,
+                "characterIds": list(frozen.character_ids),
+                "dialogue": stored["dialogue"],
+                "shotCount": frozen.shot_count,
+                "durationSeconds": frozen.duration_seconds,
+                "shots": draft_stored_scene(stored),
+            }
+        )
+    characters = []
+    seen = set()
+    for scene in scenes:
+        for character_id in scene["characterIds"]:
+            if character_id in seen:
+                continue
+            character = _character_record(state, character_id)
+            characters.append(_character_summary(character))
+            seen.add(character_id)
+    return {
+        "episodeId": episode.id,
+        "episode": {
+            "title": episode.title,
+            "currentVersion": episode.current_version,
+            "revision": episode.revision,
+            "styleId": episode.style_id,
+            "createdAt": episode.created_at,
+            "textSplitContract": episode.latest.text_split_contract,
+            "targetDurationSeconds": episode.latest.target_duration_seconds,
+            "sourceRefs": [item.model_dump(mode="json", by_alias=True) for item in episode.latest.sources],
+            "shotBudget": episode.latest.shot_budget.model_dump(mode="json", by_alias=True),
+        },
+        "scenes": scenes,
+        "characters": characters,
+        "episodes": summaries,
+    }
+
+
+def save_bible(args: dict, state: dict, project_id: str) -> dict:
+    """Create or append one character/style bible version; history is append-only."""
+    kind = args.get("kind")
+    if kind not in BIBLE_KINDS:
+        raise AppError("INVALID_ARGUMENTS", "kind 只能是 character 或 style。")
+    record_id = args.get("id")
+    collection = state["characters"] if kind == "character" else state["styles"]
+    raw = collection.get(record_id) if record_id else None
+    if record_id and (raw is None or raw["projectId"] != project_id):
+        raise AppError(
+            "CHARACTER_NOT_FOUND" if kind == "character" else "STYLE_NOT_FOUND",
+            "当前项目中没有这条圣经记录。",
+        )
+    timestamp = utc_now()
+    if kind == "character":
+        existing = Character.model_validate(raw) if raw is not None else None
+        if existing is not None and existing.revision != args.get("expectedRevision", -1):
+            raise AppError("VERSION_CONFLICT", "角色记录已变化，请重新读取后再修改。")
+        entry = CharacterVersion(
+            version=(existing.current_version + 1) if existing is not None else 1,
+            name=args["name"],
+            aliases=tuple(args.get("aliases") or ()),
+            appearance=args["appearance"],
+            wardrobe=args.get("wardrobe"),
+            voice=args.get("voice"),
+            relationships=tuple(args.get("relationships") or ()),
+            reference_asset_ids=tuple(args.get("referenceAssetIds") or ()),
+            created_at=timestamp,
+        )
+        if existing is None:
+            record = Character(
+                id=record_id or str(uuid4()),
+                project_id=project_id,
+                current_version=1,
+                versions=(entry,),
+                revision=0,
+                created_at=timestamp,
+            )
+        else:
+            record = existing.model_copy(
+                update={
+                    "versions": (*existing.versions, entry),
+                    "current_version": entry.version,
+                    "revision": existing.revision + 1,
+                }
+            )
+        state["characters"][record.id] = record.model_dump(mode="json", by_alias=True)
+        return {
+            "kind": "character",
+            "id": record.id,
+            "version": record.current_version,
+            "revision": record.revision,
+        }
+    existing_style = Style.model_validate(raw) if raw is not None else None
+    if existing_style is not None and existing_style.revision != args.get("expectedRevision", -1):
+        raise AppError("VERSION_CONFLICT", "风格记录已变化，请重新读取后再修改。")
+    entry = StyleVersion(
+        version=(existing_style.current_version + 1) if existing_style is not None else 1,
+        name=args["name"],
+        genre=tuple(args.get("genre") or ()),
+        palette=args["palette"],
+        camera_language=args["cameraLanguage"],
+        created_at=timestamp,
+    )
+    if existing_style is None:
+        record = Style(
+            id=record_id or str(uuid4()),
+            project_id=project_id,
+            current_version=1,
+            versions=(entry,),
+            revision=0,
+            created_at=timestamp,
+        )
+    else:
+        record = existing_style.model_copy(
+            update={
+                "versions": (*existing_style.versions, entry),
+                "current_version": entry.version,
+                "revision": existing_style.revision + 1,
+            }
+        )
+    state["styles"][record.id] = record.model_dump(mode="json", by_alias=True)
+    return {
+        "kind": "style",
+        "id": record.id,
+        "version": record.current_version,
+        "revision": record.revision,
+    }
+
+
+def read_bible(args: dict, state: dict, project_id: str) -> dict:
+    """Read one or all bible entries of a kind; metadata only, no private paths."""
+    kind = args.get("kind")
+    record_id = args.get("id")
+    if kind == "character":
+        records = [Character.model_validate(raw) for raw in state["characters"].values()]
+        summaries = [_character_summary(record) for record in records if record.project_id == project_id]
+        key = "characterId"
+    elif kind == "style":
+        records = [Style.model_validate(raw) for raw in state["styles"].values()]
+        summaries = [_style_summary(record) for record in records if record.project_id == project_id]
+        key = "styleId"
+    else:
+        raise AppError("INVALID_ARGUMENTS", "kind 只能是 character 或 style。")
+    summaries.sort(key=lambda item: (item["name"], item[key]))
+    if record_id:
+        found = next((item for item in summaries if item[key] == record_id), None)
+        if found is None:
+            raise AppError(
+                "CHARACTER_NOT_FOUND" if kind == "character" else "STYLE_NOT_FOUND",
+                "当前项目中没有这条圣经记录。",
+            )
+        return {"kind": kind, "entry": found, "entries": summaries}
+    return {"kind": kind, "entry": None, "entries": summaries}

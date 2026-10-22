@@ -9,7 +9,7 @@
 | 项目 | 冻结结果 |
 |---|---|
 | 存储 | E0 新建与迁移为 schema **6**；v5→v6 只加四个空集合 `episodes/scenes/characters/styles` |
-| 工具面 | **E0 保持 6/6**；E1 追加改编工具时升 **7/7**（mock 与 live 同步），并保留 6/6、5/5、4/4、3/3、2/2、1/1 冻结变体 |
+| 工具面 | **E0 保持 6/6**；E1 追加改编工具后为 **7/7**（mock 与 live 同步，已实现），并保留 6/6、5/5、4/4、3/3、2/2、1/1 冻结变体 |
 | 恢复 | 继续按完整 `toolFeatures` 身份选择冻结注册表；新版本不得改写旧 prompt/规则字节，未知组合返回 `RESUME_CONFIG_CHANGED` |
 | execution/context/checkpoint | 保持 **3 / 2 / 1**，不为分集引入第二套等待状态机 |
 | Job/Request | 沿用 **v6** 通用供应商请求；M5 不新增 Job 契约版本，逐镜头登记仍走 `shot_generate` |
@@ -30,7 +30,8 @@ JSON 字段采用 camelCase；ID 由服务端生成（canonical UUID），用户
 | `Character` | `id, projectId, currentVersion, versions[], revision, createdAt`（项目级角色圣经） |
 | `CharacterVersion` | `version, name, aliases[], appearance, wardrobe, voice, relationships[], referenceAssetIds[], createdAt` |
 | `Scene` | `id, projectId, episodeId, storyboardId(nullable), currentVersion, versions[], revision, createdAt` |
-| `SceneVersion` | `version, heading, location, timeOfDay, synopsis, characterIds[], shotCount, durationSeconds, createdAt` |
+| `SceneVersion` | `version, heading, location, timeOfDay, synopsis, characterIds[], **dialogue[]**(E1 追加，默认空), shotCount, durationSeconds, createdAt` |
+| `SceneDialogue` | `text, speaker(对白归属的姓名，可空), paragraph(该对白所在段落序号)` |
 | `Episode` | `id, projectId, title, styleId(nullable), currentVersion, versions[], revision, createdAt` |
 | `EpisodeVersion` | `version, targetDurationSeconds, shotBudget, scenes[{sceneId, sceneVersion}], sources[], textSplitContract, createdAt` |
 | `ShotBudget` | `shotCount, targetDurationSeconds, sceneMaxShots, jobCap, perShotAmount, currency, episodeCapAmount, priceVersion` |
@@ -46,8 +47,9 @@ JSON 字段采用 camelCase；ID 由服务端生成（canonical UUID），用户
 7. `Character.referenceAssetIds` 必须指向**同项目素材库中的图像**（`CHARACTER_ASSET_MISSING`）；关系双方必须同项目且不得自指（`CHARACTER_CONFLICT`）。
 8. `Episode.styleId` 已设置后不可更换；`sources[]` 沿用既有 `ArtifactRef` 版本引用校验。
 9. `StyleVersion` 不含字幕样式、音轨、转场或画幅字段；这些属于 M6，不得提前塞进 v6。
+10. **E1 追加**：`SceneVersion.dialogue[]` 把台词冻结在场景版本里，`speaker` 是对白归属的姓名（还不是 `characterId`）；不带该字段的 E0 记录继续有效，默认空数组。
 
-E1 的 `episode_save` 必须在**一个 Store 事务**内写入场景、分集与引用它的圣经记录：场景校验要求其分集存在，分集预算校验要求其场景存在。
+E1 的 `episode_save` 必须在**一个 Store 事务**内写入场景、分集与引用它的圣经记录：场景校验要求其分集存在，分集预算校验要求其场景存在。E1 的 `episode_plan`/`episode_save`（`adaptation.py` + `episodes.py`）已按此实现：同一 operation key 重放原结果，未变化的场景不产生新版本，草稿不落盘而是在读取时按 `text-split-zh-v1` 重新推导。
 
 ### 2.1 场景与分镜
 

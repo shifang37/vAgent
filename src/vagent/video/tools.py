@@ -2,7 +2,7 @@
 
 from dataclasses import replace
 from datetime import datetime, timedelta
-from typing import Annotated
+from typing import Annotated, Literal
 from uuid import uuid4
 
 from pydantic import Field, field_validator, model_validator
@@ -11,6 +11,7 @@ from vagent.contracts import Identifier
 from vagent.errors import AppError, failure
 from vagent.storage import FileStore
 from vagent.tools import Arguments, ToolDefinition, ToolFeature, ToolRegistry
+from vagent.video.adaptation import plan_episode
 from vagent.video.contracts import (
     ArtifactRef,
     Job,
@@ -23,6 +24,14 @@ from vagent.video.contracts import (
     VideoSpec,
     parse_job,
     wan_capabilities,
+)
+from vagent.video.episodes import (
+    SCENE_MAX_SHOTS,
+    TimeOfDay,
+    read_bible,
+    read_episode,
+    save_bible,
+    save_episode,
 )
 from vagent.video.jobs import JobService
 from vagent.video.storyboards import Framing, ShotMode, read_storyboard, save_storyboard
@@ -39,11 +48,12 @@ from vagent.waiting import (
 # Mock moves to the M2 toolset (storyboard tools); live keeps its frozen M1-C
 # 3/3 identity until the M2 Wan protocol lands in D2. E1 raised both to 5/5 by
 # appending the film tools; E2 raises both to 6/6 for the generic provider request
-# and keeps the 5/5 and 4/4 frozen variants so recorded Runs restore.
-VIDEO_TOOLS_VERSION = 6
-VIDEO_RULES_VERSION = 6
-LIVE_VIDEO_TOOLS_VERSION = 6
-LIVE_VIDEO_RULES_VERSION = 6
+# and keeps the 5/5 and 4/4 frozen variants so recorded Runs restore. M5 E1 appends
+# the five adaptation tools and raises both to 7/7, freezing 6/6 as history.
+VIDEO_TOOLS_VERSION = 7
+VIDEO_RULES_VERSION = 7
+LIVE_VIDEO_TOOLS_VERSION = 7
+LIVE_VIDEO_RULES_VERSION = 7
 WAIT_TIMEOUT_SECONDS = 600
 WAIT_SET_LIMIT = 16
 # Every tool this file adds after the frozen pre-M2 versions 1/2/3.
@@ -51,7 +61,10 @@ M2_TOOL_NAMES = ("storyboard_read", "storyboard_save", "shot_generate", "asset_r
 M2_STORYBOARD_TOOL_NAMES = ("storyboard_read", "storyboard_save")
 # E1 appends the film tools; the frozen 4/4 variants must hide them again.
 M3_TOOL_NAMES = ("film_assemble", "film_read")
+# M5 E1 appends the adaptation tools; every pre-M5 variant must hide them.
+M5_TOOL_NAMES = ("episode_plan", "episode_save", "episode_read", "bible_save", "bible_read")
 PRE_M3_TOOL_NAMES = (*M2_TOOL_NAMES, *M3_TOOL_NAMES)
+PRE_M5_TOOL_NAMES = (*PRE_M3_TOOL_NAMES, *M5_TOOL_NAMES)
 
 LEGACY_VIDEO_RULES = """当前启用 mock 视频模式，只能登记模拟任务；所有结果均为 simulated=true、mediaAvailable=false。
 需要生成时先调用 video_capabilities，根据返回的模型、能力版本和完整规格组合构造 video_generate。
@@ -157,6 +170,15 @@ estimate 与资源单位来自冻结能力表；actual 在取得账单前始终�
 VIDEO_RULES_V6 = VIDEO_RULES_V5
 LIVE_VIDEO_RULES_V6 = LIVE_VIDEO_RULES_V5 + "\n" + MULTI_PROVIDER_RULES
 
+ADAPTATION_RULES = """剧本/小说改编先离线切分：episode_plan 传入原文与可选标题，返回章节、场景、对白、角色提案、镜头草案与逐镜头估算。
+episode_plan 只产出草案，不写存储、不登记任务、不产生费用；同一原文与 textSplitContract 必须得到同样的草案，不要手改草案结构后声称等价。
+bible_save/bible_read 维护角色与风格圣经：角色只引用素材库中已导入的 assetId，缺参考图整批拒绝，不得编造素材 ID 或路径。
+episode_save 必须显式给出 scenes（来自草案），按每集 10–20 镜头、60–90 秒、每场≤6 镜头的冻结预算登记；超限整批拒绝，不部分保存。
+episode_save 不创建分镜、不登记视频任务、不提交供应商；episode_read 读取当前分集、场景、对白与可再生的镜头草案。"""
+
+VIDEO_RULES_V7 = VIDEO_RULES_V6 + "\n" + ADAPTATION_RULES
+LIVE_VIDEO_RULES_V7 = LIVE_VIDEO_RULES_V6 + "\n" + ADAPTATION_RULES
+
 OLD_LIVE_GENERATE_DESCRIPTION = (
     "登记一个真实视频 Job，返回 jobId 与登记状态；后台仅提交一次，云端成功后还需本地媒体交付。"
     "按能力表选择完整规格；来源须属于当前项目并指定 version。每个 Run 最多新建一个 Job。"
@@ -231,6 +253,110 @@ class FilmAssemble(Arguments):
 
 class FilmRead(Arguments):
     storyboard_id: CanonicalId | None = None
+
+
+class EpisodePlanArgs(Arguments):
+    text: str = Field(
+        min_length=1,
+        max_length=20000,
+        description="纯文本剧本或小说章节正文（txt/markdown）。切分是确定性的，同一原文得到同样的草案。",
+    )
+    title: str | None = Field(default=None, max_length=120)
+
+
+class SceneDialogueArgs(Arguments):
+    text: str = Field(min_length=1, max_length=300)
+    speaker: str | None = Field(default=None, min_length=1, max_length=40)
+    paragraph: int = Field(default=0, ge=0, le=100)
+
+
+class SceneSpec(Arguments):
+    id: CanonicalId | None = None
+    heading: str = Field(min_length=1, max_length=120)
+    location: str | None = Field(default=None, min_length=1, max_length=120)
+    time_of_day: TimeOfDay = "unknown"
+    synopsis: str = Field(min_length=1, max_length=1000)
+    character_ids: list[CanonicalId] = Field(default_factory=list, max_length=16)
+    dialogue: list[SceneDialogueArgs] = Field(default_factory=list, max_length=40)
+    shot_count: int = Field(ge=1, le=SCENE_MAX_SHOTS)
+    duration_seconds: int = Field(ge=2, le=90)
+
+
+class EpisodeSave(Arguments):
+    episode_id: CanonicalId | None = None
+    expected_revision: int | None = Field(default=None, ge=0)
+    title: str = Field(min_length=1, max_length=120)
+    style_id: CanonicalId | None = None
+    source_refs: list[ArtifactRef] | None = Field(default=None, max_length=16)
+    target_duration_seconds: int | None = Field(default=None, ge=60, le=90)
+    scenes: list[SceneSpec] = Field(min_length=1, max_length=12)
+
+    @model_validator(mode="after")
+    def require_revision(self):
+        if bool(self.episode_id) != bool(self.expected_revision is not None):
+            raise ValueError("修改时必须同时提供 episodeId 和 expectedRevision")
+        return self
+
+
+class EpisodeRead(Arguments):
+    episode_id: CanonicalId | None = None
+
+
+class VoiceArgs(Arguments):
+    description: str = Field(min_length=1, max_length=200)
+    timbre: str | None = Field(default=None, min_length=1, max_length=60)
+    pace: Literal["slow", "normal", "fast"] = "normal"
+
+
+class CharacterLinkArgs(Arguments):
+    character_id: CanonicalId
+    relation: str = Field(min_length=1, max_length=60)
+
+
+class BibleSave(Arguments):
+    kind: Literal["character", "style"]
+    id: CanonicalId | None = None
+    expected_revision: int | None = Field(default=None, ge=0)
+    name: str = Field(min_length=1, max_length=60)
+    # Character fields.
+    aliases: list[str] = Field(default_factory=list, max_length=8)
+    appearance: str | None = Field(default=None, min_length=1, max_length=600)
+    wardrobe: str | None = Field(default=None, min_length=1, max_length=300)
+    voice: VoiceArgs | None = None
+    relationships: list[CharacterLinkArgs] = Field(default_factory=list, max_length=16)
+    reference_asset_ids: list[CanonicalId] = Field(default_factory=list, max_length=4)
+    # Style fields.
+    genre: list[str] = Field(default_factory=list, max_length=8)
+    palette: str | None = Field(default=None, min_length=1, max_length=200)
+    camera_language: str | None = Field(default=None, min_length=1, max_length=300)
+
+    @model_validator(mode="after")
+    def kind_specific_fields(self):
+        if bool(self.id) != bool(self.expected_revision is not None):
+            raise ValueError("修改时必须同时提供 id 和 expectedRevision")
+        if self.kind == "character":
+            if self.appearance is None:
+                raise ValueError("角色必须提供 appearance")
+            if self.palette is not None or self.camera_language is not None or self.genre:
+                raise ValueError("角色不能携带风格字段")
+        else:
+            if self.palette is None or self.camera_language is None:
+                raise ValueError("风格必须提供 palette 与 cameraLanguage")
+            if (
+                self.appearance
+                or self.wardrobe
+                or self.voice
+                or self.aliases
+                or self.relationships
+                or self.reference_asset_ids
+            ):
+                raise ValueError("风格不能携带角色字段")
+        return self
+
+
+class BibleRead(Arguments):
+    kind: Literal["character", "style"]
+    id: CanonicalId | None = None
 
 
 class AssetLookup(Arguments):
@@ -414,7 +540,7 @@ def register_video_tools(registry: ToolRegistry, service: JobService, *, mode="m
                 "rulesVersion": LIVE_VIDEO_RULES_VERSION if live else VIDEO_RULES_VERSION,
                 "capabilities": capabilities,
             },
-            instructions=LIVE_VIDEO_RULES_V6 if live else VIDEO_RULES_V6,
+            instructions=LIVE_VIDEO_RULES_V7 if live else VIDEO_RULES_V7,
             bypass_answer_cache=True,
         )
     )
@@ -737,6 +863,53 @@ def register_video_tools(registry: ToolRegistry, service: JobService, *, mode="m
             async_write_execute=assemble_film,
             feature="video",
         ),
+        ToolDefinition(
+            "episode_plan",
+            "把纯文本剧本/小说章节离线切分为分集草案：章节、场景、对白、角色提案、镜头草案与逐镜头估算。"
+            "确定性（textSplitContract=text-split-zh-v1），不调用模型、不写存储、不登记任务、不产生费用。",
+            EpisodePlanArgs,
+            "read",
+            lambda args, _state, _project_id: plan_episode(args["text"], title=args.get("title")),
+            feature="video",
+        ),
+        ToolDefinition(
+            "episode_save",
+            "保存或修改分集：scenes 来自 episode_plan 的草案，一次原子提交场景与分集。"
+            "每集 10–20 镜头、60–90 秒、每场≤6 镜头；超限整批拒绝。修改时提供 episodeId 与 expectedRevision。"
+            "只保存分集结构与台词，不创建分镜、不登记视频任务、不产生费用。",
+            EpisodeSave,
+            "write",
+            save_episode,
+            feature="video",
+        ),
+        ToolDefinition(
+            "episode_read",
+            "读取当前项目的分集、场景、台词与可再生的镜头草案（含逐镜头估算）；"
+            "省略 episodeId 时读取本项目最近保存的分集。只读，不修改、不登记任务。",
+            EpisodeRead,
+            "read",
+            read_episode,
+            feature="video",
+        ),
+        ToolDefinition(
+            "bible_save",
+            "新建或修改角色/风格圣经：kind=character 需要 name 与 appearance，可引用素材库 referenceAssetIds；"
+            "kind=style 需要 palette 与 cameraLanguage。修改时提供 id 与 expectedRevision；版本只增不改。"
+            "只保存元数据，不导入素材、不调用模型、不登记任务。",
+            BibleSave,
+            "write",
+            save_bible,
+            feature="video",
+        ),
+        ToolDefinition(
+            "bible_read",
+            "读取当前项目的角色或风格圣经（kind 必填）：返回名称、外观、服装、声音描述、关系、参考素材 ID 与版本；"
+            "省略 id 时列出该项目的全部条目。只读，不返回本地路径。",
+            BibleRead,
+            "read",
+            read_bible,
+            feature="video",
+        ),
     ]
     await_definition = next(item for item in definitions if item.name == "await_job")
     generate_definition = next(item for item in definitions if item.name == "video_generate")
@@ -769,7 +942,7 @@ def register_video_tools(registry: ToolRegistry, service: JobService, *, mode="m
                 )
             ],
             descriptions={},
-            exclude=PRE_M3_TOOL_NAMES,
+            exclude=PRE_M5_TOOL_NAMES,
             definitions={
                 "await_job": frozen_await(AWAIT_DESCRIPTION_M1C),
                 "video_generate": frozen_generate,
@@ -790,7 +963,7 @@ def register_video_tools(registry: ToolRegistry, service: JobService, *, mode="m
                     bypass_answer_cache=True,
                 )
             ],
-            exclude=M3_TOOL_NAMES,
+            exclude=(*M3_TOOL_NAMES, *M5_TOOL_NAMES),
             definitions={"video_generate": frozen_generate},
         )
         registry.register_tools_variant(
@@ -808,6 +981,24 @@ def register_video_tools(registry: ToolRegistry, service: JobService, *, mode="m
                     bypass_answer_cache=True,
                 )
             ],
+            definitions={"video_generate": frozen_generate},
+        )
+        registry.register_tools_variant(
+            6,
+            features=[
+                ToolFeature(
+                    name="video",
+                    configuration={
+                        "mode": "live",
+                        "toolsVersion": 6,
+                        "rulesVersion": 6,
+                        "capabilities": capabilities,
+                    },
+                    instructions=LIVE_VIDEO_RULES_V6,
+                    bypass_answer_cache=True,
+                )
+            ],
+            exclude=M5_TOOL_NAMES,
             definitions={"video_generate": frozen_generate},
         )
     else:
@@ -828,7 +1019,7 @@ def register_video_tools(registry: ToolRegistry, service: JobService, *, mode="m
                 )
             ],
             descriptions={},
-            exclude=PRE_M3_TOOL_NAMES,
+            exclude=PRE_M5_TOOL_NAMES,
             definitions={"await_job": frozen_await(LEGACY_AWAIT_DESCRIPTION)},
         )
         registry.register_execution_variant(
@@ -847,7 +1038,7 @@ def register_video_tools(registry: ToolRegistry, service: JobService, *, mode="m
                 )
             ],
             descriptions={},
-            exclude=PRE_M3_TOOL_NAMES,
+            exclude=PRE_M5_TOOL_NAMES,
             definitions={"await_job": frozen_await(AWAIT_DESCRIPTION_M1C)},
         )
         registry.register_tools_variant(
@@ -865,7 +1056,7 @@ def register_video_tools(registry: ToolRegistry, service: JobService, *, mode="m
                     bypass_answer_cache=True,
                 )
             ],
-            exclude=M3_TOOL_NAMES,
+            exclude=(*M3_TOOL_NAMES, *M5_TOOL_NAMES),
         )
         registry.register_tools_variant(
             5,
@@ -882,6 +1073,23 @@ def register_video_tools(registry: ToolRegistry, service: JobService, *, mode="m
                     bypass_answer_cache=True,
                 )
             ],
+        )
+        registry.register_tools_variant(
+            6,
+            features=[
+                ToolFeature(
+                    name="video",
+                    configuration={
+                        "mode": "mock",
+                        "toolsVersion": 6,
+                        "rulesVersion": 6,
+                        "capabilities": capabilities,
+                    },
+                    instructions=VIDEO_RULES_V6,
+                    bypass_answer_cache=True,
+                )
+            ],
+            exclude=M5_TOOL_NAMES,
         )
     registry.register_wait_resolver(
         "job", lambda binding: resolve_job_wait(service.store, binding, service=service), feature="video"
