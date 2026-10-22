@@ -9,7 +9,7 @@
 | 项目 | 冻结结果 |
 |---|---|
 | 存储 | E0 新建与迁移为 schema **6**；v5→v6 只加四个空集合 `episodes/scenes/characters/styles` |
-| 工具面 | **E0 保持 6/6**；E1 追加改编工具后为 **7/7**（mock 与 live 同步，已实现），并保留 6/6、5/5、4/4、3/3、2/2、1/1 冻结变体 |
+| 工具面 | **E0 保持 6/6**；E1 追加改编工具后为 **7/7**；E2 追加工人评分工具 `consistency_review` 后为 **8/8**（mock 与 live 同步，已实现），并保留 7/7、6/6、5/5、4/4、3/3、2/2、1/1 冻结变体 |
 | 恢复 | 继续按完整 `toolFeatures` 身份选择冻结注册表；新版本不得改写旧 prompt/规则字节，未知组合返回 `RESUME_CONFIG_CHANGED` |
 | execution/context/checkpoint | 保持 **3 / 2 / 1**，不为分集引入第二套等待状态机 |
 | Job/Request | 沿用 **v6** 通用供应商请求；M5 不新增 Job 契约版本，逐镜头登记仍走 `shot_generate` |
@@ -32,8 +32,9 @@ JSON 字段采用 camelCase；ID 由服务端生成（canonical UUID），用户
 | `Scene` | `id, projectId, episodeId, storyboardId(nullable), currentVersion, versions[], revision, createdAt` |
 | `SceneVersion` | `version, heading, location, timeOfDay, synopsis, characterIds[], **dialogue[]**(E1 追加，默认空), shotCount, durationSeconds, createdAt` |
 | `SceneDialogue` | `text, speaker(对白归属的姓名，可空), paragraph(该对白所在段落序号)` |
-| `Episode` | `id, projectId, title, styleId(nullable), currentVersion, versions[], revision, createdAt` |
+| `Episode` | `id, projectId, title, styleId(nullable), currentVersion, versions[], **consistencyReviews[]**(E2 追加，默认空), revision, createdAt` |
 | `EpisodeVersion` | `version, targetDurationSeconds, shotBudget, scenes[{sceneId, sceneVersion}], sources[], textSplitContract, createdAt` |
+| `ConsistencyReview` | `id, characterId, characterVersion, episodeVersion, score(1–5), note(nullable), reviewer, shotIds[], storyboardIds[], assetIds[], consistent, createdAt`（E2 追加） |
 | `ShotBudget` | `shotCount, targetDurationSeconds, sceneMaxShots, jobCap, perShotAmount, currency, episodeCapAmount, priceVersion` |
 
 不变量（Store 每次提交都重新校验，不只校验新写入）：
@@ -48,6 +49,8 @@ JSON 字段采用 camelCase；ID 由服务端生成（canonical UUID），用户
 8. `Episode.styleId` 已设置后不可更换；`sources[]` 沿用既有 `ArtifactRef` 版本引用校验。
 9. `StyleVersion` 不含字幕样式、音轨、转场或画幅字段；这些属于 M6，不得提前塞进 v6。
 10. **E1 追加**：`SceneVersion.dialogue[]` 把台词冻结在场景版本里，`speaker` 是对白归属的姓名（还不是 `characterId`）；不带该字段的 E0 记录继续有效，默认空数组。
+11. **E2 追加**：`Episode.consistencyReviews[]` 只追加不改写。每条评分绑定当时的角色版本、分集版本、镜头、分镜与参考素材，并记录 `consistent` 证据；角色必须同项目，引用的分集/角色版本必须已存在。E0/E1 记录不带该字段仍有效，默认空数组。
+12. **E2 追加**：`Shot.characterRefs[]` 冻结每个参考帧来自哪个角色版本；`Shot.referenceAssetIds` 与 `characterRefs` 一一对应。Store 每次提交都重算该角色版本的第一个参考图，与镜头记录不一致即 `CHARACTER_ASSET_MISSING`，因此不能手工改写素材绑定。
 
 E1 的 `episode_save` 必须在**一个 Store 事务**内写入场景、分集与引用它的圣经记录：场景校验要求其分集存在，分集预算校验要求其场景存在。E1 的 `episode_plan`/`episode_save`（`adaptation.py` + `episodes.py`）已按此实现：同一 operation key 重放原结果，未变化的场景不产生新版本，草稿不落盘而是在读取时按 `text-split-zh-v1` 重新推导。
 
@@ -56,7 +59,7 @@ E1 的 `episode_save` 必须在**一个 Store 事务**内写入场景、分集�
 `Scene → Storyboard` 是 E1 的显式动作，不是保存场景的副作用：
 
 - 保存分集只写 `Episode/Scene`，不创建分镜、不登记任何 Job；
-- 用户或 Agent 显式创建分镜后，把 `storyboardId` 绑定到场景；绑定后场景的后续版本仍可改 `shotCount`/`synopsis`，但不能换绑到另一个分镜；
+- E2 起，用户或 Agent 在 `storyboard_save` 传 `sceneId`，与保存分镜同一事务把 `storyboardId` 绑定到场景；绑定后场景的后续版本仍可改 `shotCount`/`synopsis`，但不能换绑到另一个分镜，同一分镜也不能再绑定第二个场景；
 - 成片仍按 `storyboardId` 拼接（M3/M4 语义不变）；一集多场的成片由 M6 的组合成片负责，M5 不引入“整集成片”对象。
 
 ## 3. v5→v6 迁移与历史恢复
@@ -102,9 +105,14 @@ E0 提交 [v5 合成基线](../tests/fixtures/m5/manifest.json)：两份历史�
 
 ## 6. 角色与风格一致性
 
-- 镜头通过 `characterIds` 引用角色；服务端把角色映射到该角色最新版本的 `referenceAssetIds`，按 `i2v`（1 张）或 `flf2v`（2 张）顺序产出 `Shot.referenceAssetIds`。
-- 缺参考图时**整批拒绝**（`CHARACTER_ASSET_MISSING`），不降级为 `t2v`，也不借用其他项目的素材。
-- 同一角色跨镜头必须指向同一组素材；E2 验收要求角色 A 至少在 3 个镜头出现且素材 ID 一致，并记录人工一致性评分。
+E2 已按下列规则实现，证据见 [E2 验收](./M5_E2_ACCEPTANCE.md)。
+
+- **场景绑定**：`storyboard_save` 可用 `sceneId` 在保存分镜的同一事务里绑定该场记（1:1）；一个场记只能绑定一个分镜，已绑定后不可换绑（`SCENE_CONFLICT`）。未绑定的场记不参与风格与一致性计算。
+- **角色引用**：镜头通过有序 `characterIds` 引用角色，数量必须等于该模式的参考帧数（`i2v` 1 个、`flf2v` 2 个，`t2v` 0 个）；服务端取每个角色最新版本的第一个 `referenceAssetIds`，按同一顺序产出 `Shot.referenceAssetIds`，并把 `{characterId, characterVersion}` 冻结进 `Shot.characterRefs`。同一镜头不能同时给 `characterIds` 与 `referenceAssetIds`。
+- **缺素材整批拒绝**：角色没有参考图、参考图不在本项目素材库或不是图像时返回 `CHARACTER_ASSET_MISSING`，整次保存不写入任何场记/分镜；不降级为 `t2v`，不借用其他项目素材。
+- **同一组素材**：`episode_read` 逐角色重算该分集所有已绑定分镜的镜头证据（镜头 ID、分镜 ID、角色版本、参考素材），`consistent` 仅在全部镜头指向同一素材时为真。角色圣经追加新版本不会改写已冻结的镜头；新旧版本混用会如实报告 `consistent=false`。
+- **风格模板**：绑定场记后，镜头请求提示词按 `style-prompt-zh-v1` 固定顺序拼装：`【风格】名称｜题材：…｜色调：…｜镜头语言：…`，随后是 `【出场】` 有序角色名，最后是镜头描述。同一分集、同一角色版本与同一描述产生逐字节相同的提示词；仍受供应商提示词长度上限约束。
+- **人工评分**：`consistency_review` 只在用户明确给出 1–5 分时记录；它在同一事务内重算证据，追加 `ConsistencyReview`（含角色/分集版本、镜头、分镜、素材与 `consistent`），没有引用该角色的镜头时返回 `CONSISTENCY_EVIDENCE_MISSING`。评分不改变镜头、任务、预算或费用，历史评分不可改写（`EPISODE_IMMUTABLE`）。
 - 不做 LoRA/角色微调、不做声音克隆；`VoiceProfile` 只是描述性字段，不含 TTS 供应商、音色 ID 或授权。
 
 ## 7. 错误码
@@ -120,9 +128,10 @@ E0 提交 [v5 合成基线](../tests/fixtures/m5/manifest.json)：两份历史�
 | `EPISODE_COST_LIMIT` | 集级成本上限不足（登记阶段整体拒绝） |
 | `SCENE_NOT_FOUND` / `SCENE_CONFLICT` / `SCENE_IMMUTABLE` | 场景缺失、分镜重复绑定、历史被改写 |
 | `CHARACTER_NOT_FOUND` / `CHARACTER_CONFLICT` / `CHARACTER_IMMUTABLE` | 角色缺失、关系非法、历史被改写 |
-| `CHARACTER_ASSET_MISSING` | 角色参考素材缺失或不是本项目的图像 |
+| `CHARACTER_ASSET_MISSING` | 角色参考素材缺失、不是本项目的图像，或与镜头冻结的引用不一致 |
 | `STYLE_NOT_FOUND` / `STYLE_CONFLICT` / `STYLE_IMMUTABLE` | 风格缺失、跨项目、历史被改写 |
 | `TEXT_SPLIT_FAILED` | 切分无法产出完整场景/对白 |
+| `CONSISTENCY_EVIDENCE_MISSING` | 记录评分时该角色在分集已绑定分镜中没有任何镜头 |
 
 沿用：`VERSION_CONFLICT`（分集/场景 revision 竞争）、`VIDEO_RUN_COST_LIMIT`、`VIDEO_COST_LIMIT`、`SOURCE_NOT_FOUND`、`SOURCE_VERSION_NOT_FOUND`、`CONFIRM` 语义走工具参数而非新码。
 
@@ -146,6 +155,6 @@ E0 提交 [v5 合成基线](../tests/fixtures/m5/manifest.json)：两份历史�
 ## 10. 交付检查
 
 - **E1**：`text-split-zh-v1` 确定性、对白零丢失、预算合成、`episode_plan`/`episode_save`/`episode_read` 工具与 7/7 冻结变体、6/6 与 7/7 共存恢复、v5→v6 真实迁移与字节备份、3 篇固定样例离线可复现（模型调用=0）。
-- **E2**：角色圣经与参考图导入、跨镜头一致性引用、缺素材拒绝、人工一致性评分记录。
+- **E2**：角色圣经与参考图导入、跨镜头一致性引用、缺素材拒绝、人工一致性评分记录。已交付：场景绑定、`characterIds`→冻结素材、`style-prompt-zh-v1`、`episode_read` 证据与 `consistency_review`（tools/rules 8/8，冻结 7/7），见 [E2 验收](./M5_E2_ACCEPTANCE.md)。
 - **E3**：集级批量登记与预算原子性、逐镜头重做隔离、集合等待、失败隔离、submit 与预算一致（真实样本需单独授权）。
 - **E4**：离线端到端套件、经批准的最小真实样本成片、CLI/Web 流程与验收文档；未做真实样本的能力保持标注。

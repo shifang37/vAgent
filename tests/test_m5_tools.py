@@ -1,4 +1,4 @@
-"""M5 E1: adaptation tools, 7/7 publication and frozen 6/6 restoration."""
+"""M5 E1/E2: adaptation and consistency tools, 8/8 publication and frozen 7/7 views."""
 
 from pathlib import Path
 
@@ -67,31 +67,44 @@ def episode_args(plan, cast, *, title="雨夜咖啡店"):
     return {"title": title, "scenes": scenes}
 
 
-def test_tool_versions_are_seven_and_six_is_frozen():
-    assert (VIDEO_TOOLS_VERSION, VIDEO_RULES_VERSION) == (7, 7)
-    assert (LIVE_VIDEO_TOOLS_VERSION, LIVE_VIDEO_RULES_VERSION) == (7, 7)
+def test_tool_versions_are_eight_and_seven_is_frozen():
+    assert (VIDEO_TOOLS_VERSION, VIDEO_RULES_VERSION) == (8, 8)
+    assert (LIVE_VIDEO_TOOLS_VERSION, LIVE_VIDEO_RULES_VERSION) == (8, 8)
     assert "episode_plan" in video_tools.M5_TOOL_NAMES
+    assert "consistency_review" in video_tools.M5_E2_TOOL_NAMES
 
 
-def test_new_runs_publish_seven_and_old_snapshots_restore(store):
+def test_new_runs_publish_eight_and_old_snapshots_restore(store):
     registry, service, _adapter, _context = mock_tools(store, clock=None)
     features = registry.features["video"]
-    assert (features["toolsVersion"], features["rulesVersion"]) == (7, 7)
+    assert (features["toolsVersion"], features["rulesVersion"]) == (8, 8)
     names = {spec["function"]["name"] for spec in registry.specs()}
     assert set(M5_TOOLS) <= names
+    assert "consistency_review" in names
 
-    # A recorded 6/6 snapshot restores the frozen view: the adaptation tools vanish.
-    recorded = {"video": {**features, "toolsVersion": 6, "rulesVersion": 6}}
+    # A recorded 7/7 snapshot restores the frozen view: the E2 review tool vanishes
+    # while every M5 E1 tool remains.
+    recorded = {"video": {**features, "toolsVersion": 7, "rulesVersion": 7}}
     frozen = registry.for_record_features(recorded)
     assert frozen is not None
     frozen_names = {spec["function"]["name"] for spec in frozen.specs()}
-    assert not (set(M5_TOOLS) & frozen_names)
+    assert "consistency_review" not in frozen_names
+    assert set(M5_TOOLS) <= frozen_names
     assert "storyboard_save" in frozen_names and "film_assemble" in frozen_names
     assert frozen.features == recorded
-    # The pre-M5 tool set still answers with its own published rules text.
-    assert "episode_plan" not in frozen.instructions
+    # The 7/7 rules text keeps the E1 chapter but never mentions the E2 review tool.
+    assert "episode_plan" in frozen.instructions
+    assert "consistency_review" not in frozen.instructions
     assert "storyboard_save" in frozen.instructions
     assert service is not None
+
+    # A recorded 6/6 snapshot still hides both M5 chapters.
+    six = {"video": {**features, "toolsVersion": 6, "rulesVersion": 6}}
+    frozen_six = registry.for_record_features(six)
+    assert frozen_six is not None
+    assert not (set(M5_TOOLS) & {spec["function"]["name"] for spec in frozen_six.specs()})
+    assert "consistency_review" not in {spec["function"]["name"] for spec in frozen_six.specs()}
+    assert "episode_plan" not in frozen_six.instructions
 
 
 def test_plan_returns_a_draft_without_touching_the_store(store):
@@ -374,4 +387,11 @@ def test_bible_read_requires_a_kind(store):
 def test_episode_read_without_an_episode_is_empty(store):
     registry, _service, _adapter, _context = mock_tools(store)
     data = ok(registry, store, "episode_read", {}, "episode-read-empty")
-    assert data == {"episodeId": None, "episode": None, "episodes": [], "scenes": []}
+    assert data == {
+        "episodeId": None,
+        "episode": None,
+        "episodes": [],
+        "scenes": [],
+        "style": None,
+        "consistency": None,
+    }

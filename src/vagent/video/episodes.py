@@ -20,6 +20,13 @@ from pydantic import Field, model_validator
 
 from vagent.contracts import Contract, Identifier, JsonTuple, Name, UtcTimestamp
 from vagent.errors import AppError
+from vagent.video.consistency import (
+    CONSISTENCY_REVIEW_LIMIT,
+    ConsistencyReview,
+    character_evidence,
+    episode_consistency,
+    style_prompt,
+)
 from vagent.video.contracts import (
     SHOT_DURATION_MAX,
     SHOT_DURATION_MIN,
@@ -273,6 +280,9 @@ class Episode(Contract):
     style_id: Identifier | None = None
     current_version: int = Field(ge=1)
     versions: JsonTuple[EpisodeVersion] = Field(min_length=1)
+    # E2 appends human consistency reviews to the record root, exactly like M2
+    # appended ShotVersions to a storyboard: no new episode version is written.
+    consistency_reviews: JsonTuple[ConsistencyReview] = Field(default=(), max_length=CONSISTENCY_REVIEW_LIMIT)
     revision: int = Field(ge=0)
     created_at: UtcTimestamp
 
@@ -281,6 +291,8 @@ class Episode(Contract):
         _require_continuous_versions(self.versions, "Episode")
         if self.current_version != len(self.versions):
             raise ValueError("currentVersion must identify the latest episode version")
+        if len({item.id for item in self.consistency_reviews}) != len(self.consistency_reviews):
+            raise ValueError("Consistency review IDs must be unique")
         return self
 
     @property
@@ -351,10 +363,20 @@ def validate_episode_changes(previous: dict[str, dict], state: dict) -> None:
             raise AppError("EPISODE_CONFLICT", "分集 ID 或所属项目不匹配。")
         validate_source_refs(state, record.project_id, record.latest.sources)
         _validate_episode_budget(state, record, record.latest)
+        for review in record.consistency_reviews:
+            character = _character_record(state, review.character_id)
+            if character.project_id != record.project_id:
+                raise AppError("CHARACTER_CONFLICT", "评分记录的角色必须属于同一项目。")
+            if review.episode_version > record.current_version:
+                raise AppError("EPISODE_CONFLICT", "评分记录引用了尚未保存的分集版本。")
+            if review.character_version > character.current_version:
+                raise AppError("CHARACTER_CONFLICT", "评分记录引用了尚未保存的角色版本。")
         old_raw = previous.get(key)
         if old_raw is None:
             if record.current_version != 1 or record.revision != 0:
                 raise AppError("EPISODE_CONFLICT", "新分集必须先保存第 1 版。")
+            if record.consistency_reviews:
+                raise AppError("EPISODE_CONFLICT", "新分集不能预置一致性评分。")
             continue
         old = Episode.model_validate(old_raw)
         if (
@@ -364,8 +386,10 @@ def validate_episode_changes(previous: dict[str, dict], state: dict) -> None:
             or len(record.versions) < len(old.versions)
             or record.versions[: len(old.versions)] != old.versions
             or (old.style_id is not None and record.style_id != old.style_id)
+            or len(record.consistency_reviews) < len(old.consistency_reviews)
+            or record.consistency_reviews[: len(old.consistency_reviews)] != old.consistency_reviews
         ):
-            raise AppError("EPISODE_IMMUTABLE", "分集版本只增不改，旧版本与已冻结的预算必须保留。")
+            raise AppError("EPISODE_IMMUTABLE", "分集版本只增不改，旧版本、预算与评分必须保留。")
 
 
 def validate_scene_changes(previous: dict[str, dict], state: dict) -> None:
@@ -726,9 +750,21 @@ def read_episode(args: dict, state: dict, project_id: str) -> dict:
             raise AppError("EPISODE_NOT_FOUND", "当前项目中没有这个分集。")
         episode = Episode.model_validate(raw)
     elif not summaries:
-        return {"episodeId": None, "episode": None, "episodes": [], "scenes": []}
+        return {
+            "episodeId": None,
+            "episode": None,
+            "episodes": [],
+            "scenes": [],
+            "style": None,
+            "consistency": None,
+        }
     else:
         episode = Episode.model_validate(state["episodes"][summaries[0]["episodeId"]])
+
+    style = None
+    if episode.style_id is not None:
+        style_record = _style_record(state, episode.style_id)
+        style = {**_style_summary(style_record), "stylePrompt": style_prompt(style_record.latest)}
 
     scenes = []
     for reference in episode.latest.scenes:
@@ -780,6 +816,62 @@ def read_episode(args: dict, state: dict, project_id: str) -> dict:
         "scenes": scenes,
         "characters": characters,
         "episodes": summaries,
+        "style": style,
+        "consistency": episode_consistency(state, episode),
+    }
+
+
+def record_consistency_review(args: dict, state: dict, project_id: str) -> dict:
+    """Record one human 1-5 score next to the exact cross-shot reference evidence.
+
+    The evidence is recomputed inside the Store transaction: the review cites the
+    shots and frozen reference images that exist right now, so a later redo cannot
+    silently inherit an old score.
+    """
+    episode = _episode_record(state, args["episodeId"])
+    if episode.project_id != project_id:
+        raise AppError("EPISODE_NOT_FOUND", "当前项目中没有这个分集。")
+    character = _character_record(state, args["characterId"])
+    if character.project_id != project_id:
+        raise AppError("CHARACTER_NOT_FOUND", "当前项目中没有这个角色。")
+    evidence = character_evidence(state, episode, character.id)
+    if not evidence["shotIds"]:
+        raise AppError(
+            "CONSISTENCY_EVIDENCE_MISSING",
+            "这个分集已绑定的分镜中还没有引用该角色的镜头，未记录评分。",
+        )
+    timestamp = utc_now()
+    review = ConsistencyReview(
+        id=str(uuid4()),
+        character_id=character.id,
+        character_version=character.current_version,
+        episode_version=episode.current_version,
+        score=args["score"],
+        note=args.get("note"),
+        reviewer=args.get("reviewer") or "user",
+        shot_ids=tuple(evidence["shotIds"]),
+        storyboard_ids=tuple(evidence["storyboardIds"]),
+        asset_ids=tuple(evidence["assetIds"]),
+        consistent=evidence["consistent"],
+        created_at=timestamp,
+    )
+    record = episode.model_copy(
+        update={
+            "consistency_reviews": (*episode.consistency_reviews, review),
+            "revision": episode.revision + 1,
+        }
+    )
+    state["episodes"][record.id] = record.model_dump(mode="json", by_alias=True)
+    return {
+        "reviewId": review.id,
+        "episodeId": record.id,
+        "revision": record.revision,
+        "characterId": character.id,
+        "score": review.score,
+        "consistent": review.consistent,
+        "shotIds": list(review.shot_ids),
+        "assetIds": list(review.asset_ids),
+        "createdAt": review.created_at,
     }
 
 

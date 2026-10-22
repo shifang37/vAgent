@@ -42,6 +42,13 @@ def utc_now() -> str:
     return datetime.now(UTC).isoformat()
 
 
+class CharacterRef(Contract):
+    """M5 E2: the exact character version a shot's reference frame was resolved from."""
+
+    character_id: Identifier
+    character_version: int = Field(ge=1)
+
+
 class Shot(Contract):
     id: Identifier
     order: int = Field(ge=1, le=SHOT_LIMIT)
@@ -51,16 +58,33 @@ class Shot(Contract):
     duration_seconds: int = Field(ge=SHOT_DURATION_MIN, le=SHOT_DURATION_MAX)
     mode: ShotMode = "t2v"
     reference_asset_ids: JsonTuple[Identifier] = Field(default=(), max_length=2)
+    # E2 adds the character provenance additively: an M2 shot without characterIds
+    # keeps its explicit references and stays valid, while a character-derived shot
+    # freezes one (character, version) pair per reference frame.
+    character_refs: JsonTuple[CharacterRef] = Field(default=(), max_length=2)
     # Clip extension is cut from M2; the link stays null for later stages.
     extend_source: None = None
 
     @model_validator(mode="after")
     def coherent_references(self):
-        if len(self.reference_asset_ids) != REFERENCE_FRAMES[self.mode]:
+        frames = REFERENCE_FRAMES[self.mode]
+        if len(self.reference_asset_ids) != frames:
             raise ValueError("Shot mode requires its exact reference frame count")
         if len(set(self.reference_asset_ids)) != len(self.reference_asset_ids):
             raise ValueError("Reference assets must be unique per shot")
+        if self.character_refs:
+            if len(self.character_refs) != frames:
+                raise ValueError("Shot characters must match its exact reference frame count")
+            if len({item.character_id for item in self.character_refs}) != len(self.character_refs):
+                raise ValueError("A shot cannot cite the same character twice")
+            if len(self.character_refs) != len(self.reference_asset_ids):
+                raise ValueError("Every character reference contributes one reference image")
         return self
+
+    @property
+    def character_ids(self) -> tuple[str, ...]:
+        """The public ordered character IDs; empty for explicit-reference M2 shots."""
+        return tuple(item.character_id for item in self.character_refs)
 
 
 class StoryboardVersion(Contract):
@@ -154,13 +178,75 @@ def validate_source_refs(state: dict, project_id: str, refs) -> None:
             raise AppError("SOURCE_VERSION_NOT_FOUND", "源产物版本不存在，未保存分镜。")
 
 
-def _validate_shot_assets(state: dict, shot: Shot) -> None:
+def _validate_shot_assets(state: dict, project_id: str, shot: Shot) -> None:
     for asset_id in shot.reference_asset_ids:
         asset = state["assets"].get(asset_id)
         if asset is None:
             raise AppError("ASSET_NOT_FOUND", f"参考素材 {asset_id} 不存在，未保存分镜。")
         if asset.get("kind") != "image":
             raise AppError("ASSET_NOT_IMAGE", "镜头参考图必须是素材库中的图像。")
+    if not shot.character_refs:
+        return
+    from vagent.video.episodes import Character
+
+    if len(shot.character_refs) != len(shot.reference_asset_ids):
+        raise AppError("CHARACTER_ASSET_MISSING", "角色引用与参考帧数量不一致，未保存分镜。")
+    for reference, asset_id in zip(shot.character_refs, shot.reference_asset_ids, strict=True):
+        raw = state["characters"].get(reference.character_id)
+        if raw is None:
+            raise AppError("CHARACTER_NOT_FOUND", f"角色 {reference.character_id} 不存在，未保存分镜。")
+        character = Character.model_validate(raw)
+        if character.project_id != project_id:
+            raise AppError("CHARACTER_CONFLICT", "镜头的角色必须属于同一项目。")
+        version = next(
+            (item for item in character.versions if item.version == reference.character_version), None
+        )
+        if version is None:
+            raise AppError("CHARACTER_NOT_FOUND", "镜头冻结的角色版本不存在，未保存分镜。")
+        if not version.reference_asset_ids or version.reference_asset_ids[0] != asset_id:
+            raise AppError("CHARACTER_ASSET_MISSING", "镜头的参考图与角色圣经不一致，未保存分镜。")
+        asset = state["assets"].get(asset_id)
+        if asset is None or asset.get("projectId") != project_id or asset.get("kind") != "image":
+            raise AppError("CHARACTER_ASSET_MISSING", "角色参考素材缺失或不是本项目的图像。")
+
+
+def resolve_character_refs(
+    state: dict, project_id: str, character_ids, mode: str
+) -> tuple[tuple[CharacterRef, ...], tuple[str, ...]]:
+    """Map ordered character IDs to the latest version's first reference image each.
+
+    The mapping is deterministic: one character contributes exactly one frame, in the
+    caller's order (i2v first frame; flf2v first/last). A character without an imported
+    image, or an asset that is not this project's image, rejects the whole save with
+    ``CHARACTER_ASSET_MISSING`` - never a silent downgrade to text-to-video.
+    """
+    from vagent.video.episodes import Character
+
+    frames = REFERENCE_FRAMES[mode]
+    ids = tuple(character_ids)
+    if len(ids) != frames or len(set(ids)) != len(ids):
+        raise AppError("INVALID_ARGUMENTS", "镜头角色数必须与该模式的首尾帧数量一致，且不能重复。")
+    refs: list[CharacterRef] = []
+    assets: list[str] = []
+    for character_id in ids:
+        raw = state["characters"].get(character_id)
+        if raw is None:
+            raise AppError("CHARACTER_NOT_FOUND", f"角色 {character_id} 不存在，未保存分镜。")
+        character = Character.model_validate(raw)
+        if character.project_id != project_id:
+            raise AppError("CHARACTER_CONFLICT", "镜头的角色必须属于同一项目。")
+        latest = character.latest
+        if not latest.reference_asset_ids:
+            raise AppError(
+                "CHARACTER_ASSET_MISSING", f"角色 {latest.name} 还没有参考图，请先导入再创建镜头。"
+            )
+        asset_id = latest.reference_asset_ids[0]
+        asset = state["assets"].get(asset_id)
+        if asset is None or asset.get("projectId") != project_id or asset.get("kind") != "image":
+            raise AppError("CHARACTER_ASSET_MISSING", f"角色 {latest.name} 的参考图不在本项目素材库中。")
+        refs.append(CharacterRef(character_id=character_id, character_version=latest.version))
+        assets.append(asset_id)
+    return tuple(refs), tuple(assets)
 
 
 def validate_storyboard_changes(previous: dict[str, dict], state: dict) -> None:
@@ -174,7 +260,7 @@ def validate_storyboard_changes(previous: dict[str, dict], state: dict) -> None:
             raise AppError("STORYBOARD_CONFLICT", "分镜 ID 或所属项目不匹配。")
         validate_source_refs(state, record.project_id, record.source_refs)
         for shot in record.versions[-1].shots:
-            _validate_shot_assets(state, shot)
+            _validate_shot_assets(state, record.project_id, shot)
         old_raw = previous.get(key)
         if old_raw is None:
             if record.current_version != 1 or record.revision != 0:
@@ -219,6 +305,18 @@ def save_storyboard(args: dict, state: dict, project_id: str) -> dict:
     existing = Storyboard.model_validate(raw) if raw is not None else None
     if existing is not None and existing.current_version != args["expectedVersion"]:
         raise AppError("VERSION_CONFLICT", "分镜版本已变化，请重新读取后再修改。")
+    record_id = existing.id if existing is not None else (storyboard_id or str(uuid4()))
+    # E2: a scene may bind its one storyboard explicitly when the board is saved.
+    scene_id = args.get("sceneId")
+    if scene_id:
+        scene_raw = state["scenes"].get(scene_id)
+        if scene_raw is None or scene_raw["projectId"] != project_id:
+            raise AppError("SCENE_NOT_FOUND", "当前项目中没有这个场记。")
+        episode_raw = state["episodes"].get(scene_raw["episodeId"])
+        if episode_raw is None or episode_raw["projectId"] != project_id:
+            raise AppError("SCENE_CONFLICT", "场记必须归属于本项目的分集。")
+        if scene_raw.get("storyboardId") not in (None, record_id):
+            raise AppError("SCENE_CONFLICT", "该场记已绑定另一个分镜，不能换绑。")
     if "sourceRefs" in args:
         refs = tuple(ArtifactRef.model_validate(reference) for reference in args["sourceRefs"])
     else:
@@ -236,6 +334,15 @@ def save_storyboard(args: dict, state: dict, project_id: str) -> dict:
         if item.get("id") and shot_id not in known:
             raise AppError("SHOT_NOT_FOUND", "该镜头 ID 不属于这个分镜的既有版本。")
         seen.add(shot_id)
+        mode = item.get("mode", "t2v")
+        character_ids = tuple(item.get("characterIds") or ())
+        explicit = tuple(item.get("referenceAssetIds") or ())
+        if character_ids and explicit:
+            raise AppError("INVALID_ARGUMENTS", "同一镜头不能同时给出 characterIds 与 referenceAssetIds。")
+        if character_ids:
+            character_refs, reference_ids = resolve_character_refs(state, project_id, character_ids, mode)
+        else:
+            character_refs, reference_ids = (), explicit
         try:
             shot = Shot(
                 id=shot_id,
@@ -244,17 +351,18 @@ def save_storyboard(args: dict, state: dict, project_id: str) -> dict:
                 framing=item["framing"],
                 cameraMovement=item.get("cameraMovement"),
                 durationSeconds=item.get("durationSeconds", 5),
-                mode=item.get("mode", "t2v"),
-                referenceAssetIds=item.get("referenceAssetIds", []),
+                mode=mode,
+                referenceAssetIds=reference_ids,
+                characterRefs=character_refs,
             )
         except ValueError:
             raise AppError("INVALID_ARGUMENTS", "镜头字段不符合要求，未保存分镜。") from None
-        _validate_shot_assets(state, shot)
+        _validate_shot_assets(state, project_id, shot)
         shots.append(shot)
     timestamp = utc_now()
     if existing is None:
         record = Storyboard(
-            id=storyboard_id or str(uuid4()),
+            id=record_id,
             project_id=project_id,
             title=args["title"],
             source_refs=refs,
@@ -277,10 +385,19 @@ def save_storyboard(args: dict, state: dict, project_id: str) -> dict:
             }
         )
     state["storyboards"][record.id] = record.model_dump(mode="json", by_alias=True)
+    if scene_id:
+        scene_raw = state["scenes"][scene_id]
+        if scene_raw.get("storyboardId") is None:
+            state["scenes"][scene_id] = {
+                **scene_raw,
+                "storyboardId": record.id,
+                "revision": scene_raw["revision"] + 1,
+            }
     return {
         "storyboardId": record.id,
         "version": record.current_version,
         "shotIds": [shot.id for shot in shots],
+        "sceneId": scene_id,
     }
 
 
@@ -303,6 +420,8 @@ def read_storyboard(args: dict, state: dict, project_id: str) -> dict:
     shots = []
     for shot in sorted(record.versions[-1].shots, key=lambda item: item.order):
         summary = shot.model_dump(mode="json", by_alias=True)
+        # E2 publishes the ordered character IDs next to the frozen references.
+        summary["characterIds"] = list(shot.character_ids)
         summary["versions"] = [
             {
                 "shotVersionId": item.id,

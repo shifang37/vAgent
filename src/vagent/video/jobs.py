@@ -12,6 +12,7 @@ from pydantic import ValidationError
 
 from vagent.errors import AppError, failure
 from vagent.video.assets import AssetService, verified_reference_data
+from vagent.video.consistency import cast_names, compose_shot_prompt, style_for_storyboard
 from vagent.video.contracts import (
     FAL_MAX_JOB_USD,
     FAL_MAX_RUN_USD,
@@ -1247,9 +1248,16 @@ class JobService:
 
     def _derive_shot(self, draft, record, shot, *, live: bool):
         """Derive the frozen request of one shot without changing any state."""
-        prompt = shot.description.strip()
-        if not prompt:
+        description = shot.description.strip()
+        if not description:
             raise AppError("SHOT_DESCRIPTION_EMPTY", "镜头描述为空，未创建任务。")
+        # E2: a storyboard bound to a styled scene inherits the frozen style prompt
+        # template and the ordered cast names before the shot's own description.
+        prompt = compose_shot_prompt(
+            description,
+            style=style_for_storyboard(draft, record.id),
+            cast=cast_names(draft, shot),
+        )
         capabilities = self._shot_capability(shot.mode, live=live)
         if live and isinstance(capabilities, VideoCapabilitiesV4):
             # The multi-provider table publishes only text-to-video 5 s / 720p / 16:9.

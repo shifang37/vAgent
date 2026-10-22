@@ -47,7 +47,7 @@ git diff --check
 ```
 
 - 新增定向用例：改编 23 项、工具与版本 21 项、E0 域契约 10 项、E0 基线 13 项，共 **67 passed**。
-- 版本迁移：新增 Run 记录 7/7；6/6 快照通过 `for_record_features` 还原为不含 5 个新工具的冻结视图（`tests/test_m5_tools.py::test_new_runs_publish_seven_and_old_snapshots_restore`）。既有断言中 14 处“当前版本 6”按机械方式更新为 7，冻结的 3/3、4/4、5/5、6/6 变体断言保留；`test_video_integration.py` 中模拟“规则被改动则拒绝恢复”的补丁目标同步改为当前 `VIDEO_RULES_V7`。
+- 版本迁移：新增 Run 记录 7/7；6/6 快照通过 `for_record_features` 还原为不含 5 个新工具的冻结视图（E2 起该用例改名为 `tests/test_m5_tools.py::test_new_runs_publish_eight_and_old_snapshots_restore`，7/7 视图同样已冻结）。既有断言中 14 处“当前版本 6”按机械方式更新为 7，冻结的 3/3、4/4、5/5、6/6 变体断言保留；`test_video_integration.py` 中模拟“规则被改动则拒绝恢复”的补丁目标同步改为当前 `VIDEO_RULES_V7`（E2 起为 `VIDEO_RULES_V8`）。
 - ruff 与 `git diff --check` 通过。
 
 ## 5. 完整回归

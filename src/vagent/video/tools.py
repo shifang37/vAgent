@@ -30,6 +30,7 @@ from vagent.video.episodes import (
     TimeOfDay,
     read_bible,
     read_episode,
+    record_consistency_review,
     save_bible,
     save_episode,
 )
@@ -49,11 +50,12 @@ from vagent.waiting import (
 # 3/3 identity until the M2 Wan protocol lands in D2. E1 raised both to 5/5 by
 # appending the film tools; E2 raises both to 6/6 for the generic provider request
 # and keeps the 5/5 and 4/4 frozen variants so recorded Runs restore. M5 E1 appends
-# the five adaptation tools and raises both to 7/7, freezing 6/6 as history.
-VIDEO_TOOLS_VERSION = 7
-VIDEO_RULES_VERSION = 7
-LIVE_VIDEO_TOOLS_VERSION = 7
-LIVE_VIDEO_RULES_VERSION = 7
+# the five adaptation tools and raises both to 7/7, freezing 6/6 as history. M5 E2
+# appends the consistency review tool and raises both to 8/8, freezing 7/7.
+VIDEO_TOOLS_VERSION = 8
+VIDEO_RULES_VERSION = 8
+LIVE_VIDEO_TOOLS_VERSION = 8
+LIVE_VIDEO_RULES_VERSION = 8
 WAIT_TIMEOUT_SECONDS = 600
 WAIT_SET_LIMIT = 16
 # Every tool this file adds after the frozen pre-M2 versions 1/2/3.
@@ -63,8 +65,11 @@ M2_STORYBOARD_TOOL_NAMES = ("storyboard_read", "storyboard_save")
 M3_TOOL_NAMES = ("film_assemble", "film_read")
 # M5 E1 appends the adaptation tools; every pre-M5 variant must hide them.
 M5_TOOL_NAMES = ("episode_plan", "episode_save", "episode_read", "bible_save", "bible_read")
+# M5 E2 appends the human consistency review; pre-E2 variants hide it.
+M5_E2_TOOL_NAMES = ("consistency_review",)
 PRE_M3_TOOL_NAMES = (*M2_TOOL_NAMES, *M3_TOOL_NAMES)
 PRE_M5_TOOL_NAMES = (*PRE_M3_TOOL_NAMES, *M5_TOOL_NAMES)
+PRE_E2_TOOL_NAMES = (*PRE_M5_TOOL_NAMES, *M5_E2_TOOL_NAMES)
 
 LEGACY_VIDEO_RULES = """当前启用 mock 视频模式，只能登记模拟任务；所有结果均为 simulated=true、mediaAvailable=false。
 需要生成时先调用 video_capabilities，根据返回的模型、能力版本和完整规格组合构造 video_generate。
@@ -176,8 +181,15 @@ bible_save/bible_read 维护角色与风格圣经：角色只引用素材库中�
 episode_save 必须显式给出 scenes（来自草案），按每集 10–20 镜头、60–90 秒、每场≤6 镜头的冻结预算登记；超限整批拒绝，不部分保存。
 episode_save 不创建分镜、不登记视频任务、不提交供应商；episode_read 读取当前分集、场景、对白与可再生的镜头草案。"""
 
+CONSISTENCY_RULES = """角色一致性用角色圣经与参考图：storyboard_save 可用 sceneId 把分镜绑定到该分集的一个场景（只能绑定一次）；每个镜头可用 characterIds 引用角色，i2v 给 1 个、flf2v 按首帧/尾帧顺序给 2 个，服务端取每个角色最新版本的 referenceAssetIds 并冻结到镜头。
+同一镜头不能同时给 characterIds 与 referenceAssetIds；角色缺参考图、参考图不在本项目素材库或不是图像时整批拒绝（CHARACTER_ASSET_MISSING），不降级为 t2v、不借用其他项目素材。
+绑定场记后，镜头请求的提示词会先拼上该集冻结的风格模板（style-prompt-zh-v1：风格名/题材/色调/镜头语言）与出场角色名，再拼镜头描述；同一分集与同一角色版本得到逐字节相同的提示词。
+episode_read 返回逐角色的跨镜头引用证据（镜头的角色版本与参考素材）与已记录评分；只有用户明确给出 1–5 分时才调用 consistency_review 记录，不得自行编造评分，也不要把评分说成生成质量已达标。评分只追加记录，不改变镜头、任务、预算或费用。"""
+
 VIDEO_RULES_V7 = VIDEO_RULES_V6 + "\n" + ADAPTATION_RULES
 LIVE_VIDEO_RULES_V7 = LIVE_VIDEO_RULES_V6 + "\n" + ADAPTATION_RULES
+VIDEO_RULES_V8 = VIDEO_RULES_V7 + "\n" + CONSISTENCY_RULES
+LIVE_VIDEO_RULES_V8 = LIVE_VIDEO_RULES_V7 + "\n" + CONSISTENCY_RULES
 
 OLD_LIVE_GENERATE_DESCRIPTION = (
     "登记一个真实视频 Job，返回 jobId 与登记状态；后台仅提交一次，云端成功后还需本地媒体交付。"
@@ -211,6 +223,8 @@ class StoryboardShotSpec(Arguments):
     duration_seconds: int = Field(default=5, ge=2, le=15)
     mode: ShotMode = "t2v"
     reference_asset_ids: list[CanonicalId] = Field(default_factory=list, max_length=2)
+    # E2: ordered character IDs; the server resolves one exact reference image each.
+    character_ids: list[CanonicalId] = Field(default_factory=list, max_length=2)
 
     @field_validator("camera_movement")
     @classmethod
@@ -221,7 +235,16 @@ class StoryboardShotSpec(Arguments):
 
     @model_validator(mode="after")
     def references_match_mode(self):
-        if len(self.reference_asset_ids) != {"t2v": 0, "i2v": 1, "flf2v": 2}[self.mode]:
+        frames = {"t2v": 0, "i2v": 1, "flf2v": 2}[self.mode]
+        if self.character_ids:
+            if self.reference_asset_ids:
+                raise ValueError("同一镜头不能同时给出 characterIds 与 referenceAssetIds")
+            if self.mode == "t2v" or len(self.character_ids) != frames:
+                raise ValueError("镜头角色数必须与该模式的首尾帧数量一致")
+            if len(set(self.character_ids)) != len(self.character_ids):
+                raise ValueError("同一镜头不能重复引用同一个角色")
+            return self
+        if len(self.reference_asset_ids) != frames:
             raise ValueError("镜头模式要求的参考图数量不匹配")
         if len(set(self.reference_asset_ids)) != len(self.reference_asset_ids):
             raise ValueError("同一镜头的参考图不能重复")
@@ -231,6 +254,8 @@ class StoryboardShotSpec(Arguments):
 class StoryboardSave(Arguments):
     storyboard_id: CanonicalId | None = None
     expected_version: int | None = Field(default=None, ge=1)
+    # E2: bind the scene's single storyboard while saving it.
+    scene_id: CanonicalId | None = None
     title: str = Field(min_length=1, max_length=120)
     shots: list[StoryboardShotSpec] = Field(min_length=1, max_length=64)
     source_refs: list[ArtifactRef] | None = Field(default=None, max_length=16)
@@ -357,6 +382,16 @@ class BibleSave(Arguments):
 class BibleRead(Arguments):
     kind: Literal["character", "style"]
     id: CanonicalId | None = None
+
+
+class ConsistencyReviewArgs(Arguments):
+    """One human 1-5 consistency score, bound to the evidence the Store recomputes."""
+
+    episode_id: CanonicalId
+    character_id: CanonicalId
+    score: int = Field(ge=1, le=5, description="人工一致性评分：1 最差、5 最好；只按用户明确给出的分数记录。")
+    note: str | None = Field(default=None, min_length=1, max_length=500)
+    reviewer: str = Field(default="user", min_length=1, max_length=60)
 
 
 class AssetLookup(Arguments):
@@ -540,7 +575,7 @@ def register_video_tools(registry: ToolRegistry, service: JobService, *, mode="m
                 "rulesVersion": LIVE_VIDEO_RULES_VERSION if live else VIDEO_RULES_VERSION,
                 "capabilities": capabilities,
             },
-            instructions=LIVE_VIDEO_RULES_V7 if live else VIDEO_RULES_V7,
+            instructions=LIVE_VIDEO_RULES_V8 if live else VIDEO_RULES_V8,
             bypass_answer_cache=True,
         )
     )
@@ -836,7 +871,9 @@ def register_video_tools(registry: ToolRegistry, service: JobService, *, mode="m
             "storyboard_save",
             "新建或修改结构化分镜：shots 按给定顺序编号，镜头 id 由服务端生成并跨版本稳定；"
             "修改时同时提供 storyboardId 与 expectedVersion，产生新版本并保留旧版本；显式传入既有镜头 id 保持其身份。"
-            "i2v 镜头需 1 张、flf2v 需 2 张素材库参考图。只保存分镜结构，不创建视频任务。",
+            "可用 sceneId 把分镜绑定到分集的一个场景（只能绑定一次）；镜头可用 characterIds 引用角色，"
+            "i2v 给 1 个、flf2v 按首帧/尾帧顺序给 2 个，服务端取该角色最新参考图并冻结；"
+            "角色缺参考图或素材不在本项目时整批拒绝。只保存分镜结构，不创建视频任务。",
             StoryboardSave,
             "write",
             save_storyboard,
@@ -884,11 +921,23 @@ def register_video_tools(registry: ToolRegistry, service: JobService, *, mode="m
         ),
         ToolDefinition(
             "episode_read",
-            "读取当前项目的分集、场景、台词与可再生的镜头草案（含逐镜头估算）；"
+            "读取当前项目的分集、场景、台词与可再生的镜头草案（含逐镜头估算），以及该集冻结的风格模板、"
+            "逐角色的跨镜头引用证据（镜头、角色版本、参考素材是否一致）与已记录的人工一致性评分；"
             "省略 episodeId 时读取本项目最近保存的分集。只读，不修改、不登记任务。",
             EpisodeRead,
             "read",
             read_episode,
+            feature="video",
+        ),
+        ToolDefinition(
+            "consistency_review",
+            "记录用户给出的人工角色一致性评分（1–5）：服务端在同一事务内重新计算该角色在这个分集已绑定分镜中的"
+            "全部镜头、角色版本与参考素材，把证据与分数一起追加到分集；没有任何引用该角色的镜头时整次拒绝"
+            "（CONSISTENCY_EVIDENCE_MISSING）。只有用户明确给出分数时才调用；不改变镜头、任务、预算或费用，"
+            "历史评分不可改写。",
+            ConsistencyReviewArgs,
+            "write",
+            record_consistency_review,
             feature="video",
         ),
         ToolDefinition(
@@ -942,7 +991,7 @@ def register_video_tools(registry: ToolRegistry, service: JobService, *, mode="m
                 )
             ],
             descriptions={},
-            exclude=PRE_M5_TOOL_NAMES,
+            exclude=PRE_E2_TOOL_NAMES,
             definitions={
                 "await_job": frozen_await(AWAIT_DESCRIPTION_M1C),
                 "video_generate": frozen_generate,
@@ -963,7 +1012,7 @@ def register_video_tools(registry: ToolRegistry, service: JobService, *, mode="m
                     bypass_answer_cache=True,
                 )
             ],
-            exclude=(*M3_TOOL_NAMES, *M5_TOOL_NAMES),
+            exclude=(*M3_TOOL_NAMES, *M5_TOOL_NAMES, *M5_E2_TOOL_NAMES),
             definitions={"video_generate": frozen_generate},
         )
         registry.register_tools_variant(
@@ -981,6 +1030,7 @@ def register_video_tools(registry: ToolRegistry, service: JobService, *, mode="m
                     bypass_answer_cache=True,
                 )
             ],
+            exclude=(*M5_TOOL_NAMES, *M5_E2_TOOL_NAMES),
             definitions={"video_generate": frozen_generate},
         )
         registry.register_tools_variant(
@@ -998,8 +1048,26 @@ def register_video_tools(registry: ToolRegistry, service: JobService, *, mode="m
                     bypass_answer_cache=True,
                 )
             ],
-            exclude=M5_TOOL_NAMES,
-            definitions={"video_generate": frozen_generate},
+            exclude=(*M5_TOOL_NAMES, *M5_E2_TOOL_NAMES),
+        )
+        # 7/7 introduced the episode/bible tools; its video_generate schema is the
+        # same six-argument intent as 6/6, so no override is needed.
+        registry.register_tools_variant(
+            7,
+            features=[
+                ToolFeature(
+                    name="video",
+                    configuration={
+                        "mode": "live",
+                        "toolsVersion": 7,
+                        "rulesVersion": 7,
+                        "capabilities": capabilities,
+                    },
+                    instructions=LIVE_VIDEO_RULES_V7,
+                    bypass_answer_cache=True,
+                )
+            ],
+            exclude=M5_E2_TOOL_NAMES,
         )
     else:
         legacy_capabilities = legacy_mock_capabilities()
@@ -1019,7 +1087,7 @@ def register_video_tools(registry: ToolRegistry, service: JobService, *, mode="m
                 )
             ],
             descriptions={},
-            exclude=PRE_M5_TOOL_NAMES,
+            exclude=PRE_E2_TOOL_NAMES,
             definitions={"await_job": frozen_await(LEGACY_AWAIT_DESCRIPTION)},
         )
         registry.register_execution_variant(
@@ -1038,7 +1106,7 @@ def register_video_tools(registry: ToolRegistry, service: JobService, *, mode="m
                 )
             ],
             descriptions={},
-            exclude=PRE_M5_TOOL_NAMES,
+            exclude=PRE_E2_TOOL_NAMES,
             definitions={"await_job": frozen_await(AWAIT_DESCRIPTION_M1C)},
         )
         registry.register_tools_variant(
@@ -1056,7 +1124,7 @@ def register_video_tools(registry: ToolRegistry, service: JobService, *, mode="m
                     bypass_answer_cache=True,
                 )
             ],
-            exclude=(*M3_TOOL_NAMES, *M5_TOOL_NAMES),
+            exclude=(*M3_TOOL_NAMES, *M5_TOOL_NAMES, *M5_E2_TOOL_NAMES),
         )
         registry.register_tools_variant(
             5,
@@ -1073,6 +1141,7 @@ def register_video_tools(registry: ToolRegistry, service: JobService, *, mode="m
                     bypass_answer_cache=True,
                 )
             ],
+            exclude=(*M5_TOOL_NAMES, *M5_E2_TOOL_NAMES),
         )
         registry.register_tools_variant(
             6,
@@ -1089,7 +1158,24 @@ def register_video_tools(registry: ToolRegistry, service: JobService, *, mode="m
                     bypass_answer_cache=True,
                 )
             ],
-            exclude=M5_TOOL_NAMES,
+            exclude=(*M5_TOOL_NAMES, *M5_E2_TOOL_NAMES),
+        )
+        registry.register_tools_variant(
+            7,
+            features=[
+                ToolFeature(
+                    name="video",
+                    configuration={
+                        "mode": "mock",
+                        "toolsVersion": 7,
+                        "rulesVersion": 7,
+                        "capabilities": capabilities,
+                    },
+                    instructions=VIDEO_RULES_V7,
+                    bypass_answer_cache=True,
+                )
+            ],
+            exclude=M5_E2_TOOL_NAMES,
         )
     registry.register_wait_resolver(
         "job", lambda binding: resolve_job_wait(service.store, binding, service=service), feature="video"
