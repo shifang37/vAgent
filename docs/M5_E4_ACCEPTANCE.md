@@ -1,6 +1,6 @@
 # M5 E4 验收：分集工作流、安装态、浏览器与真实样本
 
-日期：**2026-10-22**。基线 `master` `d98ddc2`（M5 E3，schema 6、tools/rules 9/9、冻结 8/8）；最终代码提交见 `git log`。范围见 [M5 计划](./M5_PLAN.md) §3.2 的 E4，冻结契约见 [M5 契约](./M5_CONTRACTS.md) §10。**E4 未调用文本模型（模型调用=0）；离线套件与安装态验收的所有供应商调用均为受控 HTTP，真实视频 submit=0。** 唯一真实付费样本是经单独批准的 **18 次 Wan 文生视频提交（估算 54.00 CNY，实际账单 unknown）**，用于 `fridge-notes` 全篇 18 镜头 / 90 秒 / 7 个场记的逐场成片；未使用 Kling/fal 真实账号，未执行其他付费样本。
+日期：**2026-10-22**。基线 `master` `d98ddc2`（M5 E3，schema 6、tools/rules 9/9、冻结 8/8）；最终代码提交 **`6c2a336`**（文档同步另计）。范围见 [M5 计划](./M5_PLAN.md) §3.2 的 E4，冻结契约见 [M5 契约](./M5_CONTRACTS.md) §10。**E4 未调用文本模型（模型调用=0）；离线套件与安装态验收的所有供应商调用均为受控 HTTP，真实视频 submit=0。** 唯一真实付费样本是经单独批准的 **18 次 Wan 文生视频提交（估算 54.00 CNY，实际账单 unknown）**，用于 `fridge-notes` 全篇 18 镜头 / 90 秒 / 7 个场记的逐场成片；未使用 Kling/fal 真实账号，未执行其他付费样本。
 
 ## 1. 交付内容
 
@@ -143,8 +143,8 @@ node --test tests/test_job_state.mjs tests/test_storyboard_state.mjs tests/test_
 
 ## 6. CI 与提交
 
-- 最终代码提交：`<TBD>`。
-- 四组 CI：`<TBD>`。
+- 最终代码提交：`6c2a336`（2026-10-22）。
+- 四组 CI（`ubuntu/windows × Python 3.11/3.12`，`.github/workflows/ci.yml`「Agent checks」）在该提交上全部 **success**（[运行 39766146694](https://github.com/shifang37/vAgent/actions/runs/39766146694)）：check runs `119781970106`（ubuntu 3.12）、`119781970454`（ubuntu 3.11）、`119781970048`（windows 3.12）、`119781970303`（windows 3.11）。汇总证据保存为 `output/m5-e4-ci-6c2a336-summary.json`。文档提交在其后，不改动代码。
 
 ## 7. 失败与偏差记录
 
