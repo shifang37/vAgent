@@ -7,6 +7,8 @@
 > **E1 已完成（2026-10-22）**：离线确定性改编（章节/场景/对白/角色识别/镜头草案/预算）、5 个改编工具与 tools/rules 7/7（冻结 6/6 变体），模型调用=0、submit=0；见 [E1 验收](./M5_E1_ACCEPTANCE.md)。
 >
 > **E2 已完成（2026-10-22）**：场景绑定、镜头 `characterIds` → 冻结角色版本与参考图、`style-prompt-zh-v1` 风格提示模板、`episode_read` 跨镜头证据与人工评分 `consistency_review`；tools/rules 8/8（冻结 7/7），模型调用=0、submit=0；见 [E2 验收](./M5_E2_ACCEPTANCE.md)。
+>
+> **E3 已完成（2026-10-22）**：`episode_generate` 整集批量登记与 `shot_redo` 逐镜头重做、集级额度（`jobCap`/`episodeCapAmount` 跨 Run 累计、不换汇）、20 成员集合等待、失败隔离与 `episode_read.generation`；tools/rules 9/9（冻结 8/8），受控 HTTP + 本地测试媒体，视频 **submit=0**；见 [E3 验收](./M5_E3_ACCEPTANCE.md)。
 
 ## 1. 产品目标与当前差距
 
@@ -51,7 +53,7 @@
 | E0 契约冻结 | Episode/Scene/Character/Style 数据对象；schema v6 迁移；文本切分与镜头预算；错误码 | 旧 v1–v5 数据可读；迁移有字节备份；无模型调用。**已交付**：[契约](./M5_CONTRACTS.md)、[E0 验收](./M5_E0_ACCEPTANCE.md) |
 | E1 文本改编 | 章节/场景切分、对白抽取、镜头草案、角色识别 | 固定 3 篇样例文稿，输出结构完整；不丢对白；可复现。**已交付**：[E1 验收](./M5_E1_ACCEPTANCE.md) |
 | E2 角色/风格一致性 | 角色圣经、参考图导入、镜头引用角色 ID、风格提示模板 | 同一角色跨镜头引用同一组素材；缺素材拒绝；人工一致性评分记录。**已交付**：[E2 验收](./M5_E2_ACCEPTANCE.md) |
-| E3 生成与重做 | 批量登记、逐镜头重做、预算、集合等待、失败隔离 | 60–90 秒样例全链路；重做只影响目标镜头；submit 与预算一致 |
+| E3 生成与重做 | 批量登记、逐镜头重做、预算、集合等待、失败隔离 | 60–90 秒样例全链路；重做只影响目标镜头；submit 与预算一致。**已交付**：[E3 验收](./M5_E3_ACCEPTANCE.md) |
 | E4 验收与文档 | 离线端到端套件、真实小样本、CLI/Web 流程、验收文档 | 3 篇样例中至少 1 篇真实生成并成片；失败保留；CI 通过 |
 
 ### 3.3 验收样例
@@ -119,7 +121,7 @@
 
 建议新对话第一句：
 
-> 基于 `master` `22db33c` 的 M4 归一化，按 `docs/M5_PLAN.md` 先做 **M5 E0 契约冻结**；不要做 9:16 竖屏；先读 `docs/M4_NORMALIZATION.md`、`docs/M2_I2V_ACCEPTANCE.md`、`docs/M3_CONTRACTS.md`。先给实施计划和需要我确认的决策点，不要直接提交付费任务。
+> 基于 M5 E3 的 `master`（schema 6、tools/rules 9/9、冻结 8/8），按 `docs/M5_PLAN.md` 做 **M5 E4 验收与文档**；不要做 9:16 竖屏；先读 `docs/M5_CONTRACTS.md`、`docs/M5_E3_ACCEPTANCE.md`、`docs/M4_NORMALIZATION.md` 与 `docs/M3_CONTRACTS.md`。先给实施计划和需要我确认的决策点，不要直接提交付费任务。
 
 第一批任务建议：
 

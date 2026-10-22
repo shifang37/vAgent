@@ -31,7 +31,13 @@ from vagent.waiting import ToolExecutionContext
 
 FORMAT_VERSION = 1
 WAIT_TIMEOUT_SECONDS = 600.0
-PLANNING_EXCLUDED_TOOLS = ("shot_generate", "video_generate", "film_assemble")
+PLANNING_EXCLUDED_TOOLS = (
+    "shot_generate",
+    "video_generate",
+    "film_assemble",
+    "episode_generate",
+    "shot_redo",
+)
 PLANNING_RULES = """本次是 headless 规划阶段：先用 storyboard_save 把方案保存为按顺序的结构化分镜
 （每个镜头给出 description、framing、durationSeconds、mode），然后简要说明镜头安排。
 本阶段不能登记或提交任何视频任务，也不能拼接成片；不要声称已经生成或交付视频。

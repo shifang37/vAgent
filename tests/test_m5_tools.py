@@ -67,36 +67,52 @@ def episode_args(plan, cast, *, title="雨夜咖啡店"):
     return {"title": title, "scenes": scenes}
 
 
-def test_tool_versions_are_eight_and_seven_is_frozen():
-    assert (VIDEO_TOOLS_VERSION, VIDEO_RULES_VERSION) == (8, 8)
-    assert (LIVE_VIDEO_TOOLS_VERSION, LIVE_VIDEO_RULES_VERSION) == (8, 8)
+def test_tool_versions_are_nine_and_eight_is_frozen():
+    assert (VIDEO_TOOLS_VERSION, VIDEO_RULES_VERSION) == (9, 9)
+    assert (LIVE_VIDEO_TOOLS_VERSION, LIVE_VIDEO_RULES_VERSION) == (9, 9)
     assert "episode_plan" in video_tools.M5_TOOL_NAMES
     assert "consistency_review" in video_tools.M5_E2_TOOL_NAMES
+    assert "episode_generate" in video_tools.M5_E3_TOOL_NAMES
+    assert "shot_redo" in video_tools.M5_E3_TOOL_NAMES
 
 
-def test_new_runs_publish_eight_and_old_snapshots_restore(store):
+def test_new_runs_publish_nine_and_old_snapshots_restore(store):
     registry, service, _adapter, _context = mock_tools(store, clock=None)
     features = registry.features["video"]
-    assert (features["toolsVersion"], features["rulesVersion"]) == (8, 8)
+    assert (features["toolsVersion"], features["rulesVersion"]) == (9, 9)
     names = {spec["function"]["name"] for spec in registry.specs()}
     assert set(M5_TOOLS) <= names
     assert "consistency_review" in names
+    assert {"episode_generate", "shot_redo"} <= names
 
-    # A recorded 7/7 snapshot restores the frozen view: the E2 review tool vanishes
-    # while every M5 E1 tool remains.
-    recorded = {"video": {**features, "toolsVersion": 7, "rulesVersion": 7}}
+    # A recorded 8/8 snapshot restores the frozen view: the E3 writers vanish while
+    # every M5 E1/E2 tool remains.
+    recorded = {"video": {**features, "toolsVersion": 8, "rulesVersion": 8}}
     frozen = registry.for_record_features(recorded)
     assert frozen is not None
     frozen_names = {spec["function"]["name"] for spec in frozen.specs()}
-    assert "consistency_review" not in frozen_names
+    assert not (set(video_tools.M5_E3_TOOL_NAMES) & frozen_names)
+    assert "consistency_review" in frozen_names
     assert set(M5_TOOLS) <= frozen_names
     assert "storyboard_save" in frozen_names and "film_assemble" in frozen_names
     assert frozen.features == recorded
-    # The 7/7 rules text keeps the E1 chapter but never mentions the E2 review tool.
+    # The 8/8 rules text keeps the E2 chapter but never mentions the E3 tools.
     assert "episode_plan" in frozen.instructions
-    assert "consistency_review" not in frozen.instructions
-    assert "storyboard_save" in frozen.instructions
+    assert "consistency_review" in frozen.instructions
+    assert "episode_generate" not in frozen.instructions
+    assert "shot_redo" not in frozen.instructions
     assert service is not None
+
+    # A recorded 7/7 snapshot still hides the E2 review tool and both E3 tools.
+    seven = {"video": {**features, "toolsVersion": 7, "rulesVersion": 7}}
+    frozen_seven = registry.for_record_features(seven)
+    assert frozen_seven is not None
+    seven_names = {spec["function"]["name"] for spec in frozen_seven.specs()}
+    assert "consistency_review" not in seven_names
+    assert not (set(video_tools.M5_E3_TOOL_NAMES) & seven_names)
+    assert set(M5_TOOLS) <= seven_names
+    assert "consistency_review" not in frozen_seven.instructions
+    assert "episode_generate" not in frozen_seven.instructions
 
     # A recorded 6/6 snapshot still hides both M5 chapters.
     six = {"video": {**features, "toolsVersion": 6, "rulesVersion": 6}}
@@ -104,6 +120,7 @@ def test_new_runs_publish_eight_and_old_snapshots_restore(store):
     assert frozen_six is not None
     assert not (set(M5_TOOLS) & {spec["function"]["name"] for spec in frozen_six.specs()})
     assert "consistency_review" not in {spec["function"]["name"] for spec in frozen_six.specs()}
+    assert not (set(video_tools.M5_E3_TOOL_NAMES) & {spec["function"]["name"] for spec in frozen_six.specs()})
     assert "episode_plan" not in frozen_six.instructions
 
 
@@ -394,4 +411,5 @@ def test_episode_read_without_an_episode_is_empty(store):
         "scenes": [],
         "style": None,
         "consistency": None,
+        "generation": None,
     }

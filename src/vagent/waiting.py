@@ -132,9 +132,13 @@ class WaitBinding(Contract):
 
 
 class WaitBindingV3(WaitBinding):
-    """M2 set wait: one registration covering several Jobs of the same project."""
+    """M2 set wait: one registration covering several Jobs of the same project.
 
-    job_ids: JsonTuple[Identifier] = Field(min_length=2, max_length=16)
+    E3 raised the member ceiling from 16 to 20 so one collection wait covers a whole
+    episode (at most 20 Jobs); every stored wait with fewer members stays valid.
+    """
+
+    job_ids: JsonTuple[Identifier] = Field(min_length=2, max_length=20)
 
     @model_validator(mode="after")
     def jobset_members(self):

@@ -333,6 +333,12 @@ SHOT_DURATION_MAX = 15
 SHOT_DURATIONS = tuple(range(SHOT_DURATION_MIN, SHOT_DURATION_MAX + 1))
 # Frozen ceiling: one generation Run registers at most this many real Jobs.
 LIVE_JOBS_PER_RUN = 4
+# M5 E3 publishes an episode-level ceiling in the same snapshot type: a 9/9 tool
+# surface may place one episode's Jobs in a single Run, so the per-episode frozen
+# ``ShotBudget.jobCap`` (default 20) is the batch boundary instead of the per-Run 4.
+EPISODE_JOB_CAP = 20
+# The first tool surface allowed to register one episode's batch at once.
+EPISODE_TOOLS_VERSION = 9
 IMAGE_MIME_TYPES = ("image/png", "image/jpeg", "image/webp")
 IMAGE_MIN_SIDE = 240
 IMAGE_MAX_SIDE = 8000
@@ -651,6 +657,27 @@ class ShotRedoArgs(Contract):
     shot_id: Identifier
     expected_revision: int = Field(ge=0)
     client_request_id: Identifier
+
+
+class EpisodeGenerationArgs(Contract):
+    """One confirmed episode batch: only the episode ID and the confirmation are chosen."""
+
+    episode_id: Identifier
+    confirm: bool = False
+
+
+class ShotRedoToolArgs(Contract):
+    """A model-turn redo: the target shot plus the storyboard revision the model read.
+
+    The local CLI/Web redo keeps ``clientRequestId`` (``ShotRedoArgs``); a tool call's
+    own operation key already gives the replay identity, so the model never supplies
+    one.
+    """
+
+    storyboard_id: Identifier
+    storyboard_version: int = Field(ge=1)
+    shot_id: Identifier
+    expected_revision: int = Field(ge=0)
 
 
 class ShotMediaInput(Contract):
@@ -1313,17 +1340,36 @@ class ShotRef(Contract):
 
 
 class RunLimitsSnapshot(Contract):
-    """Registration-time snapshot of the per-Run ceilings and their usage."""
+    """Registration-time snapshot of the frozen ceilings one batch was checked against.
+
+    ``scope="run"`` keeps the M2/M3 meaning byte-for-byte: at most
+    ``LIVE_JOBS_PER_RUN`` Jobs of this Run are registered. M5 E3 adds
+    ``scope="episode"``: the same fields then describe one episode's frozen
+    ``shotBudget`` bucket (``jobCap`` Jobs and ``episodeCapAmount``), because an
+    episode may span several Runs and every Job must prove the episode boundary it
+    was registered under. The scope is stored on the Job, so the additive field
+    needs no new Job contract version and old records default to ``run``.
+    """
 
     max_job_cost: Money
-    max_new_jobs_per_run: int = Field(ge=1, le=LIVE_JOBS_PER_RUN)
+    max_new_jobs_per_run: int = Field(ge=1, le=EPISODE_JOB_CAP)
     max_run_cost: Money
-    used_new_jobs: int = Field(ge=0, le=LIVE_JOBS_PER_RUN)
+    used_new_jobs: int = Field(ge=0, le=EPISODE_JOB_CAP)
     used_amount: Money
     remaining_amount: Money
+    scope: Literal["run", "episode"] = "run"
+    episode_id: Identifier | None = None
 
     @model_validator(mode="after")
     def consistent_usage(self):
+        if self.scope == "episode":
+            if self.episode_id is None:
+                raise ValueError("An episode-scoped snapshot must name its episode")
+        else:
+            if self.episode_id is not None:
+                raise ValueError("A Run-scoped snapshot cannot carry an episode ID")
+            if self.max_new_jobs_per_run > LIVE_JOBS_PER_RUN or self.used_new_jobs > LIVE_JOBS_PER_RUN:
+                raise ValueError("A Run-scoped snapshot keeps the frozen per-Run Job ceiling")
         if self.used_new_jobs > self.max_new_jobs_per_run:
             raise ValueError("Recorded usage cannot exceed the frozen Job ceiling")
         if Decimal(self.used_amount) > Decimal(self.max_run_cost) or Decimal(

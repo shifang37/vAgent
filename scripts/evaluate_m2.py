@@ -1011,6 +1011,9 @@ def grade(case, item, *, offline):
                 "usedNewJobs": 3,
                 "usedAmount": "9.00",
                 "remainingAmount": "3.00",
+                # E3 added the snapshot scope; this Run stays on the frozen per-Run one.
+                "scope": "run",
+                "episodeId": None,
             },
             replay_deduplicated=len(generates) >= 2
             and generates[1]["result"].get("ok")

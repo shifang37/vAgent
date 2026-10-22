@@ -276,7 +276,7 @@ async def test_mock_runner_generates_three_shots_and_waits_as_one_set(store, vid
     runner = AgentRunner(store=store, model=model, tools=registry)
     suspended = await runner.run("coffee", "三镜头分镜并生成")
     assert suspended["status"] == "waiting_external", suspended["answer"]
-    assert suspended["toolFeatures"]["video"]["toolsVersion"] == 8
+    assert suspended["toolFeatures"]["video"]["toolsVersion"] == 9
     binding = parse_wait(next(iter(store.snapshot()["waits"].values())))
     assert isinstance(binding, WaitBindingV3) and binding.resource.kind == "jobset"
     assert list(binding.job_ids) == sorted(saved["jobIds"])
@@ -343,6 +343,8 @@ async def test_live_quota_snapshot_is_recomputed_from_persisted_jobs(store, vide
             "usedNewJobs": 2,
             "usedAmount": "6.00",
             "remainingAmount": "2.00",
+            "scope": "run",
+            "episodeId": None,
         }
         assert first["data"]["totalEstimate"] == {"currency": "CNY", "amount": "6.00"}
         jobs = [parse_job(raw) for raw in jobs_of(store, "shot-run")]

@@ -14,6 +14,8 @@ from vagent.errors import AppError, failure
 from vagent.video.assets import AssetService, verified_reference_data
 from vagent.video.consistency import cast_names, compose_shot_prompt, style_for_storyboard
 from vagent.video.contracts import (
+    EPISODE_JOB_CAP,
+    EPISODE_TOOLS_VERSION,
     FAL_MAX_JOB_USD,
     FAL_MAX_RUN_USD,
     KLING_MAX_JOB_UNITS,
@@ -33,6 +35,7 @@ from vagent.video.contracts import (
     CostRecord,
     CostRecordV3,
     DownloadPolicy,
+    EpisodeGenerationArgs,
     FalParameters,
     ImageSize,
     Job,
@@ -55,6 +58,7 @@ from vagent.video.contracts import (
     ShotGenerationArgs,
     ShotMediaInput,
     ShotRedoArgs,
+    ShotRedoToolArgs,
     ShotRef,
     ShotSpecV3,
     VideoCapabilities,
@@ -81,6 +85,13 @@ from vagent.video.contracts import (
     shot_price,
     validate_video_request,
     wan_price,
+)
+from vagent.video.episodes import (
+    Episode,
+    episode_boards,
+    episode_budget_usage,
+    episode_for_storyboard,
+    episode_shot_plan,
 )
 from vagent.video.storyboards import (
     Asset,
@@ -292,6 +303,63 @@ def _check_context(state: dict, context: ToolExecutionContext) -> None:
         raise AppError("JOB_CONTEXT_INVALID", "视频任务的项目、会话或 Run 不匹配。")
 
 
+def _episode_scoped_limits(job: Job):
+    """The episode bucket snapshot of one Job, or None for the frozen Run scope."""
+    limits = getattr(getattr(job, "cost", None), "limits", None)
+    return limits if isinstance(limits, RunLimitsSnapshot) and limits.scope == "episode" else None
+
+
+def _validate_run_episode_jobs(live_jobs) -> None:
+    """A 9/9 Run may hold an episode's batch; other real Jobs keep the frozen ceiling."""
+    run_scoped = sum(1 for job in live_jobs if _episode_scoped_limits(job) is None)
+    if run_scoped > LIVE_JOBS_PER_RUN:
+        raise AppError("JOB_CONFLICT", "同一 Run 登记的新真实视频任务超过冻结上限。")
+
+
+def _validate_episode_buckets(state: dict) -> None:
+    """E3: every episode-scoped Job proves its frozen ``shotBudget`` on every commit.
+
+    The episode ceiling is cumulative across Runs and redoes, so it is re-checked over
+    the whole Store, while pre-E3 Jobs stay Run-scoped and keep their frozen per-Run
+    behavior. A tampered price, currency, shot reference or ceiling is rejected here,
+    not only by the service that registered the batch.
+    """
+    buckets: dict[str, list] = {}
+    for raw in state["jobs"].values():
+        job = parse_job(raw)
+        limits = _episode_scoped_limits(job)
+        if limits is not None:
+            buckets.setdefault(limits.episode_id, []).append(job)
+    for episode_id, jobs in buckets.items():
+        raw = state["episodes"].get(episode_id)
+        if raw is None:
+            raise AppError("JOB_CONFLICT", "集级任务必须引用一个已存在的分集。")
+        episode = Episode.model_validate(raw)
+        budget = episode.latest.shot_budget
+        cap_jobs = min(int(budget.job_cap), EPISODE_JOB_CAP)
+        cap_amount = Decimal(budget.episode_cap_amount)
+        rate = Decimal(budget.per_shot_amount) / Decimal(5)
+        boards = episode_boards(state, episode)
+        total = Decimal(0)
+        for job in jobs:
+            limits = job.cost.limits
+            if (
+                limits.max_new_jobs_per_run != cap_jobs
+                or Decimal(limits.max_run_cost) != cap_amount
+                or job.context.project_id != episode.project_id
+                or job.shot_ref is None
+                or job.shot_ref.storyboard_id not in boards
+                or job.cost.estimate.currency != budget.currency
+                or Decimal(job.cost.estimate.unit_price) != rate
+            ):
+                raise AppError("JOB_CONFLICT", "集级任务与分集冻结的 shotBudget 不一致。")
+            total += Decimal(job.cost.estimate.amount)
+        if len(jobs) > cap_jobs:
+            raise AppError("EPISODE_COST_LIMIT", "集级任务数超过分集冻结的 jobCap。")
+        if total > cap_amount:
+            raise AppError("EPISODE_COST_LIMIT", "集级估算超过分集冻结的 episodeCapAmount。")
+
+
 def validate_job_changes(previous: dict[str, dict], state: dict) -> None:
     """Check identities and transitions inside every Store commit, not just the Worker."""
     jobs = state["jobs"]
@@ -405,10 +473,18 @@ def validate_job_changes(previous: dict[str, dict], state: dict) -> None:
         # Pre-M2 Runs keep the frozen single-Job rule; only M2 generation Runs may
         # register a bounded batch. The ceiling is re-checked here so a service-level
         # regression cannot commit an over-budget batch.
-        if len(jobs_of_run) > 1 and _generation_tools_version(state["runs"].get(run_id)) < M2_TOOLS_VERSION:
+        tools_version = _generation_tools_version(state["runs"].get(run_id))
+        if len(jobs_of_run) > 1 and tools_version < M2_TOOLS_VERSION:
             raise AppError("JOB_CONFLICT", "非 M2 的 Run 每个最多登记一个视频任务。")
-        if len([job for job in jobs_of_run if job.mode == "live"]) > LIVE_JOBS_PER_RUN:
-            raise AppError("JOB_CONFLICT", "同一 Run 登记的新真实视频任务超过冻结上限。")
+        live_jobs = [job for job in jobs_of_run if job.mode == "live"]
+        if tools_version < EPISODE_TOOLS_VERSION:
+            if len(live_jobs) > LIVE_JOBS_PER_RUN:
+                raise AppError("JOB_CONFLICT", "同一 Run 登记的新真实视频任务超过冻结上限。")
+        else:
+            # E3: the episode bucket replaces the per-Run 4 for its own Jobs; every
+            # other real Job of the Run keeps the frozen ceiling.
+            _validate_run_episode_jobs(live_jobs)
+    _validate_episode_buckets(state)
     if any(key != value["id"] for key, value in state["waits"].items()):
         raise AppError("WAIT_CONFLICT", "等待记录 ID 不匹配。")
     _validate_wait_members(state)
@@ -900,6 +976,47 @@ class JobService:
         # call's original result instead of registering a second Job.
         return self._register_batch(context, parsed, "shot_redo", context.operation_key, redo=True)
 
+    def redo_shot_tool(self, args: dict, *, context: ToolExecutionContext) -> dict:
+        """A model-turn redo: the same explicit path, identified by the tool call key.
+
+        The tool schema carries no client request ID; the operation key of the call is
+        the replay identity, so repeating one call never registers a second Job.
+        """
+        parsed = self._generation_args(ShotRedoToolArgs, args)
+        if isinstance(parsed, dict):
+            return parsed
+        return self._register_batch(context, parsed, "shot_redo", context.operation_key, redo=True)
+
+    def episode_generate(self, args: dict, *, context: ToolExecutionContext) -> dict:
+        """Register every shot of one confirmed episode as one atomic batch.
+
+        The plan is re-derived from the frozen episode and its bound storyboards inside
+        the commit transaction; the whole batch is rejected, with nothing written, when
+        a scene is unbound, a storyboard disagrees with the frozen scene, or any
+        per-Job / episode ceiling is exceeded. One episode spends at most ``jobCap``
+        Jobs and ``episodeCapAmount`` across every Run and redo.
+        """
+        parsed = self._generation_args(EpisodeGenerationArgs, args)
+        if isinstance(parsed, dict):
+            return parsed
+        raw = parsed.model_dump(mode="json", by_alias=True)
+
+        def register(draft):
+            return self._register_episode(draft, context, parsed)
+
+        try:
+            with self.store.locked():
+                # Scope is checked even for a replay, whose mutation callback is skipped.
+                _check_context(self.store.snapshot(), context)
+                result = self.store.operation(context.operation_key, "episode_generate", raw, register)
+            if result.get("ok"):
+                for entry in result["data"]["shots"]:
+                    if entry.get("jobId") and not entry.get("reused"):
+                        self.publish(self.get(entry["jobId"], project_id=context.project_id))
+            return result
+        except AppError as error:
+            return failure(error.code, str(error))
+
     def generation_mode(self) -> str:
         """The active video mode; only mock and live can register shot Jobs."""
         mode = getattr(self.config, "video_mode", "off")
@@ -957,7 +1074,18 @@ class JobService:
                     "estimate": estimate.model_dump(mode="json", by_alias=True) if estimate else None,
                 }
             )
-        limits = self._batch_limits(state, _preview_context(project_id), plan) if live else None
+        if live:
+            # A storyboard bound to an episode is registered against that episode's
+            # frozen bucket, so the dialog previews the same ceiling instead of a
+            # second per-Run allowance.
+            episode = episode_for_storyboard(state, record.id)
+            limits = (
+                self._episode_limits(state, episode, plan)
+                if episode is not None
+                else self._batch_limits(state, _preview_context(project_id), plan)
+            )
+        else:
+            limits = None
         total = sum((Decimal(row["estimate"]["amount"]) for row in rows if row["estimate"]), Decimal(0))
         currency = next((row["estimate"]["currency"] for row in rows if row["estimate"]), "CNY")
         return {
@@ -1138,7 +1266,20 @@ class JobService:
                 reused[shot_id] = previous
             else:
                 plan.append((shot, capabilities, request))
-        limits = self._batch_limits(draft, context, plan) if live else None
+        limits = None
+        if live:
+            # E3: on the 9/9 surface a storyboard bound to an episode spends the
+            # episode's frozen bucket, not a second per-Run allowance.
+            episode = (
+                episode_for_storyboard(draft, record.id)
+                if _generation_tools_version(run) >= EPISODE_TOOLS_VERSION
+                else None
+            )
+            limits = (
+                self._episode_limits(draft, episode, plan)
+                if episode is not None
+                else self._batch_limits(draft, context, plan)
+            )
         if authorization is not None:
             self._check_headless_authorization(
                 draft, context, record, version, order, plan, reused, limits, authorization
@@ -1154,6 +1295,238 @@ class JobService:
             limits,
             headless=authorization is not None,
         )
+
+    def _register_episode(self, draft, context, parsed) -> dict:
+        """Derive and commit one whole-episode batch inside the caller's transaction."""
+        _check_context(draft, context)
+        run = draft["runs"][context.run_id]
+        if run.get("readOnly", False):
+            raise AppError("READ_ONLY", "只读 Run 不能创建视频任务。")
+        mode = run.get("videoMode")
+        if mode not in {"mock", "live"}:
+            raise AppError("VIDEO_MODEL_UNAVAILABLE", "原 Run 的视频模式不开放分集生成。")
+        if not parsed.confirm:
+            raise AppError(
+                "CONFIRMATION_REQUIRED",
+                "分集批量登记需要显式确认：先展示逐镜头估算与集级额度，再提交。",
+            )
+        raw = draft["episodes"].get(parsed.episode_id)
+        if raw is None or raw["projectId"] != context.project_id:
+            raise AppError("EPISODE_NOT_FOUND", "当前项目中没有这个分集，未登记任何任务。")
+        episode = Episode.model_validate(raw)
+        # The frozen episode is the authority: every scene must be bound to exactly one
+        # storyboard whose shot count and duration agree with the plan.
+        targets = episode_shot_plan(draft, episode)
+        live = mode == "live"
+        if live:
+            self.check_live_configuration(self.config.video_provider)
+        plan, reused = [], {}
+        for target in targets:
+            board, shot = target["board"], target["shot"]
+            capabilities, request = self._derive_shot(draft, board, shot, live=live)
+            previous = latest_shot_version(board, board.current_version, shot.id)
+            if previous is not None and stored_request_fingerprint(previous.request) == request.fingerprint():
+                reused[shot.id] = previous
+            else:
+                plan.append((shot, capabilities, request))
+        limits = self._episode_limits(draft, episode, plan) if live else None
+        return self._commit_episode(draft, context, episode, targets, plan, reused, limits, live=live)
+
+    def _episode_limits(self, draft, episode, plan) -> RunLimitsSnapshot:
+        """The episode bucket after this batch, or a whole-batch rejection.
+
+        One episode spends at most ``jobCap`` Jobs and ``episodeCapAmount``; the usage
+        is recomputed from every attributed Job of the project, so a previous Run, a
+        redo or an unknown submission still occupies its share and a failure never
+        releases budget. Prices are never converted: a foreign-currency quote cannot be
+        covered by the frozen CNY bucket.
+        """
+        budget = episode.latest.shot_budget
+        usage = episode_budget_usage(draft, episode)
+        used_jobs = int(usage["usedJobs"])
+        used_amount = Decimal(usage["usedAmount"])
+        cap_jobs = int(usage["jobCap"])
+        cap_amount = Decimal(usage["episodeCapAmount"])
+        rate = Decimal(budget.per_shot_amount) / Decimal(5)
+        estimates = []
+        for shot, capabilities, request in plan:
+            if isinstance(capabilities, VideoCapabilitiesV4):
+                raise AppError(
+                    "EPISODE_COST_LIMIT",
+                    f"集级批量登记按 {budget.currency} 的冻结口径记账；镜头 {shot.id} 属于"
+                    f" {capabilities.provider}，不换汇，整批未登记。",
+                )
+            estimate = self._shot_estimate(capabilities, request)
+            if estimate.currency != budget.currency:
+                raise AppError(
+                    "EPISODE_COST_LIMIT",
+                    f"集级额度按 {budget.currency} 冻结；镜头 {shot.id} 的报价是 "
+                    f"{estimate.amount} {estimate.currency}，不换汇，整批未登记。",
+                )
+            if Decimal(estimate.unit_price) != rate:
+                raise AppError(
+                    "EPISODE_COST_LIMIT",
+                    f"镜头 {shot.id} 的每秒单价 {estimate.unit_price} {estimate.currency} 与"
+                    f"集冻结预算 {budget.per_shot_amount} {budget.currency}/5 秒不一致，整批未登记。",
+                )
+            job_amount, _, _, _ = self._provider_ceiling(capabilities.provider)
+            if Decimal(estimate.amount) > job_amount:
+                raise AppError("VIDEO_COST_LIMIT", "有镜头的估算超过单 Job 金额上限，整批未登记。")
+            estimates.append(estimate)
+        new_amount = sum((Decimal(item.amount) for item in estimates), Decimal(0))
+        if used_jobs + len(plan) > cap_jobs:
+            listed = "、".join(shot.id for shot, _, _ in plan) or "（无新任务）"
+            raise AppError(
+                "EPISODE_COST_LIMIT",
+                f"集级任务额度不足：已登记 {used_jobs} 个，加上本批 {len(plan)} 个超过 jobCap"
+                f" {cap_jobs}（新增镜头：{listed}）；整批未登记。",
+            )
+        if used_amount + new_amount > cap_amount:
+            detail = "、".join(
+                f"{shot.id}={item.amount} {item.currency}"
+                for (shot, _, _), item in zip(plan, estimates, strict=True)
+            )
+            raise AppError(
+                "EPISODE_COST_LIMIT",
+                f"集级成本额度不足：已用 {money(used_amount)} {budget.currency}，加上本批"
+                f" {money(new_amount)} 超过集上限 {money(cap_amount)}（{detail}）；整批未登记。",
+            )
+        return RunLimitsSnapshot(
+            max_job_cost=self.config.video_max_job_cost,
+            max_new_jobs_per_run=cap_jobs,
+            max_run_cost=budget.episode_cap_amount,
+            used_new_jobs=used_jobs + len(plan),
+            used_amount=money(used_amount + new_amount),
+            remaining_amount=money(cap_amount - used_amount - new_amount),
+            scope="episode",
+            episode_id=episode.id,
+        )
+
+    def _commit_episode(self, draft, context, episode, targets, plan, reused, limits, *, live: bool) -> dict:
+        """One timestamp, one transaction: every Job and ShotVersion, or none."""
+        plans = {shot.id: (capabilities, request) for shot, capabilities, request in plan}
+        timestamp = self.timestamp()
+        entries_by_board, shots = {}, []
+        grouped: dict[str, dict] = {}
+        for target in targets:
+            scene, board, shot = target["scene"], target["board"], target["shot"]
+            row = grouped.setdefault(
+                scene.id,
+                {
+                    "sceneId": scene.id,
+                    "storyboardId": board.id,
+                    "storyboardVersion": board.current_version,
+                    "shotIds": [],
+                },
+            )
+            row["shotIds"].append(shot.id)
+            shot_version_id, job_id = str(uuid4()), str(uuid4())
+            pair = plans.get(shot.id)
+            if pair is None:
+                # Reuse: the frozen request already has a Job for this shot version.
+                previous = reused[shot.id]
+                if previous.job_id not in draft["jobs"]:
+                    raise AppError("JOB_NOT_FOUND", "原镜头任务已不存在，请重新生成。")
+                job = parse_job(draft["jobs"][previous.job_id])
+                shots.append(
+                    {
+                        "shotId": shot.id,
+                        "sceneId": scene.id,
+                        "storyboardId": board.id,
+                        "order": shot.order,
+                        "mode": shot.mode,
+                        "durationSeconds": shot.duration_seconds,
+                        "shotVersionId": previous.id,
+                        "jobId": previous.job_id,
+                        "status": job.status,
+                        "reused": True,
+                        "estimate": previous.estimate.model_dump(mode="json", by_alias=True)
+                        if previous.estimate
+                        else None,
+                    }
+                )
+                continue
+            capabilities, request = pair
+            estimate = self._shot_estimate(capabilities, request) if live else None
+            if live:
+                job = (JobV5 if isinstance(request, VideoRequestV5) else JobV3)(
+                    id=job_id,
+                    context=context,
+                    operation_key=context.operation_key,
+                    request=request,
+                    request_fingerprint=request.fingerprint(),
+                    intent_fingerprint=request.intent_fingerprint(),
+                    capabilities=capabilities,
+                    policy=live_polling_policy(),
+                    created_at=timestamp,
+                    updated_at=timestamp,
+                    shot_ref=ShotRef(
+                        storyboard_id=board.id,
+                        storyboard_version=board.current_version,
+                        shot_id=shot.id,
+                        shot_version_id=shot_version_id,
+                    ),
+                    cost=CostRecordV3(estimate=estimate, limits=limits),
+                )
+            else:
+                job = Job(
+                    id=job_id,
+                    context=context,
+                    operation_key=context.operation_key,
+                    request=request,
+                    request_fingerprint=request.fingerprint(),
+                    capabilities=capabilities,
+                    policy=self.policy,
+                    created_at=timestamp,
+                    updated_at=timestamp,
+                )
+            draft["jobs"][job.id] = job.model_dump(mode="json", by_alias=True)
+            entries_by_board.setdefault(board.id, []).append(
+                ShotVersion(
+                    id=shot_version_id,
+                    shot_id=shot.id,
+                    storyboard_version=board.current_version,
+                    job_id=job.id,
+                    request=request.model_dump(mode="json", by_alias=True),
+                    estimate=estimate,
+                    created_at=timestamp,
+                )
+            )
+            shots.append(
+                {
+                    "shotId": shot.id,
+                    "sceneId": scene.id,
+                    "storyboardId": board.id,
+                    "order": shot.order,
+                    "mode": shot.mode,
+                    "durationSeconds": shot.duration_seconds,
+                    "shotVersionId": shot_version_id,
+                    "jobId": job.id,
+                    "status": job.status,
+                    "reused": False,
+                    "estimate": estimate.model_dump(mode="json", by_alias=True) if estimate else None,
+                }
+            )
+        # Same transaction as the Jobs: a crash cannot leave a half-registered batch,
+        # and each storyboard gains exactly one revision for the whole batch.
+        for board_id, entries in entries_by_board.items():
+            record = storyboard_in_state(draft, context.project_id, board_id)
+            draft["storyboards"][board_id] = with_shot_versions(record, entries).model_dump(
+                mode="json", by_alias=True
+            )
+        total = sum((Decimal(item["estimate"]["amount"]) for item in shots if item["estimate"]), Decimal(0))
+        currency = next((item["estimate"]["currency"] for item in shots if item["estimate"]), "CNY")
+        return {
+            "episodeId": episode.id,
+            "episodeVersion": episode.current_version,
+            "episodeRevision": episode.revision,
+            "simulated": not live,
+            "mediaAvailable": False,
+            "scenes": list(grouped.values()),
+            "shots": shots,
+            "totalEstimate": {"currency": currency, "amount": money(total)} if live else None,
+            "limits": limits.model_dump(mode="json", by_alias=True) if limits else None,
+        }
 
     def _check_headless_authorization(
         self, draft, context, record, version, order, plan, reused, limits, authorization

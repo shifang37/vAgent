@@ -9,7 +9,7 @@
 | 项目 | 冻结结果 |
 |---|---|
 | 存储 | E0 新建与迁移为 schema **6**；v5→v6 只加四个空集合 `episodes/scenes/characters/styles` |
-| 工具面 | **E0 保持 6/6**；E1 追加改编工具后为 **7/7**；E2 追加工人评分工具 `consistency_review` 后为 **8/8**（mock 与 live 同步，已实现），并保留 7/7、6/6、5/5、4/4、3/3、2/2、1/1 冻结变体 |
+| 工具面 | **E0 保持 6/6**；E1 追加改编工具后为 **7/7**；E2 追加工人评分工具 `consistency_review` 后为 **8/8**（mock 与 live 同步，已实现）；E3 追加 `episode_generate` 与 `shot_redo` 后为 **9/9**（冻结 8/8），并保留 7/7、6/6、5/5、4/4、3/3、2/2、1/1 冻结变体 |
 | 恢复 | 继续按完整 `toolFeatures` 身份选择冻结注册表；新版本不得改写旧 prompt/规则字节，未知组合返回 `RESUME_CONFIG_CHANGED` |
 | execution/context/checkpoint | 保持 **3 / 2 / 1**，不为分集引入第二套等待状态机 |
 | Job/Request | 沿用 **v6** 通用供应商请求；M5 不新增 Job 契约版本，逐镜头登记仍走 `shot_generate` |
@@ -103,6 +103,15 @@ E0 提交 [v5 合成基线](../tests/fixtures/m5/manifest.json)：两份历史�
 - 实际账单在取得凭据前始终 `unknown`，估算不得称为扣费；
 - 重做只由用户显式发起，且只影响目标镜头（沿用 M2 语义）。
 
+**E3 实现细化（2026-10-22，9/9）**：E3 把上述集级额度落到 9/9 工具面，证据见 [E3 验收](./M5_E3_ACCEPTANCE.md)。
+
+- **两个新工具**：`episode_generate`（整集批量登记，`confirm=true` 必填）与 `shot_redo`（只由用户显式发起的逐镜头重做，带分镜 `expectedRevision`）。`await_job` 的集合等待上限由 16 提到 **20**，因此一集最多 20 个任务可在一次等待里交付。
+- **计划即权威**：登记事务内重算分集 → 场记 → 分镜 → 镜头；任一场记未绑定分镜用 `SCENE_CONFLICT`，已绑定分镜的镜头数或时长与冻结场记不一致分别用 `EPISODE_SHOT_BUDGET` / `EPISODE_DURATION_LIMIT`，全部整批拒绝。分镜镜头数、镜头时长与分集总数必须与冻结 `ShotBudget` 一致，因此“登记的就是预算里的”可证明。
+- **集级额度跨调用累计**：按 Job 的 `shotRef.storyboardId` → 场记 → 分集归属，统计该项目内**所有 Run** 的已登记真实 Job（含重做、`unknown` 与失败任务，失败不释放）。`jobCap`、`episodeCapAmount` 同时生效；任一越界返回 `EPISODE_COST_LIMIT` 并列出超限镜头与桶。集级额度只按冻结的 CNY 记账，**不换汇**：`Kling`/`fal` 的 USD 报价、或每秒单价与集冻结 `perShotAmount/5` 不一致时同样整批拒绝（`EPISODE_COST_LIMIT`）。
+- **额度快照落在 Job 上**：`RunLimitsSnapshot` 增加可选 `scope=run|episode` 与 `episodeId`（默认 `run`，旧记录逐字节不变）。集级 Job 的 `cost.limits` 记录该集冻结的 `jobCap`/`episodeCapAmount`/已用与余量；Store 每次提交都按整库重算集级任务数与估算，并核对 `shotRef` 必须指向该集已绑定分镜、币种与单价必须与冻结预算一致，篡改返回 `JOB_CONFLICT` / `EPISODE_COST_LIMIT`。该字段是同一快照类型的加法扩展，不新增 Job 契约版本。
+- **9/9 的 Run 额度**：9/9 Run 可以把一集的整批 Job 放在同一 Run；这些 Job 不再受每 Run 4 个限制，改由集级 `jobCap` 约束。同一 Run 内其余非集级真实 Job 仍受冻结的每 Run 4 个限制，6/6 及更早工具面的 Run 完全不变。
+- **`episode_read` 的 `generation`**：返回 `ready/problems`、逐镜头 `unregistered/pending/delivered/failed` 状态（含 `jobId`、`shotVersionId`、`mediaId`、`estimate`、`error`）、逐场分镜与集级余量。读取路径不因场记未绑定或分镜不一致而失败，只如实报告问题。
+
 ## 6. 角色与风格一致性
 
 E2 已按下列规则实现，证据见 [E2 验收](./M5_E2_ACCEPTANCE.md)。
@@ -135,6 +144,8 @@ E2 已按下列规则实现，证据见 [E2 验收](./M5_E2_ACCEPTANCE.md)。
 
 沿用：`VERSION_CONFLICT`（分集/场景 revision 竞争）、`VIDEO_RUN_COST_LIMIT`、`VIDEO_COST_LIMIT`、`SOURCE_NOT_FOUND`、`SOURCE_VERSION_NOT_FOUND`、`CONFIRM` 语义走工具参数而非新码。
 
+E3 未新增错误码：集级任务数（`jobCap`）或金额（`episodeCapAmount`）耗尽、币种或单价与冻结预算不一致，统一返回 `EPISODE_COST_LIMIT`（“集级额度不足，整批拒绝”），消息中列出超限镜头与桶；未绑定分镜的场记沿用 `SCENE_CONFLICT`，分镜与冻结场记的镜头数/时长不一致沿用 `EPISODE_SHOT_BUDGET` / `EPISODE_DURATION_LIMIT`。
+
 ## 8. 明确排除
 
 - **9:16 竖屏与竖屏供应商能力**：不新增画幅/裁切字段，不选 mock 的 `1080p/9:16` 条目；竖屏是后续独立话题。
@@ -156,5 +167,5 @@ E2 已按下列规则实现，证据见 [E2 验收](./M5_E2_ACCEPTANCE.md)。
 
 - **E1**：`text-split-zh-v1` 确定性、对白零丢失、预算合成、`episode_plan`/`episode_save`/`episode_read` 工具与 7/7 冻结变体、6/6 与 7/7 共存恢复、v5→v6 真实迁移与字节备份、3 篇固定样例离线可复现（模型调用=0）。
 - **E2**：角色圣经与参考图导入、跨镜头一致性引用、缺素材拒绝、人工一致性评分记录。已交付：场景绑定、`characterIds`→冻结素材、`style-prompt-zh-v1`、`episode_read` 证据与 `consistency_review`（tools/rules 8/8，冻结 7/7），见 [E2 验收](./M5_E2_ACCEPTANCE.md)。
-- **E3**：集级批量登记与预算原子性、逐镜头重做隔离、集合等待、失败隔离、submit 与预算一致（真实样本需单独授权）。
+- **E3**：集级批量登记与预算原子性、逐镜头重做隔离、集合等待、失败隔离、submit 与预算一致（真实样本需单独授权）。已交付：`episode_generate`/`shot_redo` 与 tools/rules **9/9**（冻结 8/8）、集级额度跨 Run 累计与 Store 重算、20 成员集合等待、`episode_read.generation`，见 [E3 验收](./M5_E3_ACCEPTANCE.md)。
 - **E4**：离线端到端套件、经批准的最小真实样本成片、CLI/Web 流程与验收文档；未做真实样本的能力保持标注。

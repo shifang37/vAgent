@@ -28,14 +28,17 @@ from vagent.video.consistency import (
     style_prompt,
 )
 from vagent.video.contracts import (
+    EPISODE_JOB_CAP,
     SHOT_DURATION_MAX,
     SHOT_DURATION_MIN,
     WAN_PRICE_VERSION,
     ArtifactRef,
     Currency,
     Money,
+    parse_job,
 )
-from vagent.video.storyboards import validate_source_refs
+from vagent.video.storyboards import Storyboard, latest_shot_version, validate_source_refs
+from vagent.video.views import delivered_media
 
 # --- Frozen M5 E0 constants -------------------------------------------------
 # The text-adaptation contract id is stored in every EpisodeVersion, so a later
@@ -53,8 +56,9 @@ SCENE_MAX_SHOTS = 6
 SCENE_LIMIT = 12
 SCENE_MAX_SECONDS = SHOT_DURATION_MAX * SCENE_MAX_SHOTS
 # Episode-level batch ceiling. The frozen per-Run ceiling (LIVE_JOBS_PER_RUN=4)
-# keeps constraining 6/6 and older tool surfaces; M5 publishes both numbers.
-EPISODE_JOB_CAP = 20
+# keeps constraining 6/6 and older tool surfaces; E3 registers one episode's whole
+# batch under the shared ``EPISODE_JOB_CAP`` (imported above) and re-checks it on
+# every commit instead of the per-Run 4.
 EPISODE_COST_CAP = "60.00"
 SHOT_ESTIMATE_AMOUNT = "3.00"
 SHOT_ESTIMATE_CURRENCY: Currency = "CNY"
@@ -508,6 +512,281 @@ def _episode_record(state: dict, episode_id: str) -> Episode:
     return Episode.model_validate(raw)
 
 
+# --- E3: one episode's shots and its frozen ceiling -------------------------
+
+
+def _amount(value) -> Decimal:
+    return Decimal(str(value))
+
+
+def _money(value) -> str:
+    return format(Decimal(value), ".2f")
+
+
+def episode_scene_rows(state: dict, episode: Episode) -> tuple[list[dict], list[dict]]:
+    """The episode's frozen scenes with the one storyboard that renders each.
+
+    Returns ``(rows, problems)`` instead of raising: the read view has to stay usable
+    before every scene is bound, while registration demands a complete plan. Each row
+    freezes ``scene``/``frozen``/``board`` and the board's current ordered ``shots``.
+    Problems use the frozen M5 error codes so the caller can surface the first one.
+    """
+    rows, problems = [], []
+    for reference in episode.latest.scenes:
+        raw = state["scenes"].get(reference.scene_id)
+        if raw is None:
+            problems.append(
+                {
+                    "code": "SCENE_NOT_FOUND",
+                    "sceneId": reference.scene_id,
+                    "message": "分集引用的场记已不存在。",
+                }
+            )
+            continue
+        scene = Scene.model_validate(raw)
+        frozen = next((item for item in scene.versions if item.version == reference.scene_version), None)
+        if frozen is None:
+            problems.append(
+                {
+                    "code": "SCENE_CONFLICT",
+                    "sceneId": scene.id,
+                    "message": "分集引用的场记版本已不存在。",
+                }
+            )
+            continue
+        board = None
+        board_raw = state["storyboards"].get(scene.storyboard_id or "")
+        if board_raw is not None and board_raw.get("projectId") == episode.project_id:
+            board = Storyboard.model_validate(board_raw)
+        if board is None:
+            problems.append(
+                {
+                    "code": "SCENE_CONFLICT",
+                    "sceneId": scene.id,
+                    "message": f"场记「{frozen.heading}」还没有绑定分镜。",
+                }
+            )
+            continue
+        shots = sorted(board.versions[-1].shots, key=lambda item: item.order)
+        if len(shots) != frozen.shot_count:
+            problems.append(
+                {
+                    "code": "EPISODE_SHOT_BUDGET",
+                    "sceneId": scene.id,
+                    "message": (
+                        f"场记「{frozen.heading}」已绑定的分镜有 {len(shots)} 个镜头，"
+                        f"冻结计划是 {frozen.shot_count} 个。"
+                    ),
+                }
+            )
+        elif sum(item.duration_seconds for item in shots) != frozen.duration_seconds:
+            problems.append(
+                {
+                    "code": "EPISODE_DURATION_LIMIT",
+                    "sceneId": scene.id,
+                    "message": (
+                        f"场记「{frozen.heading}」已绑定的分镜合计 "
+                        f"{sum(item.duration_seconds for item in shots)} 秒，"
+                        f"冻结计划是 {frozen.duration_seconds} 秒。"
+                    ),
+                }
+            )
+        rows.append({"scene": scene, "frozen": frozen, "board": board, "shots": shots})
+    return rows, problems
+
+
+def episode_shot_plan(state: dict, episode: Episode) -> list[dict]:
+    """Every registered shot of the episode, ordered by scene then shot.
+
+    Registration is the strict caller: an unbound scene, a storyboard whose shot
+    count/duration disagrees with the frozen scene, or a total that disagrees with the
+    frozen ``ShotBudget`` rejects the whole batch before anything is written.
+    """
+    rows, problems = episode_scene_rows(state, episode)
+    if problems:
+        detail = "；".join(problem["message"] for problem in problems)
+        raise AppError(problems[0]["code"], f"{detail} 未登记任何任务。")
+    targets = [
+        {"scene": row["scene"], "frozen": row["frozen"], "board": row["board"], "shot": shot}
+        for row in rows
+        for shot in row["shots"]
+    ]
+    total = len(targets)
+    if total != episode.latest.shot_budget.shot_count:
+        raise AppError(
+            "EPISODE_SHOT_BUDGET",
+            f"分集共 {total} 个已绑定镜头，冻结预算是 {episode.latest.shot_budget.shot_count} 个；"
+            "未登记任何任务。",
+        )
+    durations = sum(target["shot"].duration_seconds for target in targets)
+    if durations != episode.latest.target_duration_seconds:
+        raise AppError(
+            "EPISODE_DURATION_LIMIT",
+            f"分集镜头合计 {durations} 秒，冻结目标是 {episode.latest.target_duration_seconds} 秒；"
+            "未登记任何任务。",
+        )
+    return targets
+
+
+def episode_boards(state: dict, episode: Episode) -> set[str]:
+    """The storyboard IDs bound to this episode's scenes (tolerant of gaps)."""
+    boards = set()
+    for reference in episode.latest.scenes:
+        raw = state["scenes"].get(reference.scene_id)
+        if raw is not None and raw.get("storyboardId"):
+            boards.add(raw["storyboardId"])
+    return boards
+
+
+def episode_for_storyboard(state: dict, storyboard_id: str) -> Episode | None:
+    """The episode whose scene bound this storyboard, if any."""
+    for raw in state["scenes"].values():
+        if raw.get("storyboardId") != storyboard_id:
+            continue
+        episode_raw = state["episodes"].get(raw["episodeId"])
+        if episode_raw is None:
+            return None
+        return Episode.model_validate(episode_raw)
+    return None
+
+
+def episode_budget_usage(state: dict, episode: Episode) -> dict:
+    """The episode's frozen ceiling plus what its already-registered Jobs occupy.
+
+    Attribution is provable from the Store: a live Job belongs to the episode when its
+    ``shotRef`` names a storyboard bound to one of the episode's scenes. Runs, redoes
+    and unknown submissions all stay attributed, so a failure never releases budget.
+    Amounts only count the episode's frozen currency; a foreign-currency Job is
+    reported separately and never converted.
+    """
+    budget = episode.latest.shot_budget
+    boards = episode_boards(state, episode)
+    cap_jobs = min(int(budget.job_cap), EPISODE_JOB_CAP)
+    cap_amount = _amount(budget.episode_cap_amount)
+    used_jobs, used_amount, foreign = 0, Decimal(0), []
+    for raw in state["jobs"].values():
+        if raw.get("mode") != "live" or raw["context"]["projectId"] != episode.project_id:
+            continue
+        shot_ref = raw.get("shotRef")
+        if not shot_ref or shot_ref.get("storyboardId") not in boards:
+            continue
+        used_jobs += 1
+        estimate = (raw.get("cost") or {}).get("estimate") or {}
+        if estimate.get("currency") == budget.currency and estimate.get("amount") is not None:
+            used_amount += _amount(estimate["amount"])
+        else:
+            foreign.append({"jobId": raw["id"], "currency": estimate.get("currency")})
+    return {
+        "jobCap": cap_jobs,
+        "usedJobs": used_jobs,
+        "remainingJobs": max(0, cap_jobs - used_jobs),
+        "currency": budget.currency,
+        "perShotAmount": budget.per_shot_amount,
+        "episodeCapAmount": _money(cap_amount),
+        "usedAmount": _money(used_amount),
+        "remainingAmount": _money(max(Decimal(0), cap_amount - used_amount)),
+        "priceVersion": budget.price_version,
+        "shotCount": budget.shot_count,
+        "targetDurationSeconds": budget.target_duration_seconds,
+        "foreignCurrencyJobs": foreign,
+    }
+
+
+def _shot_status(job, delivered: bool) -> str:
+    """One shot's delivery state from its latest Job; never inferred from a request."""
+    if job is None:
+        return "unregistered"
+    if delivered:
+        return "delivered"
+    if (
+        job.status in {"failed", "unknown", "download_failed"}
+        or job.query_state == "paused"
+        or getattr(job, "runtime_block", None) is not None
+    ):
+        return "failed"
+    return "pending"
+
+
+def episode_generation(state: dict, episode: Episode) -> dict:
+    """Per-shot registration/delivery evidence and the episode's remaining ceiling.
+
+    This is the read-side projection shared by ``episode_read`` and the acceptance
+    tests. It never raises on an incomplete episode: unbound scenes and mismatched
+    storyboards become ``problems`` so the caller can fix the plan first.
+    """
+    rows, problems = episode_scene_rows(state, episode)
+    jobs = {job_id: parse_job(raw) for job_id, raw in state["jobs"].items()}
+    scenes, shots = [], []
+    counts = {
+        "planned": episode.latest.shot_budget.shot_count,
+        "registered": 0,
+        "delivered": 0,
+        "failed": 0,
+        "pending": 0,
+        "unregistered": 0,
+    }
+    for row in rows:
+        board = row["board"]
+        entries = []
+        for shot in row["shots"]:
+            previous = latest_shot_version(board, board.current_version, shot.id)
+            entry = {
+                "shotId": shot.id,
+                "sceneId": row["scene"].id,
+                "storyboardId": board.id,
+                "storyboardVersion": board.current_version,
+                "order": shot.order,
+                "mode": shot.mode,
+                "durationSeconds": shot.duration_seconds,
+                "shotVersionId": None,
+                "jobId": None,
+                "status": "unregistered",
+                "mediaId": None,
+                "mediaAvailable": False,
+                "estimate": None,
+                "error": None,
+            }
+            if previous is not None:
+                job = jobs.get(previous.job_id)
+                media_id, available = delivered_media(job)
+                entry.update(
+                    {
+                        "shotVersionId": previous.id,
+                        "jobId": previous.job_id,
+                        "status": _shot_status(job, available),
+                        "mediaId": media_id,
+                        "mediaAvailable": available,
+                        "estimate": previous.estimate.model_dump(mode="json", by_alias=True)
+                        if previous.estimate
+                        else None,
+                        "error": job.error.public() if job is not None and job.error else None,
+                    }
+                )
+                counts["registered"] += 1
+            counts[entry["status"]] += 1
+            entries.append(entry)
+            shots.append(entry)
+        scenes.append(
+            {
+                "sceneId": row["scene"].id,
+                "heading": row["frozen"].heading,
+                "storyboardId": board.id,
+                "storyboardVersion": board.current_version,
+                "shotCount": len(row["shots"]),
+                "durationSeconds": row["frozen"].duration_seconds,
+                "shotIds": [shot.id for shot in row["shots"]],
+            }
+        )
+    return {
+        "ready": not problems,
+        "problems": problems,
+        "budget": episode_budget_usage(state, episode),
+        "scenes": scenes,
+        "shots": shots,
+        "counts": counts,
+    }
+
+
 def _candidate_scene(item: dict) -> dict:
     """The frozen fields of one requested scene, as it would be stored."""
     dialogue = []
@@ -757,6 +1036,7 @@ def read_episode(args: dict, state: dict, project_id: str) -> dict:
             "scenes": [],
             "style": None,
             "consistency": None,
+            "generation": None,
         }
     else:
         episode = Episode.model_validate(state["episodes"][summaries[0]["episodeId"]])
@@ -818,6 +1098,7 @@ def read_episode(args: dict, state: dict, project_id: str) -> dict:
         "episodes": summaries,
         "style": style,
         "consistency": episode_consistency(state, episode),
+        "generation": episode_generation(state, episode),
     }
 
 
