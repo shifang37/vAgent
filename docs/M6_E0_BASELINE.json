@@ -1,0 +1,257 @@
+{
+  "baseline": "m6-e0",
+  "purpose": "Pin the schema 6 contract shapes, frozen limits and local FFmpeg facts M6 extends.",
+  "submit": 0,
+  "modelCalls": 0,
+  "providerRequests": 0,
+  "schemaSha256": {
+    "vagent.storage": {
+      "Artifact": "94e5f1ddf057f1dce9d0d340e651a10d11e288523949e61160ed1aea70a935ec",
+      "ArtifactVersion": "0a103780c0ab11f9945a1a656db69f4557182b89b4df0c7ce4d382fb5ac6a19e",
+      "ContentCheck": "60fa919b06c418f5ea9ec9bbecc33a8e105ffd4f56f0113b63f6e58c81538b45",
+      "Database": "188d2ea12bdbc695e5723207c5abed5ef5bf4c24f15b820e12d3aaa81979105c",
+      "DatabaseV1": "a535912d6aff0268e71123cfa9a577b95e89410890a9807579e54e7b2b2ade11",
+      "DatabaseV2": "5ff285275729c25e4f29945b34a564c7e9890b9c3f0db56845c1dafaa1592603",
+      "DatabaseV3": "d499e15db5f81fc18b0ba59eb5e56f4f7da97f0fffa64edbf65e539a459024ec",
+      "DatabaseV4": "8e4504fbd25805dc7ec64dcac91c0d6ec0a48fb28a0be28a2c91854aa93b45cc",
+      "DatabaseV5": "1f894b5443afa6f9e3414e065db617af7c8c614d71db15225ed9ae46327dc7f2",
+      "ErrorDetail": "fb3b409b0f6cf861aa6019d0ae601bbb90af22820156cb9bec69678eb54506ca",
+      "Failure": "185732956bd40a56cfba80f8342ef7569bccee9d47d8fb9e42b66385f3449ea8",
+      "ModelCall": "af88f9e1f39868d4b8dad93742876b09acf3895cd68c41f2267a1ef6504de10c",
+      "Operation": "18c143f7a47f4d163b9b2bd267d1b461c3ffc22b4ed68ddde9cedb46f370e3ca",
+      "PlanStep": "cc333bea6f24e7a844f43af08f75ad96e9daa13a1c40866666a64a5ee4bdb22f",
+      "Project": "0493a6db906452dffd4bcc97a7d846d11a4d498fa3bb2d2c333b1a728705b128",
+      "Record": "748cb42a2e3ee881bcf40915290ebea2513b8ff5a9cfeb4e310a0b5be5c41fcb",
+      "RunRecord": "2260d7954463841e4c9edb86210e9abd8d2d67c5d61183607e7819979cc0adcc",
+      "RunRecordV1": "0716f2cd795a748eddc125218f2e50c8b45497d7d3e3cffba1486c5e40cb1b88",
+      "RunRecordV2": "abac4acffbdbb1b0606e300c89c23756ef89a31bc76e5ab0ad959abe8540d079",
+      "SavedPolicy": "aad15de662b9b522f2c95fe35562dc62c775bb3e4db2119552e8934309dba6a8",
+      "Session": "b308b3c295d18133046ed49f369eeaa814320118714dc11e064ba6d922103d5b",
+      "StoredMessage": "ea82f3565b1711af93e84ba694c4bbbb8ed14ba862a0afb3f5121b57378fc2ef",
+      "Success": "bfadd28a3a011404fc5d14748039711562d4a1ba41cb6c66c0f5f2fa4e045db5"
+    },
+    "vagent.video.contracts": {
+      "ActualCost": "25a9c270260467cf292e104f637959b27dbb09e0d4c5eaede30e4cdbf643fc2d",
+      "AmountLimit": "2a2f935d56047b6a4a99755a6cab4fe463821bb7d7702d80cd3a91ebecda61d0",
+      "ArtifactRef": "631971f9602ac4fc846b0880d39c273467e93b96588a0eddcfc6e6e1890a3786",
+      "CostEstimate": "6378622aac8af1bb320cbd4cde5961ef753f523fc781115696ba8283ad89a036",
+      "CostRecord": "161a4bad50ceebddcf53cf326dd75a2e1cb2918f8b4314ce7315813950ed3ed8",
+      "CostRecordV3": "ed667bc1ee12e6d8a6d535362d1774abab7df936fe53a1e95421d97f4cc9437e",
+      "DownloadPolicy": "2b048af500b1cbe5c05e69d39f22dbb178e9a3f4d479aa8ee73b2af84b337fa3",
+      "DownloadRecord": "34a3eff3ca9e989175528168a427f0a9b610b9582997a282b4068f408ddb7b99",
+      "EpisodeGenerationArgs": "659e6e99551ed28e1774091e7ab9290adb733d6288347d17f18d2b9f081dfaab",
+      "FalParameters": "b2d4dedcb31112daf77a359bddc158ba812d77ddb38cada721f7ee5726dcab70",
+      "FrameRate": "d0d9aabec8a9d98e882f7d29359cf5254606edef973995f6237ece039adbef8b",
+      "ImageInputRule": "5da0c4ba01da3fdb224d0b6e4921ed0ae2e1a6472bd46a0fc18a5af7178e49eb",
+      "ImageSize": "3f08e52ea23ee6a8ba6e0b9571b0abd824c98d8a2d8fcf1709a9f5525930bbbe",
+      "Job": "1f0df0c375d3b752b355019d867bdabea17a7e68079cf98c0d91073c69626f77",
+      "JobCostV6": "febd21e2c4337221849f33e6a491da04ec86db11afc6a6e5e2fc2913f3509d5c",
+      "JobError": "46822661110fe79f54230c64a97fd495b99c7933e1ff45f9db5eed8695965bfc",
+      "JobErrorV2": "7096a56236661586ffab315168ad93b81a41cd8183f3565d1222fd9fd119fd0a",
+      "JobResult": "958ca7e7e36162344be7962da4c969920799408bdde9f2f84a0ed32eea0366dd",
+      "JobResultV2": "3be0f192ae10f1371ba65a7e1718be54e21b5a8f29e13db881ac6b203722226d",
+      "JobResultV3": "bb6e9c1fc6275e9748491cc51d5728c1b41a454ae445693a830b87feccde2dd6",
+      "JobV2": "f41fe15334ea353f3fb96cd12b3735e7d41b2c5f26983b2daf6ee38df3807ea6",
+      "JobV3": "0f23c2af9b11b1e2eb29258608b93b526e1764ee7a2bc2bd0595e8014dd60836",
+      "JobV4": "e4eea30af7325c5232ce3741cc9dd679a4073ff94549903f8801ef1eba20fe31",
+      "JobV5": "90ec7895f87ccbb732b2a7c5454070694b3186d53f2850acbbaf8a0f196a4787",
+      "JobV6": "e7c0b8993a148d04ad8f6c459b99edc1aab46865563e613272fbf785ff8ec431",
+      "KlingParameters": "836ffa15c157da8b467038b0c48e7e118c283babc147e5bd2b227199c2cb248c",
+      "MediaAsset": "df8d310290a1145b1afb0a9964915eb027ce6ab66282c78c3d9997985a74ec38",
+      "MediaAvailability": "ae9812b1f5fb6c4d460fdf0b60d7da8748abbdd14d6d9e2e7c1ba9e6c166f1d1",
+      "MediaMetadata": "861e0d22e1bafdc59d0f1dd0e1b3b55fba12f5226783dd743f5396b4a96840ec",
+      "MediaRef": "4fd6602fa2b7cd0a5c83239ec9da22a865c9e480e7276ea90c3d3d5f802997cc",
+      "PollingPolicy": "47bffded24da40dce31ffb52e6847617bb5dd141ec40cf4a48abd605c158b5c2",
+      "PreparedMedia": "8975ded3e88187cf09d02b74a4034d1dc183605625f22acc3bcf90336f286292",
+      "ProviderActualCost": "4c70b2fab3f133d7d50c9ac225104f0935de68d6feae0c82a6289b73620e9e17",
+      "ProviderOutput": "a1e8208346257d0d152c6b65f827f008e6fd7d09b572c0590087f7ed31fa4b05",
+      "ProviderOutputV2": "8a43ab48ce18374a538729b303b7e64fc5338545124feebc13e7ad3093c65894",
+      "ProviderPrice": "f53acf64331eb67b908285a6105df5c28e3f3d0f580d837a65a91385334f4eef",
+      "ProviderRate": "c5c9e063ed7394af3835a73313c5e8cb76cf92334b7fcb7e5af34c999328258c",
+      "ProviderTaskHandle": "f073bd7552e89e7eb5177ed9158da84df07ddb9166e41befb0250c4e271afe73",
+      "ProviderTaskHandleV2": "9673424b61e5c027dfb10e68527a9c4aba8cf21b1506f88592cf3bf4f9640c0f",
+      "ProviderTaskHandleV3": "cbecd418aa095653ac8d67375c2aad9ad273ff93512a80af40f839ea07c4189e",
+      "ProviderTaskSnapshot": "0cfa386128430003e7e1e1608d3683e13daf1efe7a46e6901b4b332562c2673e",
+      "ProviderTaskSnapshotV2": "4d70435f82ce55aca095eb38b3eda1e62888d37998ee5db42b97a43d1c270875",
+      "ProviderTaskSnapshotV3": "feb2b5c4721ec0ca4632156ec62380dab1971c967a8df9f5753580141fb4784a",
+      "ProviderTimes": "85ff7b8a4fbe2264846bd8f613e7a15f66c883473762c3a4ed1ac70b0c9cc842",
+      "ProviderUsage": "142090eafd68ddfe7a8a33b15bd0423180940ecc166506edb72b6f64c0786182",
+      "ResourceEstimate": "5de18ef7160c3ce63cc94144010624822aee7caa6dd9262435813ecd9196773b",
+      "ResourceRate": "34060fe3969ab7c86645934d2426a1fa271e60e58d01496c607379815fd284e7",
+      "ResultSource": "c49ac8028695cbea43b3c4cb83f52435d9b36de0c1ad7381147f7203c3838ad0",
+      "RunLimitsSnapshot": "6c40cdecd4366e5ae668fe6df14e35f66daf309e04d1dd80c2afefeaf1c6d0b9",
+      "RunLimitsSnapshotV2": "d8d06e42204c98cefe6823b20dbf1821820eeee965e42d08d76581e09a390d04",
+      "RuntimeBlock": "fe13b06568f24df3253b4e3a4af20021d6f72882993b863d45779f929846048b",
+      "ShotGenerationArgs": "1e6d284ac42e52236b4d29ca28839ac1bbb5d4b05606ca5ecc8dc7ca1c45942c",
+      "ShotMediaInput": "74ba15e81089b77d9ce98ce6945cea10534fbb4d3a1cb54ee098047daa913da3",
+      "ShotRedoArgs": "d28cfabfdc85aa094a5e18a12bddc908f08bd1397bc3b8a2dc0d233c2dd33e6c",
+      "ShotRedoToolArgs": "523a1b5e034eb913f9a171c341235dc6145aa59b2a5000ea6dc0f2292b92d416",
+      "ShotRef": "47f386f1f6455fc35e8c8ae50f24be6c9df40880a1f2759b4900eff9aafab9c0",
+      "ShotSpecV3": "1e9d31ac0a9b3b5c662cbc03b0c16c2323d3bef93b2e83cef6e265892c24c94b",
+      "VideoCapabilities": "c9800c1fbf7936b26970f98bbd521085315a92525332b27aef0c96e252700eff",
+      "VideoCapabilitiesV2": "f00b17e2d2abb3cf840173b876e19787085021da62d2ab3e997cabd7c1adca74",
+      "VideoCapabilitiesV3": "397f65df3aeb5ef5552bb1bcddb46113b348a0b54e31e5353dd3245a4c08fa42",
+      "VideoCapabilitiesV4": "8de13551ddcf0c2e1e33f70c80d1d7588bd1b678982f602403d0cba041666397",
+      "VideoIntentV2": "ea64359d6b912d0fda56ff903413fc5c15a55e5723dc0f77a67cc73a757a8b04",
+      "VideoIntentV6": "5272ba385c7987979cef89230c28fdc9706db2e92a6db3b0ca96819ded1e4c58",
+      "VideoPrice": "16971511ed41d8f9d5370d682eaf54fd8f3873c796ee1e51e9a0da121b32fef4",
+      "VideoRequest": "2ddac1ea4b750010d9551d4261e091444feca230fb321baaf318f4050714619d",
+      "VideoRequestV2": "a47bc531bb260cbedeadc3959ca86ca129db6cdb10e5f1f6828f3522c95d8cfc",
+      "VideoRequestV3": "7f1d8bb0b0fbc92f1de6fe108daab9dbe367cfc2795c061d8d11270161198227",
+      "VideoRequestV4": "8a9a0980ab9ef8fef1b9e27563e3d083683627506ea68056e595056467e77090",
+      "VideoRequestV5": "1ff290f9dd194ef227cb07dca1869e8827f95f358d360044a9f424bc7973d06a",
+      "VideoRequestV6": "a207f8a12245262c0d8444306e35d1cfc1ce4676526ddc2b0e908ecbaaf446bb",
+      "VideoSpec": "c828756ece14e49b3ddd36c9f1d2e6c0b5915ded0ba302673625d603ce2b976c",
+      "VideoSpecV2": "3de9767d3650172a4cda58ee29ec009c137a9c04ca15a10abf5f927e1c004947",
+      "WanParameters": "e3de47177359ddf1f99d1939782b0096b6a7fcf66b46bd0e94f4fa0b0d56e096",
+      "WanParametersV3": "8ba300326e08259d60687f82ed0a1c94a9a3c17975d0b0f4be885f56ea731a84"
+    },
+    "vagent.video.films": {
+      "Film": "52682b4a00860eb2df0560627162a8a54e9ee2e806a988932b52b67a9ecd9415",
+      "FilmAssembly": "3157ed40b7be1978b77143a10ced8873b4acc3437577f2cb1e4f1189e8b8e23e",
+      "FilmEngine": "f560c04ce2cdb36592cac7077e537fe956c530d27d33082188e5e9adcb15e7d8",
+      "FilmInput": "5632db79268307e0a1da8e5f7f443531e09f63a45b78c53cf839e8f2f6711172",
+      "FilmMedia": "4b46f4d89b59bd2114c8cda55ca02a9083c1466696a2a39e057b067b68625708",
+      "FilmNormalization": "ce48f04b73c281b805716b3d0677ef4f4a110d5b98d15cb7ee7715ccd09c6c78",
+      "FilmSegment": "ef5b4eebd87398975bc01a5446c365c9110f3bfb904db02247fa7cfafc31f96e",
+      "FilmVersion": "dbcb0e1b8e2c84e4812ef4fb560233dd39233bab652dbfcd2c8b905b4a214455",
+      "Rational": "cce0defbbd41c9ddb04340875163516dd801ae7a9fa16b6a3b03b528b9b2dcd0"
+    },
+    "vagent.video.episodes": {
+      "Character": "69daaa098b102b7f1a0eb64e43894668fc870e3742fe1925766cce7704628974",
+      "CharacterLink": "51cafaf198ed5c1ad27fdfe636caaaab5ff13d145a2a4b37f1d68f9c3e9f6c96",
+      "CharacterVersion": "d23f621ff88135e1f0090dbb93d443ea210dbbeaf38feb89ae928b5a89a567b7",
+      "Episode": "115f9efb3e7f8906bf75dabb793a663e87c3cc31e4a167130ceaf76246129b00",
+      "EpisodeVersion": "93d01b99ff35b348ec9f901d1d1d66e36882849a76d34c385544fe350a5fef7f",
+      "Scene": "1608ed987ebbfd992d1600dc4d51c43dc32cb04431311d7e53142c61133d7a8b",
+      "SceneDialogue": "811ce3e319b6832d095748a5a884064676a26f5651d951e60bdade7727bf612f",
+      "SceneRef": "f1dc29a975af5b521615c99c673c8c92c1f24f929a8b962719d834b9827b34f3",
+      "SceneVersion": "e7302c1b622b5f958c2818163bace18bae55ba7057392a8f40921b87a47c1254",
+      "ShotBudget": "fcc3106974aca11c04aa694d08347bc4abbf95e4dff668930905fe16b34d163e",
+      "Style": "c5b182fcf5396dc92e684ce00cf810e9d5676dd1e5acc5c6dceb6e7a978d1e9e",
+      "StyleVersion": "9a0513a69d1c122b9275bdebe0739a25f29313f34a5e6d9e50686f8e24e6a36c",
+      "VoiceProfile": "9307773f7955f00f2305a275b439647fe67c4e10131e37091f844fe4ed4e2db5"
+    },
+    "vagent.video.storyboards": {
+      "Asset": "6a6b13647d1d71a92e2a28ca1ab271809cdd34ff738e950532bac1e0c85716a5",
+      "CharacterRef": "b72221b343e6d01180369939cdb50cd3000d9ec3ca53fea435934f87965ad2ef",
+      "ImageDimensions": "1ea4f7f77a5e7e45334cbf910e2f8459a54b46d0810af3788e6dd40dd46de7dd",
+      "Shot": "cb3ad83a585ce75e73fbc6074dabb0abbde77934d516377a27b22b552c425973",
+      "ShotVersion": "acc5a7d2e5f8cbc304415aa724305a909f4d598f59a7a0281b8afef8941ee04f",
+      "Storyboard": "e1e67267543234369054e2046ff12c263e757cadfd1e7149816f2099bea6402c",
+      "StoryboardVersion": "cf6f9328dc641da0a03066593715db36e48ab1e76c63bfc904150cae20f5577b"
+    }
+  },
+  "limits": {
+    "storageSchemaVersion": 6,
+    "film": {
+      "assemblyVersion": "ffmpeg-concat-copy-v1",
+      "normalizationVersion": "ffmpeg-concat-normalize-v4",
+      "normalizationProfile": "h264-1280x720-30fps-aac-48k-stereo-v1",
+      "compatibilityVersion": "mp4-copy-signature-v1",
+      "filmMediaContractVersion": 2,
+      "inputLimit": 64,
+      "versionLimit": 64,
+      "assemblyTimeoutSeconds": 120.0
+    },
+    "episode": {
+      "minSeconds": 60,
+      "maxSeconds": 90,
+      "minShots": 10,
+      "maxShots": 20,
+      "sceneMaxShots": 6,
+      "sceneLimit": 12,
+      "costCap": "60.00",
+      "shotEstimateAmount": "3.00",
+      "shotDurationMin": 2,
+      "shotDurationMax": 15,
+      "jobCap": 20,
+      "toolsVersion": 9
+    },
+    "wait": {
+      "setLimit": 20,
+      "timeoutSeconds": 600
+    },
+    "toolGroups": {
+      "M2": [
+        "storyboard_read",
+        "storyboard_save",
+        "shot_generate",
+        "asset_read"
+      ],
+      "M3": [
+        "film_assemble",
+        "film_read"
+      ],
+      "M5": [
+        "episode_plan",
+        "episode_save",
+        "episode_read",
+        "bible_save",
+        "bible_read"
+      ],
+      "M5E2": [
+        "consistency_review"
+      ],
+      "M5E3": [
+        "episode_generate",
+        "shot_redo"
+      ]
+    }
+  },
+  "ffmpeg": {
+    "binarySha256": "2ce797a0f88d7f067180338fb227f7b1928ea727bd9a4d7a1d022f7c52af71a3",
+    "versionLine": "ffmpeg version 7.1-essentials_build-www.gyan.dev Copyright (c) 2000-2024 the FFmpeg developers",
+    "configurationSha256": "df7f1233a38e9bb70a77ab7d4b38e27c4eaea073ac04147471810442a99ff44c",
+    "ffprobePresent": false,
+    "capabilities": {
+      "filters": {
+        "subtitles": true,
+        "ass": true,
+        "xfade": true,
+        "loudnorm": true,
+        "afade": true,
+        "drawtext": true,
+        "amix": true,
+        "sidechaincompress": true,
+        "aresample": true,
+        "scale": true,
+        "fps": true
+      },
+      "encoders": {
+        "mov_text": true,
+        "ass": true,
+        "subrip": true,
+        "aac": true,
+        "libx264": true
+      },
+      "muxers": {
+        "srt": true,
+        "ass": true,
+        "mp4": true,
+        "matroska": true
+      }
+    },
+    "probes": {
+      "burnInChinese": {
+        "returncode": 0,
+        "outputBytes": 2779,
+        "frameSha256": "9a7c03bc8bcaaf67dea0184be8fbb00dad8ab5c7210b53f9202fe49bd637659f"
+      },
+      "softSubtitles": {
+        "returncode": 0,
+        "outputBytes": 2978
+      },
+      "loudnessMeasurement": {
+        "returncode": 0,
+        "input": {
+          "input_i": "-21.75",
+          "input_tp": "-18.06",
+          "input_lra": "0.00",
+          "input_thresh": "-31.75"
+        }
+      },
+      "systemCjkFontPresent": true
+    }
+  }
+}

@@ -1,6 +1,6 @@
 # 后续规划：从“可拼接成片”到 AI 短剧流水线
 
-状态：**E0–E4 已完成（2026-10-22）**；M5 已随 **v0.4.0** 发布（[发布说明](./RELEASE_0.4.0.md)）。基线：`master` `00d087f`（M4 自动时间线归一化已合入）；上一发布 `v0.3.0` 指向 `4c456f6`。当前能力：16:9 720P、Wan t2v/i2v/flf2v 真实样本、Kling/fal 受控接入、copy 优先 + 自动转码拼接、CLI/Web/headless，以及剧本/小说 → 分集分场分镜与逐场成片。**本规划不包含 9:16 竖屏**，竖屏单列为后续独立话题。
+状态：**E0–E4 已完成（2026-10-22）**；M5 已随 **v0.4.0** 发布（[发布说明](./RELEASE_0.4.0.md)）。**M6 E0 契约已冻结（2026-10-22）**：[M6 契约](./M6_CONTRACTS.md)、[E0 验收](./M6_E0_ACCEPTANCE.md)。基线：`master` `b8df786`（M4 自动时间线归一化已合入）；上一发布 `v0.3.0` 指向 `4c456f6`。当前能力：16:9 720P、Wan t2v/i2v/flf2v 真实样本、Kling/fal 受控接入、copy 优先 + 自动转码拼接、CLI/Web/headless，以及剧本/小说 → 分集分场分镜与逐场成片。**本规划不包含 9:16 竖屏**，竖屏单列为后续独立话题。
 
 > **E0 已完成（2026-10-22）**：契约见 [M5_CONTRACTS](./M5_CONTRACTS.md)（schema v6 外壳、Episode/Scene/Character/Style、`text-split-zh-v1`、镜头/时长/预算、错误码），证据见 [M5 E0 验收](./M5_E0_ACCEPTANCE.md)。E0 的 `schemaVersion 6` 与本文第 4 节 M6 的“成片版本 v6”不是同一个编号空间：M6 若需新的存储形状必须用 v7。
 >
@@ -81,7 +81,7 @@
 
 | 包 | 交付 | 验收 |
 |---|---|---|
-| E0 契约冻结 | 字幕/音轨/转场/导出 profile；成片版本 v6；TTS/音乐来源策略 | 旧成片可读；无供应商调用 |
+| E0 契约冻结 | 字幕/音轨/转场/导出 profile；成片版本 v6；TTS/音乐来源策略 | 旧成片可读；无供应商调用。**已交付**：[契约](./M6_CONTRACTS.md)、[E0 验收](./M6_E0_ACCEPTANCE.md)（schema 7 方向、7 个决策点、18 个错误码、126 个契约基线哈希、FFmpeg 能力探针） |
 | E1 字幕 | 台词 → SRT/ASS；烧录与软字幕；时间轴对齐 | 60 秒样例字幕不漂移；中文字体可用；可手动修正 |
 | E2 音频 | TTS、BGM/SFX、ducking、响度 | 人声清晰；无削波；响度测量通过；来源可追溯 |
 | E3 转场/片头片尾/导出 | xfade 等；标题卡；720P/1080P 导出 | 转场无黑帧/音画不同步；导出可播放；时长正确 |
@@ -121,11 +121,11 @@
 
 ## 8. 新对话启动方式
 
-M5 已全部完成（E0–E4）并随 **v0.4.0** 发布。下一阶段为 **M6 成片后期**（字幕、TTS、BGM/SFX、响度、转场、片头片尾、720P/1080P 导出），启动时先按 M5 的 E0 流程冻结契约与本轮范围，再进入编码：
+M5 已全部完成（E0–E4）并随 **v0.4.0** 发布；**M6 E0 契约已冻结（2026-10-22）**，决策点已全部确认，下一步是 **M6 E1 字幕**。启动 E1 时先读 [M6 契约](./M6_CONTRACTS.md)、[E0 验收](./M6_E0_ACCEPTANCE.md)、`docs/M6_E0_BASELINE.json` 与 [M5 契约](./M5_CONTRACTS.md)：
 
-> 基于 M5 E4 后的 `master`（schema 6、tools/rules 9/9、冻结 8/8），按 `docs/M5_PLAN.md` 的 M6 范围做契约冻结；不要做 9:16 竖屏；先读 `docs/M5_CONTRACTS.md`、[E4 验收](./M5_E4_ACCEPTANCE.md)、`docs/M4_NORMALIZATION.md` 与 `docs/M3_CONTRACTS.md`。先给实施计划和需要我确认的决策点，不要直接提交付费任务。
+> 基于 `v0.4.0`（`b8df786`；schema 6、tools/rules 9/9、冻结 8/8…1/1），按 `docs/M6_CONTRACTS.md` 执行 E1：schema 7（`audio`/`subtitleTracks` + media `kind=audio`）、v6→v7 逐字节备份迁移与基线比对、`subtitle-align-zh-v1`、`subtitle_save`、软字幕与烧录、包内 OFL 字体，工具面升到 10/10（冻结 9/9）。不要做 9:16 竖屏；E1 不调用任何供应商，也不提交付费任务。
 
-M6 决策点沿用 [M5 计划](./M5_PLAN.md) §4.3：TTS 供应商/音色、音乐/音效许可、字幕默认烧录或软字幕、是否引入 1080P、供应商水印。
+M6 决策点已按 [M6 契约](./M6_CONTRACTS.md) §1 冻结：TTS 用百炼 CosyVoice（复用视频 Key）、音乐仅 CC0/用户导入、默认软字幕 + 可选烧录、1080P 仅参数化上采样、接受水印、包内 OFL 字体、整集成片纳入 E3。
 
 ## 9. 本轮明确不做
 
