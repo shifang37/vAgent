@@ -245,7 +245,7 @@ S2 列出该模型北京免费额度 **50 秒**，有效期自开通百炼/模�
 
 当前账号对 i2v 的模型授权与 IP 权限；i2v 真实结果主机与重定向（沿用 `wan-result-hosts-v2` 允许集）；首帧真实输出画幅与音频表现；实际账单（保持 `unknown`）；免费额度是否抵扣。本次不把“文档支持”升级为“账号已验证”。
 
-**2026-10-22 真实样本补记**：北京 `wan2.7-i2v-2026-04-25` 的 `i2v` 与 `flf2v` 各 1 条 **5 秒 720P** 真实任务成功并下载本地 MP4（task `0520a9b5-c071-48b8-a87e-72d3124ee0c9` 与 `6add91d2-dbd5-4503-8469-1796610e7ab0`；均为 1280×720 / H.264+AAC / 5.033 秒，结果主机 `dashscope-a717.oss-accelerate.aliyuncs.com`）。两条各估算 3.00 CNY，实际账单仍为 `unknown`。两条输出编码与分辨率相同，但时间线相差超过一帧，`film assemble` 按 `mp4-copy-signature-v1` 拒绝直接拼接。证据与限制见 [i2v/flf2v 验收](./M2_I2V_ACCEPTANCE.md)。
+**2026-10-22 真实样本补记**：北京 `wan2.7-i2v-2026-04-25` 的 `i2v` 与 `flf2v` 各 1 条 **5 秒 720P** 真实任务成功并下载本地 MP4（task `0520a9b5-c071-48b8-a87e-72d3124ee0c9` 与 `6add91d2-dbd5-4503-8469-1796610e7ab0`；均为 1280×720 / H.264+AAC / 5.033 秒，结果主机 `dashscope-a717.oss-accelerate.aliyuncs.com`）。两条各估算 3.00 CNY，实际账单仍为 `unknown`。两条输出编码与分辨率相同，但时间线相差超过一帧，copy 路径按 `mp4-copy-signature-v1` 拒绝直接拼接；M4 自动转码回退已可合成 10.000 秒成片。证据与限制见 [i2v/flf2v 验收](./M2_I2V_ACCEPTANCE.md) 与 [M4 归一化](./M4_NORMALIZATION.md)。
 
 ## 10. M3 规划期预研：两 Key 直用与共享域名（2026-10-17）
 

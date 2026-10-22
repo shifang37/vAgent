@@ -1,9 +1,15 @@
-"""Local film assembly: bundled FFmpeg, concat demuxer, stream copy, no transcoding.
+"""Local film assembly: bundled FFmpeg, concat demuxer, copy first, transcode fallback.
 
 The executable is only ever the one shipped inside the ``imageio-ffmpeg`` install:
 no PATH lookup, no environment-variable override, no runtime download. Inputs are
 hard-linked (or copied) into a private work directory so the concat list never
 contains a user path, and every input is re-verified before the process starts.
+
+The default path is the frozen stream-copy concatenation. When its strict copy
+signature cannot splice the inputs, ``assemble_normalized`` transcodes every input
+to one canonical profile and concatenates the normalized streams with a single
+filter graph, so timeline/priming, frame-rate, resolution and missing-audio
+differences do not leak into the delivered film.
 
 Assembly is a cancellable local operation. The caller runs it outside the Store
 lock and commits the resulting file, FilmVersion and FilmMedia in one transaction.
@@ -12,12 +18,13 @@ lock and commits the resulting file, FilmVersion and FilmMedia in one transactio
 import asyncio
 import errno
 import hashlib
+import json
 import os
 import shutil
 import stat
 import subprocess
 import tempfile
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from decimal import Decimal
 from fractions import Fraction
 from pathlib import Path
@@ -33,6 +40,13 @@ from vagent.video.copy_signature import (
 from vagent.video.mp4 import inspect_mp4
 
 ASSEMBLY_VERSION = "ffmpeg-concat-copy-v1"
+NORMALIZATION_VERSION = "ffmpeg-concat-normalize-v4"
+NORMALIZATION_PROFILE = "h264-1280x720-30fps-aac-48k-stereo-v1"
+TARGET_WIDTH = 1280
+TARGET_HEIGHT = 720
+TARGET_FPS = 30
+TARGET_AUDIO_RATE = 48000
+TARGET_AUDIO_CHANNELS = 2
 MAX_INPUTS = 64
 MAX_INPUT_BYTES = 268435456
 MAX_TOTAL_INPUT_BYTES = 2 * 1024**3
@@ -85,6 +99,10 @@ class AssemblyPlan:
     expected_audio_seconds: Fraction | None
     max_frame_seconds: Fraction
     expected_presentation_seconds: Fraction
+    mode: str = "copy"
+    assembly_version: str = ASSEMBLY_VERSION
+    profile: str | None = None
+    normalization: dict | None = None
 
 
 @dataclass(frozen=True)
@@ -211,6 +229,81 @@ def plan_assembly(signatures) -> AssemblyPlan:
     )
 
 
+def _normalized_frames(signature: CopySignature) -> int:
+    """Frame-exact target frame count at the canonical 30 fps."""
+    frame_ticks, timescale = signature.video.frame_ticks, signature.video.timescale
+    if frame_ticks and timescale:
+        frames = round(signature.video.samples * TARGET_FPS * frame_ticks / timescale)
+    else:
+        frames = round(signature.duration_seconds * TARGET_FPS)
+    return max(1, int(frames))
+
+
+def _normalized_duration(signature: CopySignature) -> Fraction:
+    """Frame-exact target duration at the canonical 30 fps."""
+    return Fraction(_normalized_frames(signature), TARGET_FPS)
+
+
+def plan_normalization(signatures) -> AssemblyPlan:
+    """Plan the transcode fallback: every input becomes the same canonical profile.
+
+    The copy signature is still parsed for provenance and duration, but timeline,
+    frame-rate, resolution and audio-presence differences are deliberately accepted
+    here. The output timeline uses each input's presentation duration; the filter
+    graph trims both streams to that duration before concatenation.
+    """
+    signatures = tuple(signatures)
+    if not signatures:
+        raise AssemblyError("FILM_INPUT_INCOMPATIBLE")
+    if len(signatures) > MAX_INPUTS:
+        raise AssemblyError("FILM_INPUT_INCOMPATIBLE", "镜头数量超过上限。")
+    timeline, offset = [], Fraction(0)
+    for index, signature in enumerate(signatures, start=1):
+        duration = _normalized_duration(signature)
+        if duration <= 0:
+            raise AssemblyError("FILM_INPUT_INCOMPATIBLE", f"输入 {index} 的时长为零。")
+        timeline.append({"start": offset, "duration": duration, "signature": signature})
+        offset += duration
+    normalization = {
+        "version": NORMALIZATION_VERSION,
+        "profile": NORMALIZATION_PROFILE,
+        "width": TARGET_WIDTH,
+        "height": TARGET_HEIGHT,
+        "frameRate": TARGET_FPS,
+        "videoCodec": "h264",
+        "audioCodec": "aac",
+        "audioSampleRate": TARGET_AUDIO_RATE,
+        "audioChannels": TARGET_AUDIO_CHANNELS,
+    }
+    compatibility = {
+        "version": NORMALIZATION_VERSION,
+        "profile": normalization,
+        "inputs": [
+            {
+                "signatureSha256": signature.sha256(),
+                "duration": format_seconds(_normalized_duration(signature)),
+                "hasAudio": signature.has_audio,
+            }
+            for signature in signatures
+        ],
+    }
+    encoded = json.dumps(compatibility, sort_keys=True, ensure_ascii=False, separators=(",", ":"))
+    return AssemblyPlan(
+        signatures=signatures,
+        timeline=tuple(timeline),
+        compatibility=compatibility,
+        compatibility_sha256=hashlib.sha256(encoded.encode("utf-8")).hexdigest(),
+        expected_video_seconds=offset,
+        expected_audio_seconds=offset,
+        max_frame_seconds=Fraction(1, TARGET_FPS),
+        expected_presentation_seconds=offset,
+        mode="normalize",
+        assembly_version=NORMALIZATION_VERSION,
+        profile=NORMALIZATION_PROFILE,
+        normalization=normalization,
+    )
+
+
 def _write_concat_list(work: Path, names: list[str], plan: AssemblyPlan) -> Path:
     lines = ["ffconcat version 1.0"]
     for name, entry in zip(names, plan.timeline, strict=True):
@@ -262,6 +355,85 @@ def _command(binary: Path, listing: Path, output: Path) -> list[str]:
         "-y",
         str(output),
     ]
+
+
+def _normalization_command(binary: Path, names: list[str], plan: AssemblyPlan, output: Path) -> list[str]:
+    """One filter graph: scale/fps/trim each input, add silence when needed, concat."""
+    command = [
+        str(binary),
+        "-hide_banner",
+        "-nostdin",
+        "-loglevel",
+        "warning",
+        "-nostats",
+    ]
+    for name in names:
+        command.extend(["-i", name])
+    filters = []
+    for index, entry in enumerate(plan.timeline):
+        frames = _normalized_frames(entry["signature"])
+        duration = format_seconds(Fraction(frames, TARGET_FPS))
+        filters.append(
+            f"[{index}:v:0]scale={TARGET_WIDTH}:{TARGET_HEIGHT}:force_original_aspect_ratio=decrease,"
+            f"pad={TARGET_WIDTH}:{TARGET_HEIGHT}:(ow-iw)/2:(oh-ih)/2,setsar=1,fps={TARGET_FPS},"
+            f"trim=end_frame={frames},setpts=PTS-STARTPTS,format=yuv420p[v{index}]"
+        )
+        if entry["signature"].has_audio:
+            filters.append(
+                f"[{index}:a:0]aresample={TARGET_AUDIO_RATE},"
+                f"aformat=sample_fmts=fltp:channel_layouts=stereo,apad,"
+                f"atrim=duration={duration},asetpts=PTS-STARTPTS[a{index}]"
+            )
+        else:
+            filters.append(
+                f"anullsrc=channel_layout=stereo:sample_rate={TARGET_AUDIO_RATE},"
+                f"atrim=duration={duration},asetpts=PTS-STARTPTS[a{index}]"
+            )
+    streams = "".join(f"[v{index}][a{index}]" for index in range(len(names)))
+    filters.append(f"{streams}concat=n={len(names)}:v=1:a=1[v][a]")
+    command.extend(
+        [
+            "-filter_complex",
+            ";".join(filters),
+            "-map",
+            "[v]",
+            "-map",
+            "[a]",
+            "-c:v",
+            "libx264",
+            "-preset",
+            "veryfast",
+            "-crf",
+            "20",
+            "-profile:v",
+            "high",
+            "-level:v",
+            "4.0",
+            "-pix_fmt",
+            "yuv420p",
+            "-fps_mode",
+            "cfr",
+            "-r",
+            str(TARGET_FPS),
+            "-c:a",
+            "aac",
+            "-b:a",
+            "192k",
+            "-ar",
+            str(TARGET_AUDIO_RATE),
+            "-ac",
+            str(TARGET_AUDIO_CHANNELS),
+            "-max_muxing_queue_size",
+            "1024",
+            "-movflags",
+            "+faststart",
+            "-f",
+            "mp4",
+            "-y",
+            str(output),
+        ]
+    )
+    return command
 
 
 async def assemble(
@@ -328,6 +500,117 @@ async def assemble(
         shutil.rmtree(work, ignore_errors=True)
 
 
+async def assemble_normalized(
+    *,
+    engine: Engine,
+    inputs: list[Path],
+    work_root: Path,
+    output: Path,
+    cancelled=None,
+    deadline: float | None = None,
+) -> AssembledFilm:
+    """Transcode every input to the canonical profile and concatenate in one pass."""
+    if not inputs or len(inputs) > MAX_INPUTS:
+        raise AssemblyError("FILM_INPUT_INCOMPATIBLE", "镜头数量超出上限。")
+    signatures, total = [], 0
+    for path in inputs:
+        try:
+            size = path.stat().st_size
+        except OSError:
+            raise AssemblyError("FILM_ASSEMBLY_FAILED", "输入文件不可读。") from None
+        if size <= 0 or size > MAX_INPUT_BYTES:
+            raise AssemblyError("FILM_INPUT_INCOMPATIBLE", "输入文件大小超出上限。")
+        total += size
+        if total > MAX_TOTAL_INPUT_BYTES:
+            raise AssemblyError("FILM_INPUT_INCOMPATIBLE", "输入总大小超出上限。")
+        with path.open("rb") as handle:
+            try:
+                signatures.append(read_copy_signature(handle, size))
+            except (ValueError, OSError):
+                raise AssemblyError("FILM_INPUT_INCOMPATIBLE", "输入不是可拼接的 AVC/AAC MP4。") from None
+    plan = plan_normalization(signatures)
+    work = Path(tempfile.mkdtemp(prefix="normalize-", dir=work_root))
+    try:
+        names = []
+        for index, path in enumerate(inputs, start=1):
+            name = f"in-{index:03d}.mp4"
+            _link_or_copy(path, work / name)
+            names.append(name)
+        command = _normalization_command(engine.path, names, plan, output)
+        await _run_ffmpeg_command(
+            engine,
+            work,
+            command,
+            output,
+            cancelled=cancelled,
+            deadline=deadline,
+            strict_warnings=False,
+        )
+        size, digest = _hash_file(output)
+        if size > MAX_OUTPUT_BYTES:
+            raise AssemblyError("FILM_ASSEMBLY_FAILED", "输出文件超出上限。")
+        with output.open("rb") as handle:
+            try:
+                metadata = inspect_mp4(handle, size)
+            except (ValueError, OverflowError):
+                raise AssemblyError("FILM_ASSEMBLY_FAILED", "输出文件不是完整的 H.264 MP4。") from None
+            handle.seek(0)
+            try:
+                signature = read_copy_signature(handle, size)
+            except (ValueError, OverflowError):
+                raise AssemblyError("FILM_ASSEMBLY_FAILED", "输出文件的时间线结构无法验证。") from None
+        _verify_normalized_output(metadata, plan)
+        plan = _fit_normalized_timeline(plan, signature.video.raw_end)
+        return AssembledFilm(
+            path=output,
+            size_bytes=size,
+            sha256=digest,
+            metadata=metadata,
+            signature=signature,
+            plan=plan,
+        )
+    finally:
+        shutil.rmtree(work, ignore_errors=True)
+
+
+def _fit_normalized_timeline(plan: AssemblyPlan, actual: Fraction) -> AssemblyPlan:
+    """Make the committed segment timeline equal the encoded video duration.
+
+    Frame-rate conversion can drop a boundary frame at a seam. The output remains
+    valid and within the verification tolerance; scaling the frozen segment
+    durations keeps the public timeline consistent with the actual file instead of
+    claiming a duration the encoder did not produce.
+    """
+    if actual <= 0 or plan.expected_presentation_seconds <= 0:
+        raise AssemblyError("FILM_ASSEMBLY_FAILED", "输出时长无效。")
+    scale = actual / plan.expected_presentation_seconds
+    timeline, offset = [], Fraction(0)
+    for entry in plan.timeline:
+        duration = entry["duration"] * scale
+        timeline.append({**entry, "start": offset, "duration": duration})
+        offset += duration
+    return replace(
+        plan,
+        timeline=tuple(timeline),
+        expected_video_seconds=actual,
+        expected_audio_seconds=actual,
+        expected_presentation_seconds=actual,
+    )
+
+
+def _verify_normalized_output(metadata: MediaMetadata, plan: AssemblyPlan) -> None:
+    if (metadata.width, metadata.height) != (TARGET_WIDTH, TARGET_HEIGHT):
+        raise AssemblyError("FILM_ASSEMBLY_FAILED", "输出分辨率不是 1280×720。")
+    if metadata.video_codec != "h264" or not metadata.has_audio or metadata.audio_codec != "aac":
+        raise AssemblyError("FILM_ASSEMBLY_FAILED", "输出不是 H.264 + AAC。")
+    if (metadata.frame_rate.numerator, metadata.frame_rate.denominator) != (TARGET_FPS, 1):
+        raise AssemblyError("FILM_ASSEMBLY_FAILED", "输出帧率不是 30fps。")
+    observed = Fraction(metadata.duration_seconds).limit_denominator(1_000_000)
+    tolerance = max(Fraction(1, 2), plan.max_frame_seconds * 2)
+    if abs(observed - plan.expected_presentation_seconds) > tolerance:
+        raise AssemblyError("FILM_ASSEMBLY_FAILED", "输出时长偏离归一化时间线。")
+
+
 def _verify_output(metadata: MediaMetadata, signature: CopySignature, plan: AssemblyPlan) -> None:
     first = plan.signatures[0]
     if (metadata.width, metadata.height) != (first.config["video"]["width"], first.config["video"]["height"]):
@@ -368,6 +651,14 @@ def _verify_output(metadata: MediaMetadata, signature: CopySignature, plan: Asse
 
 async def _run_ffmpeg(engine: Engine, work: Path, listing: Path, output: Path, *, cancelled, deadline):
     command = _command(engine.path, listing, output)
+    await _run_ffmpeg_command(
+        engine, work, command, output, cancelled=cancelled, deadline=deadline, strict_warnings=True
+    )
+
+
+async def _run_ffmpeg_command(
+    engine: Engine, work: Path, command: list[str], output: Path, *, cancelled, deadline, strict_warnings
+):
     try:
         process = await asyncio.create_subprocess_exec(
             *command,
@@ -393,7 +684,7 @@ async def _run_ffmpeg(engine: Engine, work: Path, listing: Path, output: Path, *
     if process.returncode != 0:
         raise AssemblyError("FILM_ASSEMBLY_FAILED", _first_error(text))
     lowered = text.lower()
-    if any(marker in lowered for marker in WARNING_MARKERS):
+    if strict_warnings and any(marker in lowered for marker in WARNING_MARKERS):
         # FFmpeg can return 0 after silently shifting timestamps; refuse to deliver.
         raise AssemblyError("FILM_ASSEMBLY_FAILED", "时间戳告警，拒绝交付。")
 

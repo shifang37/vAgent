@@ -33,7 +33,7 @@
 ## 3. 失败与偏差
 
 1. **两次 `SUBMISSION_UNKNOWN` 由一次性验收脚本导致，不是供应商拒绝**：脚本在登记后抛 `KeyError` 并退出，应用关闭，Worker 的提交被取消；上游任务列表确认没有生成对应任务，也没有重复提交。修正后 `i2v` 由 Worker 正常提交成功；`flf2v` 用**同一请求体**单独提交一次（加长客户端超时）成功后，把已确认的 task ID 接回原 Job，由应用完成查询与下载。未创建第二条 `flf2v` 任务，产品代码未因本次验收修改。
-2. **i2v 与 flf2v 输出不能直接流复制拼接**：`vagent film assemble` 对两条输入返回 `FILM_INPUT_INCOMPATIBLE`，说明 `输入 2 的音视频时间线相差超过一帧`。两条文件的编码、分辨率与总时长一致，但音频 priming/时间线不同；按 `mp4-copy-signature-v1` 的契约，流复制应拒绝而不是静默修正。若需要把 `i2v` 与 `flf2v` 混在一条成片里，需要新增时间线归一化或转码能力。
+2. **i2v 与 flf2v 输出不能直接流复制拼接**：`vagent film assemble` 对两条输入返回 `FILM_INPUT_INCOMPATIBLE`，说明 `输入 2 的音视频时间线相差超过一帧`。两条文件的编码、分辨率与总时长一致，但音频 priming/时间线不同；按 `mp4-copy-signature-v1` 的契约，流复制应拒绝而不是静默修正。**2026-10-22 后续 M4 已加入自动转码回退：当前 `film assemble` 会把两条合成 10.000 秒 / 5,968,116 字节成片（`ffmpeg-concat-normalize-v4`，profile `h264-1280x720-30fps-aac-48k-stereo-v1`），见 [M4 归一化](./M4_NORMALIZATION.md)；本段保留当时 copy-only 的结果。** 若需要把 `i2v` 与 `flf2v` 混在一条成片里，原路径需要转码；现有 M4 已提供该能力。
 3. **诊断用的空请求**：为排查 30 秒提交超时，曾向同一模型发送缺少 `input` 的请求，产生一条 `FAILED` 任务（`0f85af84-43ee-4e77-aa3b-468173739ac6`，`InvalidParameter`），没有生成视频；这是排障记录，不是验收样本。
 
 ## 4. 未验证与限制

@@ -2,6 +2,7 @@
 
 import asyncio
 import os
+import subprocess
 import sys
 from dataclasses import replace
 from fractions import Fraction
@@ -11,12 +12,15 @@ import pytest
 
 import vagent.video.assembler as assembler_module
 from vagent.video.assembler import (
+    NORMALIZATION_PROFILE,
     AssemblyError,
     _command,
     assemble,
+    assemble_normalized,
     bundled_engine,
     format_seconds,
     plan_assembly,
+    plan_normalization,
 )
 from vagent.video.copy_signature import (
     SignatureError,
@@ -190,6 +194,131 @@ def test_plan_rejects_input_whose_audio_timeline_drifts_beyond_one_frame():
     assert drifted.duration_seconds - drifted.video.raw_end > drifted.max_frame_seconds
     with pytest.raises(AssemblyError) as error:
         plan_assembly([drifted])
+    assert error.value.code == "FILM_INPUT_INCOMPATIBLE"
+
+
+def test_normalization_plan_accepts_timeline_and_audio_differences():
+    parsed = signature()
+    silent = replace(parsed, audio=None)
+    plan = plan_normalization([parsed, silent])
+    assert plan.mode == "normalize"
+    assert plan.assembly_version == "ffmpeg-concat-normalize-v4"
+    assert plan.profile == NORMALIZATION_PROFILE
+    assert plan.normalization["width"] == 1280
+    assert plan.normalization["height"] == 720
+    assert plan.expected_presentation_seconds == Fraction(10)
+    assert plan.expected_audio_seconds is not None
+    assert plan.compatibility_sha256 != compatibility([parsed, parsed])[1]
+
+
+def test_normalized_assembly_adds_silent_audio(engine, tmp_path):
+    silent = tmp_path / "silent.mp4"
+    subprocess.run(
+        [
+            str(engine.path),
+            "-hide_banner",
+            "-loglevel",
+            "error",
+            "-y",
+            "-i",
+            str(FIXTURE),
+            "-an",
+            "-c:v",
+            "copy",
+            "-movflags",
+            "+faststart",
+            str(silent),
+        ],
+        check=True,
+    )
+    output = tmp_path / "film.mp4.part"
+    film = asyncio.run(
+        assemble_normalized(
+            engine=engine,
+            inputs=[FIXTURE, silent],
+            work_root=tmp_path,
+            output=output,
+        )
+    )
+    assert film.plan.mode == "normalize"
+    assert film.metadata.width == 1280 and film.metadata.height == 720
+    assert film.metadata.has_audio and film.metadata.audio_codec == "aac"
+    assert abs(film.metadata.duration_seconds - float(film.plan.expected_presentation_seconds)) < 0.5
+    assert not list(tmp_path.glob("normalize-*"))
+
+
+def test_normalized_assembly_scales_and_reframes(engine, tmp_path):
+    small = tmp_path / "small.mp4"
+    subprocess.run(
+        [
+            str(engine.path),
+            "-hide_banner",
+            "-loglevel",
+            "error",
+            "-y",
+            "-i",
+            str(FIXTURE),
+            "-vf",
+            "scale=640:360,fps=15",
+            "-an",
+            "-c:v",
+            "libx264",
+            "-preset",
+            "veryfast",
+            "-crf",
+            "20",
+            "-pix_fmt",
+            "yuv420p",
+            "-movflags",
+            "+faststart",
+            str(small),
+        ],
+        check=True,
+    )
+    output = tmp_path / "film.mp4.part"
+    film = asyncio.run(
+        assemble_normalized(
+            engine=engine,
+            inputs=[FIXTURE, small],
+            work_root=tmp_path,
+            output=output,
+        )
+    )
+    assert (film.metadata.width, film.metadata.height) == (1280, 720)
+    assert (film.metadata.frame_rate.numerator, film.metadata.frame_rate.denominator) == (30, 1)
+    assert film.metadata.has_audio and film.metadata.audio_codec == "aac"
+    assert not list(tmp_path.glob("normalize-*"))
+
+
+def test_copy_assembler_still_rejects_audio_mismatch(engine, tmp_path):
+    silent = tmp_path / "silent.mp4"
+    subprocess.run(
+        [
+            str(engine.path),
+            "-hide_banner",
+            "-loglevel",
+            "error",
+            "-y",
+            "-i",
+            str(FIXTURE),
+            "-an",
+            "-c:v",
+            "copy",
+            "-movflags",
+            "+faststart",
+            str(silent),
+        ],
+        check=True,
+    )
+    with pytest.raises(AssemblyError) as error:
+        asyncio.run(
+            assemble(
+                engine=engine,
+                inputs=[FIXTURE, silent],
+                work_root=tmp_path,
+                output=tmp_path / "film.mp4.part",
+            )
+        )
     assert error.value.code == "FILM_INPUT_INCOMPATIBLE"
 
 

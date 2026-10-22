@@ -14,10 +14,13 @@ from uuid import uuid4
 from vagent.errors import AppError
 from vagent.storage import now
 from vagent.video.assembler import (
+    AssemblyError,
     Engine,
     assemble,
+    assemble_normalized,
     bundled_engine,
     plan_assembly,
+    plan_normalization,
 )
 from vagent.video.copy_signature import read_copy_signature
 from vagent.video.films import (
@@ -26,6 +29,7 @@ from vagent.video.films import (
     FilmEngine,
     FilmInput,
     FilmMedia,
+    FilmNormalization,
     FilmSegment,
     FilmVersion,
     Rational,
@@ -103,8 +107,14 @@ class FilmService:
         state = self.store.snapshot()
         selection = select_inputs(state, project_id, storyboard_id, expected_revision)
         prepared = self._verify_inputs(state, selection["inputs"])
-        plan = plan_assembly([item["signature"] for item in prepared])
-        fingerprint = self._fingerprint(project_id, selection, plan.compatibility_sha256, engine)
+        signatures = [item["signature"] for item in prepared]
+        try:
+            plan = plan_assembly(signatures)
+        except AssemblyError as error:
+            if error.code != "FILM_INPUT_INCOMPATIBLE":
+                raise
+            plan = plan_normalization(signatures)
+        fingerprint = self._fingerprint(project_id, selection, plan, engine)
         replay = self._replay_fingerprint(state, project_id, storyboard_id, fingerprint)
         if replay is not None:
             return self.store.operation(operation_key, TOOL_NAME, args, lambda _: replay)
@@ -114,12 +124,22 @@ class FilmService:
         part_relative = final_relative + ".part"
         output = self._part_path(part_relative)
         try:
-            produced = await assemble(
-                engine=engine,
-                inputs=[item["path"] for item in prepared],
-                work_root=self._work_root(),
-                output=output,
-                cancelled=cancelled,
+            produced = await (
+                assemble_normalized(
+                    engine=engine,
+                    inputs=[item["path"] for item in prepared],
+                    work_root=self._work_root(),
+                    output=output,
+                    cancelled=cancelled,
+                )
+                if plan.mode == "normalize"
+                else assemble(
+                    engine=engine,
+                    inputs=[item["path"] for item in prepared],
+                    work_root=self._work_root(),
+                    output=output,
+                    cancelled=cancelled,
+                )
             )
             result = self.store.operation(
                 operation_key,
@@ -132,7 +152,7 @@ class FilmService:
                     expected_revision=expected_revision,
                     selection=selection,
                     prepared=prepared,
-                    plan=plan,
+                    plan=produced.plan,
                     produced=produced,
                     engine=engine,
                     film=film,
@@ -180,20 +200,20 @@ class FilmService:
             )
         return prepared
 
-    def _fingerprint(
-        self, project_id: str, selection: dict, compatibility_sha256: str, engine: Engine
-    ) -> str:
+    def _fingerprint(self, project_id: str, selection: dict, plan, engine: Engine) -> str:
         return assembly_fingerprint(
             project_id=project_id,
             storyboard_id=selection["storyboard"].id,
             storyboard_version=selection["storyboardVersion"],
             inputs=selection["inputs"],
-            compatibility_sha256=compatibility_sha256,
+            compatibility_sha256=plan.compatibility_sha256,
             engine=FilmEngine(
                 package_version=engine.package_version,
                 ffmpeg_version=engine.ffmpeg_version,
                 binary_sha256=engine.binary_sha256,
             ),
+            assembly_version=plan.assembly_version,
+            normalization=plan.normalization,
         )
 
     def _replay_fingerprint(self, state: dict, project_id: str, storyboard_id: str, fingerprint: str):
@@ -276,6 +296,7 @@ class FilmService:
             for entry, item in zip(prepared, plan.timeline, strict=True)
         )
         assembly = FilmAssembly(
+            assembly_version=plan.assembly_version,
             engine=FilmEngine(
                 package_version=engine.package_version,
                 ffmpeg_version=engine.ffmpeg_version,
@@ -284,6 +305,11 @@ class FilmService:
             compatibility_sha256=plan.compatibility_sha256,
             timeline=segments,
             fingerprint=fingerprint,
+            normalization=(
+                FilmNormalization.model_validate(plan.normalization)
+                if plan.normalization is not None
+                else None
+            ),
         )
         version = FilmVersion(
             version=version_number,

@@ -1,4 +1,4 @@
-"""E1: film assembly through the service — atomic commit, idempotency and versions."""
+"""E1: film assembly through the service 鈥?atomic commit, idempotency and versions."""
 
 import hashlib
 import os
@@ -8,9 +8,10 @@ import pytest
 from film_support import assembly_args, delivered_pair, link_shot_versions
 from shot_support import mock_tools, revise_storyboard, save_storyboard, shot
 
+import vagent.video.film_service as film_service_module
 from vagent.errors import AppError
 from vagent.video import clients
-from vagent.video.assembler import bundled_engine
+from vagent.video.assembler import NORMALIZATION_PROFILE, AssemblyError, bundled_engine
 from vagent.video.film_service import FilmService
 from vagent.video.films import cleanup_stale_parts
 from vagent.video.jobs import JobService
@@ -42,6 +43,35 @@ async def assemble(service, fixture, *, revision=None, key="film-op-1"):
         expected_revision=args["expectedRevision"],
         operation_key=key,
         args=args,
+    )
+
+
+@requires_ffmpeg
+async def test_copy_incompatibility_falls_back_to_normalization(store, monkeypatch):
+    fixture = await delivered_pair(store)
+    service = film_service(store)
+
+    def incompatible(signatures):
+        raise AssemblyError("FILM_INPUT_INCOMPATIBLE", "forced by the regression test")
+
+    monkeypatch.setattr(film_service_module, "plan_assembly", incompatible)
+    result = await assemble(service, fixture, key="film-normalize-op")
+    assert result["ok"], result
+    latest = result["data"]["latest"]
+    assert latest["assemblyVersion"] == "ffmpeg-concat-normalize-v4"
+    assert latest["normalization"]["profile"] == NORMALIZATION_PROFILE
+    assert latest["normalization"]["width"] == 1280
+    assert latest["normalization"]["height"] == 720
+    assert latest["normalization"]["audioCodec"] == "aac"
+    assert latest["mediaAvailable"] is True
+    film_media = store.snapshot()["media"][latest["outputMediaId"]]
+    assert film_media["metadata"]["width"] == 1280
+    assert film_media["metadata"]["height"] == 720
+    assert film_media["metadata"]["hasAudio"] is True
+    assert (
+        not (store.home / film_media["relativePath"])
+        .with_name((store.home / film_media["relativePath"]).name + ".part")
+        .exists()
     )
 
 
@@ -116,7 +146,7 @@ async def test_a_changed_storyboard_revision_appends_a_new_version(store):
         {"storyboardId": fixture["storyboardId"], "version": 1, "shotIds": fixture["shotIds"]},
         [
             {"id": shot_id, **shot(description)}
-            for shot_id, description in zip(fixture["shotIds"], ["雨夜街道", "推门入店"], strict=True)
+            for shot_id, description in zip(fixture["shotIds"], ["闆ㄥ琛楅亾", "鎺ㄩ棬鍏ュ簵"], strict=True)
         ],
         key="film-storyboard-revise",
     )
@@ -160,7 +190,7 @@ async def test_missing_or_unready_shots_refuse_the_whole_assembly(store):
     await delivered_pair(store)
     registry, _jobs, _adapter, _context = mock_tools(store)
     saved = save_storyboard(
-        registry, store, [shot("雨夜街道"), shot("推门入店"), shot("收尾")], key="three-shots"
+        registry, store, [shot("闆ㄥ琛楅亾"), shot("鎺ㄩ棬鍏ュ簵"), shot("鏀跺熬")], key="three-shots"
     )
     service = film_service(store)
     with pytest.raises(AppError) as error:

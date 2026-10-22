@@ -30,6 +30,8 @@ from vagent.video.storyboards import (
 FILM_INPUT_LIMIT = 64
 FILM_VERSION_LIMIT = 64
 ASSEMBLY_VERSION = "ffmpeg-concat-copy-v1"
+NORMALIZATION_VERSION = "ffmpeg-concat-normalize-v4"
+NORMALIZATION_PROFILE = "h264-1280x720-30fps-aac-48k-stereo-v1"
 COMPATIBILITY_VERSION = "mp4-copy-signature-v1"
 FILM_MEDIA_CONTRACT_VERSION = 2
 MEDIA_VALIDATION_VERSION = "mp4-avc-v1"
@@ -73,6 +75,25 @@ class FilmEngine(Contract):
     binary_sha256: Fingerprint
 
 
+class FilmNormalization(Contract):
+    """The canonical transcode profile used when copy compatibility is impossible."""
+
+    version: Literal[
+        "ffmpeg-concat-normalize-v1",
+        "ffmpeg-concat-normalize-v2",
+        "ffmpeg-concat-normalize-v3",
+        "ffmpeg-concat-normalize-v4",
+    ] = NORMALIZATION_VERSION
+    profile: str = Field(min_length=1, max_length=120)
+    width: int = Field(gt=0)
+    height: int = Field(gt=0)
+    frame_rate: int = Field(gt=0)
+    video_codec: Literal["h264"] = "h264"
+    audio_codec: Literal["aac"] = "aac"
+    audio_sample_rate: int = Field(gt=0)
+    audio_channels: int = Field(gt=0)
+
+
 class FilmSegment(Contract):
     """One input's rational start offset and duration on the output timeline."""
 
@@ -86,12 +107,28 @@ class FilmSegment(Contract):
 
 
 class FilmAssembly(Contract):
-    assembly_version: Literal["ffmpeg-concat-copy-v1"] = ASSEMBLY_VERSION
+    assembly_version: Literal[
+        "ffmpeg-concat-copy-v1",
+        "ffmpeg-concat-normalize-v1",
+        "ffmpeg-concat-normalize-v2",
+        "ffmpeg-concat-normalize-v3",
+        "ffmpeg-concat-normalize-v4",
+    ] = ASSEMBLY_VERSION
     compatibility_version: Literal["mp4-copy-signature-v1"] = COMPATIBILITY_VERSION
     engine: FilmEngine
     compatibility_sha256: Fingerprint
     timeline: JsonTuple[FilmSegment] = Field(min_length=1, max_length=FILM_INPUT_LIMIT)
     fingerprint: Fingerprint
+    normalization: FilmNormalization | None = None
+
+    @model_validator(mode="after")
+    def coherent_version(self):
+        normalized = self.assembly_version != ASSEMBLY_VERSION
+        if (self.normalization is not None) != normalized:
+            raise ValueError("Normalization metadata must match the assembly version")
+        if self.normalization is not None and self.normalization.version != self.assembly_version:
+            raise ValueError("Normalization version must match the assembly version")
+        return self
 
 
 class FilmVersion(Contract):
@@ -183,33 +220,40 @@ def assembly_fingerprint(
     inputs: tuple[FilmInput, ...],
     compatibility_sha256: str,
     engine: FilmEngine,
+    assembly_version: str = ASSEMBLY_VERSION,
+    normalization: dict | None = None,
 ) -> str:
-    """Output-affecting identity only: no time, path, revision or call ID."""
-    return canonical_sha256(
-        {
-            "projectId": project_id,
-            "storyboardId": storyboard_id,
-            "storyboardVersion": storyboard_version,
-            "inputs": [
-                {
-                    "shotId": item.shot_id,
-                    "shotVersionId": item.shot_version_id,
-                    "jobId": item.job_id,
-                    "mediaId": item.media_id,
-                    "sha256": item.sha256,
-                    "sizeBytes": item.size_bytes,
-                }
-                for item in inputs
-            ],
-            "assemblyVersion": ASSEMBLY_VERSION,
-            "compatibilityVersion": COMPATIBILITY_VERSION,
-            "compatibilitySha256": compatibility_sha256,
-            "engine": {
-                "packageVersion": engine.package_version,
-                "binarySha256": engine.binary_sha256,
-            },
-        }
-    )
+    """Output-affecting identity only: no time, path, revision or call ID.
+
+    The copy payload is kept byte-identical for pre-normalization versions, so an
+    existing film still replays instead of being re-assembled under a new engine.
+    """
+    payload = {
+        "projectId": project_id,
+        "storyboardId": storyboard_id,
+        "storyboardVersion": storyboard_version,
+        "inputs": [
+            {
+                "shotId": item.shot_id,
+                "shotVersionId": item.shot_version_id,
+                "jobId": item.job_id,
+                "mediaId": item.media_id,
+                "sha256": item.sha256,
+                "sizeBytes": item.size_bytes,
+            }
+            for item in inputs
+        ],
+        "assemblyVersion": assembly_version,
+        "compatibilityVersion": COMPATIBILITY_VERSION,
+        "compatibilitySha256": compatibility_sha256,
+        "engine": {
+            "packageVersion": engine.package_version,
+            "binarySha256": engine.binary_sha256,
+        },
+    }
+    if normalization is not None:
+        payload["normalization"] = normalization
+    return canonical_sha256(payload)
 
 
 def select_inputs(state: dict, project_id: str, storyboard_id: str, expected_revision: int) -> dict:
@@ -432,6 +476,12 @@ def film_view(state: dict, film: Film) -> dict:
                     for segment in version.assembly.timeline
                 ],
                 "engine": version.assembly.engine.model_dump(mode="json", by_alias=True),
+                "assemblyVersion": version.assembly.assembly_version,
+                "normalization": (
+                    version.assembly.normalization.model_dump(mode="json", by_alias=True)
+                    if version.assembly.normalization is not None
+                    else None
+                ),
                 "fingerprint": version.assembly.fingerprint,
             }
         )
