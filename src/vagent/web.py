@@ -392,6 +392,18 @@ def create_app(config, *, port=3210, model=None, policy=None):
         asset, lease = await file_io(
             app.state.service.media.open_content, media_id, cancel_cleanup=lambda result: result[1].close()
         )
+        if getattr(asset, "kind", None) == "audio":
+            from vagent.video.audio import AUDIO_EXTENSIONS
+
+            return media_response(
+                asset,
+                lease,
+                method=request.method,
+                request_headers=request.headers,
+                download=download == "1",
+                content_type=asset.mime_type,
+                extension=AUDIO_EXTENSIONS[asset.mime_type],
+            )
         return media_response(
             asset, lease, method=request.method, request_headers=request.headers, download=download == "1"
         )

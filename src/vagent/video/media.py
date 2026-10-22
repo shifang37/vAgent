@@ -158,7 +158,8 @@ class MediaFiles:
         try:
             assert_id(parts[1])
             name = parts[2].removesuffix(".part")
-            if not name.endswith(".mp4") or str(UUID(name[:-4])) != name[:-4]:
+            stem, dot, extension = name.rpartition(".")
+            if not dot or extension not in {"mp4", "wav", "m4a"} or str(UUID(stem)) != stem:
                 raise ValueError("Invalid media ID")
         except (ValueError, AppError):
             raise MediaError("MEDIA_SOURCE_UNSAFE") from None
@@ -220,7 +221,7 @@ class MediaFiles:
             raise
 
     def remove_part(self, relative):
-        if not relative.endswith(".mp4.part"):
+        if not relative.endswith((".mp4.part", ".wav.part", ".m4a.part")):
             raise MediaError("MEDIA_SOURCE_UNSAFE")
         try:
             with self.parent(relative) as (path, descriptor, name):
@@ -438,7 +439,23 @@ class MediaService:
 
         media = self.record(media_id, project_id=project_id)
         if isinstance(media, AudioMedia):
-            raise AppError("MEDIA_NOT_FOUND", "音频媒体读取属于 M6 E2，E1 只冻结其记录形状。")
+            status, reason = self._availability(media)
+            return {
+                "mediaId": media.id,
+                "kind": "audio",
+                "projectId": media.project_id,
+                "mimeType": media.mime_type,
+                "sizeBytes": media.size_bytes,
+                "sha256": media.sha256,
+                "durationSeconds": media.duration_seconds,
+                "sampleRate": media.sample_rate,
+                "channels": media.channels,
+                "validationVersion": media.validation_version,
+                "createdAt": media.created_at,
+                "availability": {"status": status, "reason": reason},
+                "mediaAvailable": status == "available",
+                "contentUrl": f"/api/media/{media.id}/content" if status == "available" else None,
+            }
         if isinstance(media, FilmMedia):
             state = self.store.snapshot()
             verify_film_media(state, media)
@@ -473,7 +490,10 @@ class MediaService:
 
         media = self.record(media_id)
         if isinstance(media, AudioMedia):
-            raise AppError("MEDIA_NOT_FOUND", "音频媒体读取属于 M6 E2，E1 只冻结其记录形状。")
+            try:
+                return media, self.files.verified(media.relative_path, media)
+            except (OSError, MediaError):
+                raise AppError("JOB_MEDIA_UNAVAILABLE", "本地音频文件缺失或损坏，请重新生成配音。") from None
         if isinstance(media, FilmMedia):
             verify_film_media(self.store.snapshot(), media)
             try:

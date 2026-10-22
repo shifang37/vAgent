@@ -12,6 +12,8 @@ from vagent.errors import AppError, failure
 from vagent.storage import FileStore
 from vagent.tools import Arguments, ToolDefinition, ToolFeature, ToolRegistry
 from vagent.video.adaptation import plan_episode
+from vagent.video.audio import AudioGenerateArgs
+from vagent.video.audio_service import episode_audio_view
 from vagent.video.contracts import (
     ArtifactRef,
     EpisodeGenerationArgs,
@@ -39,6 +41,7 @@ from vagent.video.episodes import (
 from vagent.video.jobs import JobService
 from vagent.video.storyboards import Framing, ShotMode, read_storyboard, save_storyboard
 from vagent.video.subtitles import save_subtitles, subtitle_for
+from vagent.video.tts import tts_capabilities
 from vagent.video.views import job_snapshot
 from vagent.waiting import (
     ExternalResourceRef,
@@ -56,11 +59,12 @@ from vagent.waiting import (
 # the five adaptation tools and raises both to 7/7, freezing 6/6 as history. M5 E2
 # appends the consistency review tool and raises both to 8/8, freezing 7/7. M5 E3
 # appends episode generation and per-shot redo and raises both to 9/9, freezing 8/8.
-# M6 E1 appends subtitle_save and raises both to 10/10, freezing 9/9.
-VIDEO_TOOLS_VERSION = 10
-VIDEO_RULES_VERSION = 10
-LIVE_VIDEO_TOOLS_VERSION = 10
-LIVE_VIDEO_RULES_VERSION = 10
+# M6 E1 appends subtitle_save and raises both to 10/10, freezing 9/9. M6 E2
+# appends audio_generate and raises both to 11/11, freezing 10/10.
+VIDEO_TOOLS_VERSION = 11
+VIDEO_RULES_VERSION = 11
+LIVE_VIDEO_TOOLS_VERSION = 11
+LIVE_VIDEO_RULES_VERSION = 11
 WAIT_TIMEOUT_SECONDS = 600
 # One episode may hold up to 20 shots and 20 Jobs, so one collection wait covers a
 # whole episode; E3 raised the member limit from 16. Stored waits with fewer members
@@ -80,10 +84,12 @@ M5_E3_TOOL_NAMES = ("episode_generate", "shot_redo")
 # M6 registers four post-production tools across E1..E3; E1 enables subtitle_save.
 M6_TOOL_NAMES = ("subtitle_save", "audio_generate", "film_render", "render_read")
 M6_E1_TOOL_NAMES = ("subtitle_save",)
+M6_E2_TOOL_NAMES = ("audio_generate",)
 PRE_M3_TOOL_NAMES = (*M2_TOOL_NAMES, *M3_TOOL_NAMES)
 PRE_M5_TOOL_NAMES = (*PRE_M3_TOOL_NAMES, *M5_TOOL_NAMES)
 PRE_E2_TOOL_NAMES = (*PRE_M5_TOOL_NAMES, *M5_E2_TOOL_NAMES, *M5_E3_TOOL_NAMES)
 PRE_E1_M6_TOOL_NAMES = (*PRE_E2_TOOL_NAMES, *M6_E1_TOOL_NAMES)
+PRE_E2_M6_TOOL_NAMES = (*PRE_E1_M6_TOOL_NAMES, *M6_E2_TOOL_NAMES)
 
 LEGACY_VIDEO_RULES = """当前启用 mock 视频模式，只能登记模拟任务；所有结果均为 simulated=true、mediaAvailable=false。
 需要生成时先调用 video_capabilities，根据返回的模型、能力版本和完整规格组合构造 video_generate。
@@ -222,6 +228,13 @@ SUBTITLE_RULES = """字幕用 subtitle_save：传入 scope=storyboard 与 storyb
 
 VIDEO_RULES_V10 = VIDEO_RULES_V9 + "\n" + SUBTITLE_RULES
 LIVE_VIDEO_RULES_V10 = LIVE_VIDEO_RULES_V9 + "\n" + SUBTITLE_RULES
+
+AUDIO_RULES = """配音用 audio_generate：传入 episodeId、可选的台词范围（sceneId + paragraph，必要时带 text）与 speaker→voiceId 映射，必须显式 confirm；服务端只使用该集冻结的 SceneVersion.dialogue，不重读原文、不自行改写台词。
+音色表来自 tts-providers-v1：episode_read 的 audio.provider.voices 给出当前模式可用的 voiceId 与价格；mock 模式只用本地确定性音色（零费用、零网络），live 模式的 CosyVoice 仍标注「文档支持，未做真实样本」。同一集同一 speaker 第一次生成时冻结 provider/model/voiceId/speed，之后必须一致，否则整批拒绝（VOICE_CONFLICT）。
+额度按集从 Store 重算并跨调用累计：单条 ≤500 字符、每集 ≤2000 字符、每集 ≤40 次请求；价格已核实时单条 ≤0.10 CNY、每集 ≤0.40 CNY。任一超限整批拒绝、不部分提交、不自动拆批或换音色绕过；相同台词与相同音色重放复用原音频资产，不重复计费。
+audio_generate 只生成配音资产与本地音频媒体，不登记视频 Job、不提交视频供应商、不改变镜头/成片；视频与 TTS 费用分桶，不换汇、不互相抵扣。没有台词、缺少音色映射或音色未核实时不得编造配音。"""
+VIDEO_RULES_V11 = VIDEO_RULES_V10 + "\n" + AUDIO_RULES
+LIVE_VIDEO_RULES_V11 = LIVE_VIDEO_RULES_V10 + "\n" + AUDIO_RULES
 
 OLD_LIVE_GENERATE_DESCRIPTION = (
     "登记一个真实视频 Job，返回 jobId 与登记状态；后台仅提交一次，云端成功后还需本地媒体交付。"
@@ -642,8 +655,9 @@ def register_video_tools(registry: ToolRegistry, service: JobService, *, mode="m
                 "toolsVersion": LIVE_VIDEO_TOOLS_VERSION if live else VIDEO_TOOLS_VERSION,
                 "rulesVersion": LIVE_VIDEO_RULES_VERSION if live else VIDEO_RULES_VERSION,
                 "capabilities": capabilities,
+                "tts": tts_capabilities(mode),
             },
-            instructions=LIVE_VIDEO_RULES_V10 if live else VIDEO_RULES_V10,
+            instructions=LIVE_VIDEO_RULES_V11 if live else VIDEO_RULES_V11,
             bypass_answer_cache=True,
         )
     )
@@ -888,10 +902,15 @@ def register_video_tools(registry: ToolRegistry, service: JobService, *, mode="m
             if episode_id
             else None
         )
+        data["audio"] = episode_audio_view(state, project_id, episode_id, mode=mode) if episode_id else None
         return data
 
     def save_subtitle(args, state, project_id):
         return save_subtitles(args, state, project_id)
+
+    async def generate_audio(args, store, context):
+        check_store(store)
+        return await service.audio.generate(args, context=context)
 
     definitions = [
         ToolDefinition(
@@ -1060,6 +1079,19 @@ def register_video_tools(registry: ToolRegistry, service: JobService, *, mode="m
             feature="video",
         ),
         ToolDefinition(
+            "audio_generate",
+            "为分集台词生成配音：必须显式确认，按 speaker→voiceId 映射调用当前模式的 TTS（mock 为本地确定性音色，"
+            "live 为 CosyVoice）；只使用该集冻结的台词，单条 ≤500 字符、每集 ≤2000 字符/40 次请求，价格已核实时"
+            "单条 ≤0.10 CNY、每集 ≤0.40 CNY，任一超限整批拒绝。同一集同一 speaker 首次生成即冻结音色，"
+            "不同音色返回 VOICE_CONFLICT；相同台词与音色重放复用原音频资产。只生成本地音频资产与媒体，"
+            "不登记视频 Job、不提交视频供应商。",
+            AudioGenerateArgs,
+            "write",
+            None,
+            async_write_execute=generate_audio,
+            feature="video",
+        ),
+        ToolDefinition(
             "consistency_review",
             "记录用户给出的人工角色一致性评分（1–5）：服务端在同一事务内重新计算该角色在这个分集已绑定分镜中的"
             "全部镜头、角色版本与参考素材，把证据与分数一起追加到分集；没有任何引用该角色的镜头时整次拒绝"
@@ -1121,7 +1153,7 @@ def register_video_tools(registry: ToolRegistry, service: JobService, *, mode="m
                 )
             ],
             descriptions={},
-            exclude=PRE_E1_M6_TOOL_NAMES,
+            exclude=PRE_E2_M6_TOOL_NAMES,
             definitions={
                 "await_job": frozen_await(AWAIT_DESCRIPTION_M1C),
                 "video_generate": frozen_generate,
@@ -1142,7 +1174,14 @@ def register_video_tools(registry: ToolRegistry, service: JobService, *, mode="m
                     bypass_answer_cache=True,
                 )
             ],
-            exclude=(*M3_TOOL_NAMES, *M5_TOOL_NAMES, *M5_E2_TOOL_NAMES, *M5_E3_TOOL_NAMES, *M6_E1_TOOL_NAMES),
+            exclude=(
+                *M3_TOOL_NAMES,
+                *M5_TOOL_NAMES,
+                *M5_E2_TOOL_NAMES,
+                *M5_E3_TOOL_NAMES,
+                *M6_E1_TOOL_NAMES,
+                *M6_E2_TOOL_NAMES,
+            ),
             definitions={"video_generate": frozen_generate},
         )
         registry.register_tools_variant(
@@ -1160,7 +1199,13 @@ def register_video_tools(registry: ToolRegistry, service: JobService, *, mode="m
                     bypass_answer_cache=True,
                 )
             ],
-            exclude=(*M5_TOOL_NAMES, *M5_E2_TOOL_NAMES, *M5_E3_TOOL_NAMES, *M6_E1_TOOL_NAMES),
+            exclude=(
+                *M5_TOOL_NAMES,
+                *M5_E2_TOOL_NAMES,
+                *M5_E3_TOOL_NAMES,
+                *M6_E1_TOOL_NAMES,
+                *M6_E2_TOOL_NAMES,
+            ),
             definitions={"video_generate": frozen_generate},
         )
         registry.register_tools_variant(
@@ -1178,7 +1223,13 @@ def register_video_tools(registry: ToolRegistry, service: JobService, *, mode="m
                     bypass_answer_cache=True,
                 )
             ],
-            exclude=(*M5_TOOL_NAMES, *M5_E2_TOOL_NAMES, *M5_E3_TOOL_NAMES, *M6_E1_TOOL_NAMES),
+            exclude=(
+                *M5_TOOL_NAMES,
+                *M5_E2_TOOL_NAMES,
+                *M5_E3_TOOL_NAMES,
+                *M6_E1_TOOL_NAMES,
+                *M6_E2_TOOL_NAMES,
+            ),
         )
         # 7/7 introduced the episode/bible tools; its video_generate schema is the
         # same six-argument intent as 6/6, so no override is needed.
@@ -1197,7 +1248,7 @@ def register_video_tools(registry: ToolRegistry, service: JobService, *, mode="m
                     bypass_answer_cache=True,
                 )
             ],
-            exclude=(*M5_E2_TOOL_NAMES, *M5_E3_TOOL_NAMES, *M6_E1_TOOL_NAMES),
+            exclude=(*M5_E2_TOOL_NAMES, *M5_E3_TOOL_NAMES, *M6_E1_TOOL_NAMES, *M6_E2_TOOL_NAMES),
         )
         # 8/8 added the consistency review; E3 freezes it without the new writers.
         registry.register_tools_variant(
@@ -1215,7 +1266,7 @@ def register_video_tools(registry: ToolRegistry, service: JobService, *, mode="m
                     bypass_answer_cache=True,
                 )
             ],
-            exclude=(*M5_E3_TOOL_NAMES, *M6_E1_TOOL_NAMES),
+            exclude=(*M5_E3_TOOL_NAMES, *M6_E1_TOOL_NAMES, *M6_E2_TOOL_NAMES),
         )
         # 9/9 froze the M5 E3 episode surface; M6 E1 hides its new post-production tool.
         registry.register_tools_variant(
@@ -1233,7 +1284,25 @@ def register_video_tools(registry: ToolRegistry, service: JobService, *, mode="m
                     bypass_answer_cache=True,
                 )
             ],
-            exclude=M6_E1_TOOL_NAMES,
+            exclude=(*M6_E1_TOOL_NAMES, *M6_E2_TOOL_NAMES),
+        )
+        # 10/10 froze the M6 E1 subtitle surface; M6 E2 hides only its new TTS writer.
+        registry.register_tools_variant(
+            10,
+            features=[
+                ToolFeature(
+                    name="video",
+                    configuration={
+                        "mode": "live",
+                        "toolsVersion": 10,
+                        "rulesVersion": 10,
+                        "capabilities": capabilities,
+                    },
+                    instructions=LIVE_VIDEO_RULES_V10,
+                    bypass_answer_cache=True,
+                )
+            ],
+            exclude=M6_E2_TOOL_NAMES,
         )
     else:
         legacy_capabilities = legacy_mock_capabilities()
@@ -1253,7 +1322,7 @@ def register_video_tools(registry: ToolRegistry, service: JobService, *, mode="m
                 )
             ],
             descriptions={},
-            exclude=PRE_E1_M6_TOOL_NAMES,
+            exclude=PRE_E2_M6_TOOL_NAMES,
             definitions={"await_job": frozen_await(LEGACY_AWAIT_DESCRIPTION)},
         )
         registry.register_execution_variant(
@@ -1272,7 +1341,7 @@ def register_video_tools(registry: ToolRegistry, service: JobService, *, mode="m
                 )
             ],
             descriptions={},
-            exclude=PRE_E1_M6_TOOL_NAMES,
+            exclude=PRE_E2_M6_TOOL_NAMES,
             definitions={"await_job": frozen_await(AWAIT_DESCRIPTION_M1C)},
         )
         registry.register_tools_variant(
@@ -1290,7 +1359,14 @@ def register_video_tools(registry: ToolRegistry, service: JobService, *, mode="m
                     bypass_answer_cache=True,
                 )
             ],
-            exclude=(*M3_TOOL_NAMES, *M5_TOOL_NAMES, *M5_E2_TOOL_NAMES, *M5_E3_TOOL_NAMES, *M6_E1_TOOL_NAMES),
+            exclude=(
+                *M3_TOOL_NAMES,
+                *M5_TOOL_NAMES,
+                *M5_E2_TOOL_NAMES,
+                *M5_E3_TOOL_NAMES,
+                *M6_E1_TOOL_NAMES,
+                *M6_E2_TOOL_NAMES,
+            ),
         )
         registry.register_tools_variant(
             5,
@@ -1307,7 +1383,13 @@ def register_video_tools(registry: ToolRegistry, service: JobService, *, mode="m
                     bypass_answer_cache=True,
                 )
             ],
-            exclude=(*M5_TOOL_NAMES, *M5_E2_TOOL_NAMES, *M5_E3_TOOL_NAMES, *M6_E1_TOOL_NAMES),
+            exclude=(
+                *M5_TOOL_NAMES,
+                *M5_E2_TOOL_NAMES,
+                *M5_E3_TOOL_NAMES,
+                *M6_E1_TOOL_NAMES,
+                *M6_E2_TOOL_NAMES,
+            ),
         )
         registry.register_tools_variant(
             6,
@@ -1324,7 +1406,13 @@ def register_video_tools(registry: ToolRegistry, service: JobService, *, mode="m
                     bypass_answer_cache=True,
                 )
             ],
-            exclude=(*M5_TOOL_NAMES, *M5_E2_TOOL_NAMES, *M5_E3_TOOL_NAMES, *M6_E1_TOOL_NAMES),
+            exclude=(
+                *M5_TOOL_NAMES,
+                *M5_E2_TOOL_NAMES,
+                *M5_E3_TOOL_NAMES,
+                *M6_E1_TOOL_NAMES,
+                *M6_E2_TOOL_NAMES,
+            ),
         )
         registry.register_tools_variant(
             7,
@@ -1341,7 +1429,7 @@ def register_video_tools(registry: ToolRegistry, service: JobService, *, mode="m
                     bypass_answer_cache=True,
                 )
             ],
-            exclude=(*M5_E2_TOOL_NAMES, *M5_E3_TOOL_NAMES, *M6_E1_TOOL_NAMES),
+            exclude=(*M5_E2_TOOL_NAMES, *M5_E3_TOOL_NAMES, *M6_E1_TOOL_NAMES, *M6_E2_TOOL_NAMES),
         )
         registry.register_tools_variant(
             8,
@@ -1358,7 +1446,7 @@ def register_video_tools(registry: ToolRegistry, service: JobService, *, mode="m
                     bypass_answer_cache=True,
                 )
             ],
-            exclude=(*M5_E3_TOOL_NAMES, *M6_E1_TOOL_NAMES),
+            exclude=(*M5_E3_TOOL_NAMES, *M6_E1_TOOL_NAMES, *M6_E2_TOOL_NAMES),
         )
         # 9/9 froze the M5 E3 episode surface; M6 E1 hides its new post-production tool.
         registry.register_tools_variant(
@@ -1376,7 +1464,25 @@ def register_video_tools(registry: ToolRegistry, service: JobService, *, mode="m
                     bypass_answer_cache=True,
                 )
             ],
-            exclude=M6_E1_TOOL_NAMES,
+            exclude=(*M6_E1_TOOL_NAMES, *M6_E2_TOOL_NAMES),
+        )
+        # 10/10 froze the M6 E1 subtitle surface; M6 E2 hides only its new TTS writer.
+        registry.register_tools_variant(
+            10,
+            features=[
+                ToolFeature(
+                    name="video",
+                    configuration={
+                        "mode": "mock",
+                        "toolsVersion": 10,
+                        "rulesVersion": 10,
+                        "capabilities": capabilities,
+                    },
+                    instructions=VIDEO_RULES_V10,
+                    bypass_answer_cache=True,
+                )
+            ],
+            exclude=M6_E2_TOOL_NAMES,
         )
     registry.register_wait_resolver(
         "job", lambda binding: resolve_job_wait(service.store, binding, service=service), feature="video"

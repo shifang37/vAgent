@@ -68,8 +68,8 @@ def episode_args(plan, cast, *, title="雨夜咖啡店"):
 
 
 def test_tool_versions_are_ten_and_nine_is_frozen():
-    assert (VIDEO_TOOLS_VERSION, VIDEO_RULES_VERSION) == (10, 10)
-    assert (LIVE_VIDEO_TOOLS_VERSION, LIVE_VIDEO_RULES_VERSION) == (10, 10)
+    assert (VIDEO_TOOLS_VERSION, VIDEO_RULES_VERSION) == (11, 11)
+    assert (LIVE_VIDEO_TOOLS_VERSION, LIVE_VIDEO_RULES_VERSION) == (11, 11)
     assert "episode_plan" in video_tools.M5_TOOL_NAMES
     assert "consistency_review" in video_tools.M5_E2_TOOL_NAMES
     assert "episode_generate" in video_tools.M5_E3_TOOL_NAMES
@@ -79,7 +79,9 @@ def test_tool_versions_are_ten_and_nine_is_frozen():
 def test_new_runs_publish_ten_and_old_snapshots_restore(store):
     registry, service, _adapter, _context = mock_tools(store, clock=None)
     features = registry.features["video"]
-    assert (features["toolsVersion"], features["rulesVersion"]) == (10, 10)
+    assert (features["toolsVersion"], features["rulesVersion"]) == (11, 11)
+    # Frozen variants predate the E2 TTS capability key; restore their exact shape.
+    frozen_features = {key: value for key, value in features.items() if key != "tts"}
     names = {spec["function"]["name"] for spec in registry.specs()}
     assert set(M5_TOOLS) <= names
     assert "consistency_review" in names
@@ -87,7 +89,7 @@ def test_new_runs_publish_ten_and_old_snapshots_restore(store):
 
     # A recorded 8/8 snapshot restores the frozen view: the E3 writers vanish while
     # every M5 E1/E2 tool remains.
-    recorded = {"video": {**features, "toolsVersion": 8, "rulesVersion": 8}}
+    recorded = {"video": {**frozen_features, "toolsVersion": 8, "rulesVersion": 8}}
     frozen = registry.for_record_features(recorded)
     assert frozen is not None
     frozen_names = {spec["function"]["name"] for spec in frozen.specs()}
@@ -104,7 +106,7 @@ def test_new_runs_publish_ten_and_old_snapshots_restore(store):
     assert service is not None
 
     # A recorded 7/7 snapshot still hides the E2 review tool and both E3 tools.
-    seven = {"video": {**features, "toolsVersion": 7, "rulesVersion": 7}}
+    seven = {"video": {**frozen_features, "toolsVersion": 7, "rulesVersion": 7}}
     frozen_seven = registry.for_record_features(seven)
     assert frozen_seven is not None
     seven_names = {spec["function"]["name"] for spec in frozen_seven.specs()}
@@ -115,7 +117,7 @@ def test_new_runs_publish_ten_and_old_snapshots_restore(store):
     assert "episode_generate" not in frozen_seven.instructions
 
     # A recorded 6/6 snapshot still hides both M5 chapters.
-    six = {"video": {**features, "toolsVersion": 6, "rulesVersion": 6}}
+    six = {"video": {**frozen_features, "toolsVersion": 6, "rulesVersion": 6}}
     frozen_six = registry.for_record_features(six)
     assert frozen_six is not None
     assert not (set(M5_TOOLS) & {spec["function"]["name"] for spec in frozen_six.specs()})
@@ -413,4 +415,5 @@ def test_episode_read_without_an_episode_is_empty(store):
         "consistency": None,
         "generation": None,
         "subtitle": None,
+        "audio": None,
     }

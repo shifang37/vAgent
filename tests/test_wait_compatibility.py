@@ -58,7 +58,7 @@ async def test_original_b2_video_fingerprints_and_checkpoints_resume_unchanged(
             create_project_tools(), JobService(reopened, [MockVideoAdapter(reopened)])
         )
         current = AgentRunner(store=reopened, model=model, tools=tools, read_only=read_only)
-        assert current.execution_version == 3 and current.tools.features["video"]["rulesVersion"] == 10
+        assert current.execution_version == 3 and current.tools.features["video"]["rulesVersion"] == 11
         final = await current.resume(first["id"])
         assert final["status"] == "completed" and final["executionVersion"] == 1
         assert final["contextSignature"] == B2_SIGNATURES[context_version, read_only]

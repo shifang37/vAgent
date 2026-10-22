@@ -13,6 +13,17 @@
 > - **字体**：包内 `VAgentSubtitleSC-400.ttf`（Noto Sans SC 子集，改名以符合 OFL 对修改版保留名的要求），`fontRef` 固定名称与 SHA-256；文件缺失或哈希不符返回 `FONT_MISSING`。
 > - **错误码**：E1 额外使用 `RENDER_ENCODE_FAILED` 与 `RENDER_VALIDATION_FAILED` 表示本地编码/输出校验失败（§7 的 18 个码保持不变，仅为新增本地导出失败细分）。
 > - **媒体联合**：soft 成片含 `mov_text` 轨，`mp4-avc-v1` 解析接受 `sbtl/text/subt` 字幕轨（仍拒绝外部数据引用、重叠样本与未知轨道）；音频 `kind=audio`（`contractVersion=3`）在 E1 只冻结记录形状，读取/写入由 E2 实施。
+>
+> **E2 已实施（2026-10-22）**：`tts-providers-v1`、`local-tts-v1`、CosyVoice 适配器、`audio_generate`、音频资产/媒体读写、`mix-zh-v1`、tools/rules 11/11（冻结 10/10）与验收见 [E2 验收](./M6_E2_ACCEPTANCE.md)。实现中对本文件的细化（不改冻结语义）：
+>
+> - **官方事实**：CosyVoice 非实时 HTTP API 为 `POST {base}/api/v1/services/audio/tts/SpeechSynthesizer`，`Authorization: Bearer <Key>`；请求 `{model, input:{text, voice, format:"wav", sample_rate:48000, rate, volume}}`；返回 `request_id`、`output.audio.url`（24 小时有效）、`usage.characters`。共享域名 `dashscope.aliyuncs.com` 与业务空间域名 `{WorkspaceId}.cn-beijing.maas.aliyuncs.com` 均可；`cosyvoice-v2` 北京 2 元/万字符（0.20 元/千字符）、RPM 180。未经真实样本前能力表固定标 `documented-no-real-sample`。
+> - **音色绑定键**：冻结的 `SceneVersion.dialogue[].speaker` 可能为空或未保存为角色，因此绑定键取「speaker（空则 `画外`）+ 集」，能唯一解析到角色时同时记录 `characterId`；`ProviderAudioSource` 追加可选 `episodeId`/`speaker`（E1 从未写入音频资产，历史记录不受影响），使额度、绑定与幂等复用均可从 Store 重算。`VoiceProfile` 仍只描述声音，不承载供应商 voice id。
+> - **预算与价格**：单条 ≤500 字符、每集 ≤2000 字符、≤40 次请求；价格已核实时单条 ≤0.10 CNY、每集 ≤0.40 CNY。金额以 4 位小数记录，只按 CNY；`unknown` 价格（本地夹具）只按字符与次数限制并标注。额度在锁内从 `audio` 集合重算，额度不足或音色冲突整批拒绝，不部分提交。
+> - **本地夹具**：`local-tts-v1` 严格按 §8 公式生成 48 kHz、单声道、16 位 PCM WAV（正弦 + 静音、10 ms 淡入淡出、无时钟/随机）；CosyVoice 请求固定 `format=wav`、`sample_rate=48000`，下载只接受 HTTP(S) `*.aliyuncs.com`、禁用重定向、上限 25 MB。
+> - **混音与响度**：`mix-zh-v1` 每轨 `volume=<gain>dB` + `adelay` + `apad/atrim`，voice 0 dB、BGM −18 dB、SFX −6 dB；BGM 用 `sidechaincompress`（阈值线性 0.1 = −20 dB、ratio 8、attack 20 ms、release 400 ms），最终 `amix normalize=0`。两遍 `loudnorm`（先测量后应用）后，用 `ebur128=peak=true` 对交付文件复测；成品响度超出 −16±0.5 LU、true peak > −1 dBTP 或时长相距时间线超过 1 帧时返回 `LOUDNESS_OUT_OF_RANGE`/`RENDER_VALIDATION_FAILED` 并删除产物。两遍 `loudnorm` JSON 与 EBU R128 复测值都随 `MixResult` 返回，E3 写入 `FilmVersion.render.audio.loudness`。
+> - **错误码**：§7 的 18 个码保持不变；E2 新增 `AUDIO_FORMAT_UNSUPPORTED`、`TTS_KEY_MISSING`、`TTS_EMPTY_EPISODE`、`PROVIDER_RESULT_UNTRUSTED` 与供应商传输码（`PROVIDER_*`），用于本地上传校验与受控 TTS 错误映射。
+> - **工具面**：新 Run 发布 tools/rules **11/11**，`audio_generate` 为 `write`、无 Job；冻结 10/10（隐藏 `audio_generate`、保留 E1 规则字节）与 9/9…1/1 继续按 `toolFeatures` 恢复。`episode_read` 只追加 `audio` 投影（音色表、额度、绑定、资产），不改变既有字段。
+> - **范围**：E2 只做配音生成、资产/媒体与本地混音服务；整集渲染、转场、标题卡、1080P、CLI/Web 音频面板与浏览器验收仍属 E3/E4，`film_render`/`render_read` 未注册。
 
 ## 1. 决策与版本
 
@@ -166,7 +177,7 @@ E0 前的 7 个决策点已确认，冻结如下：
 | 包 | 交付 | 验收 |
 |---|---|---|
 | E1 字幕 | **已交付（2026-10-22）**：schema v7（两个空集合 + media kind=audio）、`subtitle_save`、`subtitle-align-zh-v1`、SRT/ASS 生成、软字幕与旁挂、烧录 profile 与包内字体；tools/rules **10/10**（冻结 9/9）。见 [E1 验收](./M6_E1_ACCEPTANCE.md) | 60 秒样例字幕零漂移；中文渲染正确；人工修正可重渲染；重叠/越界/缺轨全部拒绝；submit=0、模型调用=0 |
-| E2 音频 | `audio_generate`、`tts-providers-v1`、`local-tts-v1` 与 CosyVoice 适配器、音色绑定、混音与 ducking、两遍响度测量；tools/rules **11/11**（冻结 10/10） | 人声清晰无削波；响度测量在容差内；来源与许可可追溯；字符/次数/金额额度超限整批拒绝；离线全链路零真实请求 |
+| E2 音频 | **已交付（2026-10-22）**：`audio_generate`、`tts-providers-v1`、`local-tts-v1` 与 CosyVoice 适配器、音色绑定、音频资产/媒体读写、`mix-zh-v1` 混音/ducking、两遍响度测量；tools/rules **11/11**（冻结 10/10）。见 [E2 验收](./M6_E2_ACCEPTANCE.md) | 人声清晰无削波；响度测量在容差内；来源与许可可追溯；字符/次数/金额额度超限整批拒绝；离线全链路零真实请求 |
 | E3 转场/片头尾/导出/整集 | `cut/fade/crossfade`、标题卡、跨场整集渲染、`720p`/`1080p` profile、旁挂 SRT；tools/rules **13/13**（冻结 11/11） | 转场无黑帧、音画同步；时长与时间线一致；整集 60–90 秒成片；单场失败隔离；同指纹幂等 |
 | E4 验收 | 60–90 秒整集成片（复用真实镜头 + 离线套件）、浏览器播放与字幕开关、响度与字幕检查、安装态与 CI、验收文档 | 一条完整短剧成片可播放、字幕可开关、音频测量达标；失败保留；CI 通过；真实付费样本需单独授权 |
 
@@ -179,10 +190,12 @@ E0 前的 7 个决策点已确认，冻结如下：
 - 1080P 画质增强/超分；1080P 仅作为参数化上采样 profile。
 - Sora/Veo/Seedance/Replicate、可执行插件、PyPI 公开发布。
 
-## 12. E2 前须核实（不得先写实现再补文档）
+## 12. E2 前须核实（2026-10-22 已核实，不得先写实现再补文档）
 
-1. CosyVoice 的官方端点、请求/响应字段、音色 ID 列表、并发与限流。
-2. 计价口径（按字符还是按请求）、货币、是否与 Wan 视频共用业务空间与 Key。
-3. 音频返回格式、采样率、时长与临时 URL 有效期；是否需要下载后校验。
-4. 可用商用/可再分发的 OFL 中文字体子集与许可证文本（随包附 `LICENSES`）。
-5. CC0 素材清单与逐项许可记录格式。
+已核实（2026-10-22，官方页面见下），结果写入 [E2 验收](./M6_E2_ACCEPTANCE.md) §2：
+
+1. CosyVoice 的官方端点、请求/响应字段、音色 ID 列表、并发与限流：非实时 HTTP API `POST {base}/api/v1/services/audio/tts/SpeechSynthesizer`（[HTTP API 参考](https://help.aliyun.com/zh/model-studio/cosyvoice-tts-http-api)）；模型 `cosyvoice-v2`，`input.text/voice/format/sample_rate/rate`；返回 `output.audio.url`（24 小时）、`usage.characters`；北京 RPM 180。音色见 [CosyVoice 音色列表](https://help.aliyun.com/zh/model-studio/cosyvoice-voice-list)。
+2. 计价口径、货币、是否与 Wan 共用 Key：[cosyvoice-v2 模型页](https://help.aliyun.com/zh/model-studio/cosyvoice-v2) 为 **2 元/万字符**（CNY、按字符）；复用 `VAGENT_DASHSCOPE_KEY`，可不填业务空间（共享域名），填写后走业务空间专属域名。
+3. 返回格式/采样率/时长/URL 有效期：请求 `format=wav`、`sample_rate=48000` 后返回 16 位 PCM WAV；结果 URL 24 小时；下载后由 `inspect_wav` 校验 RIFF/PCM 与时长，仅信任 `*.aliyuncs.com` 的 HTTP(S) 地址。
+4. 字体已在 E1 交付（包内 OFL 子集与许可证），E2 未新增字体。
+5. CC0 素材清单与许可格式已由 `ImportedAudioSource`（`title/sourceUrl/license` 必填）冻结；E2 未接入素材导入工具，导入路径留待 E4/M7。

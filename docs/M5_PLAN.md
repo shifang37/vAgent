@@ -1,6 +1,6 @@
 # 后续规划：从“可拼接成片”到 AI 短剧流水线
 
-状态：**E0–E4 已完成（2026-10-22）**；M5 已随 **v0.4.0** 发布（[发布说明](./RELEASE_0.4.0.md)）。**M6 E0 契约已冻结（2026-10-22）**：[M6 契约](./M6_CONTRACTS.md)、[E0 验收](./M6_E0_ACCEPTANCE.md)；**M6 E1 字幕已交付（2026-10-22，schema 7、tools/rules 10/10、离线 submit=0）**：[E1 验收](./M6_E1_ACCEPTANCE.md)。基线：`master` `b8df786`（M4 自动时间线归一化已合入）；上一发布 `v0.3.0` 指向 `4c456f6`。当前能力：16:9 720P、Wan t2v/i2v/flf2v 真实样本、Kling/fal 受控接入、copy 优先 + 自动转码拼接、CLI/Web/headless，以及剧本/小说 → 分集分场分镜与逐场成片。**本规划不包含 9:16 竖屏**，竖屏单列为后续独立话题。
+状态：**E0–E4 已完成（2026-10-22）**；M5 已随 **v0.4.0** 发布（[发布说明](./RELEASE_0.4.0.md)）。**M6 E0 契约已冻结（2026-10-22）**：[M6 契约](./M6_CONTRACTS.md)、[E0 验收](./M6_E0_ACCEPTANCE.md)；**M6 E1 字幕已交付（2026-10-22，schema 7、tools/rules 10/10、离线 submit=0）**：[E1 验收](./M6_E1_ACCEPTANCE.md)；**M6 E2 音频已交付（2026-10-22，tools/rules 11/11、TTS 真实请求=0、视频 submit=0）**：[E2 验收](./M6_E2_ACCEPTANCE.md)。基线：`master` `b8df786`（M4 自动时间线归一化已合入）；上一发布 `v0.3.0` 指向 `4c456f6`。当前能力：16:9 720P、Wan t2v/i2v/flf2v 真实样本、Kling/fal 受控接入、copy 优先 + 自动转码拼接、CLI/Web/headless，以及剧本/小说 → 分集分场分镜与逐场成片。**本规划不包含 9:16 竖屏**，竖屏单列为后续独立话题。
 
 > **E0 已完成（2026-10-22）**：契约见 [M5_CONTRACTS](./M5_CONTRACTS.md)（schema v6 外壳、Episode/Scene/Character/Style、`text-split-zh-v1`、镜头/时长/预算、错误码），证据见 [M5 E0 验收](./M5_E0_ACCEPTANCE.md)。E0 的 `schemaVersion 6` 与本文第 4 节 M6 的“成片版本 v6”不是同一个编号空间：M6 若需新的存储形状必须用 v7。
 >
@@ -121,9 +121,9 @@
 
 ## 8. 新对话启动方式
 
-M5 已全部完成（E0–E4）并随 **v0.4.0** 发布；**M6 E0 契约已冻结（2026-10-22）**，**E1 字幕已交付（2026-10-22）**，下一步是 **M6 E2 音频（`audio_generate`、CosyVoice 适配器与 `local-tts-v1`、音色绑定、混音/ducking、两遍响度）**。启动 E2 时先读 [M6 契约](./M6_CONTRACTS.md) §4/§12（E2 前须核实 CosyVoice 端点、音色、计价与返回格式）、[E1 验收](./M6_E1_ACCEPTANCE.md)、`docs/M6_E0_BASELINE.json` 与 [M5 契约](./M5_CONTRACTS.md)：
+M5 已全部完成（E0–E4）并随 **v0.4.0** 发布；**M6 E0 契约已冻结（2026-10-22）**，**E1 字幕与 E2 音频已交付（2026-10-22）**，下一步是 **M6 E3 转场/片头尾/导出/整集**。启动 E3 时先读 [M6 契约](./M6_CONTRACTS.md) §5/§10、[E1 验收](./M6_E1_ACCEPTANCE.md)、[E2 验收](./M6_E2_ACCEPTANCE.md)、`docs/M6_E0_BASELINE.json` 与 [M5 契约](./M5_CONTRACTS.md)：
 
-> 基于 `v0.4.0`（`b8df786`；schema 6、tools/rules 9/9、冻结 8/8…1/1），按 `docs/M6_CONTRACTS.md` 执行 E2：`audio_generate`、`tts-providers-v1`、`local-tts-v1` 与 CosyVoice 适配器、音色绑定、混音与 ducking、两遍响度测量，工具面升到 11/11（冻结 10/10）。不要做 9:16 竖屏；真实 TTS 只在显式授权下提交，未核实前保持「文档支持，未做真实样本」，离线全链路零真实请求。
+> 基于 `master`（E2 交付后；schema 7、tools/rules 11/11、冻结 10/10…1/1），按 `docs/M6_CONTRACTS.md` 执行 E3：`film_render`/`render_read`、`cut/fade/crossfade`、标题卡、跨场整集渲染、720p/1080p profile 与旁挂 SRT，工具面升到 13/13（冻结 11/11）。不要做 9:16 竖屏；渲染全程本地、零供应商费用，真实付费样本单独授权。
 
 M6 决策点已按 [M6 契约](./M6_CONTRACTS.md) §1 冻结：TTS 用百炼 CosyVoice（复用视频 Key）、音乐仅 CC0/用户导入、默认软字幕 + 可选烧录、1080P 仅参数化上采样、接受水印、包内 OFL 字体、整集成片纳入 E3。
 

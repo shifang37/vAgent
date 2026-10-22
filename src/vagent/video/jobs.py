@@ -574,6 +574,10 @@ class JobService:
 
         # M6 E1 subtitle save/export is local too: no Job and no provider request.
         self.subtitles = SubtitleService(self)
+        from vagent.video.audio_service import AudioService
+
+        # M6 E2 TTS writes audio assets/media; it never registers a video Job.
+        self.audio = AudioService(self)
         self._adapters = {}
         self._capabilities = {}
         self._published = []

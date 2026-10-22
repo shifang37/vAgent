@@ -735,8 +735,11 @@ def cleanup_stale_parts(home, state: dict) -> int:
         if isinstance(raw.get("download"), dict) and raw["download"].get("mediaId")
     }
     removed = 0
-    for path in sorted(media.glob("*/*.mp4.part")):
-        if path.name[: -len(".mp4.part")] in owned:
+    for path in sorted(media.glob("*/*.part")):
+        if path.name.endswith(".mp4.part"):
+            if path.name[: -len(".mp4.part")] in owned:
+                continue
+        elif not path.name.endswith((".wav.part", ".m4a.part")):
             continue
         try:
             info = path.lstat()

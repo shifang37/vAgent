@@ -37,10 +37,11 @@ PLANNING_EXCLUDED_TOOLS = (
     "film_assemble",
     "episode_generate",
     "shot_redo",
+    "audio_generate",
 )
 PLANNING_RULES = """本次是 headless 规划阶段：先用 storyboard_save 把方案保存为按顺序的结构化分镜
 （每个镜头给出 description、framing、durationSeconds、mode），然后简要说明镜头安排。
-本阶段不能登记或提交任何视频任务，也不能拼接成片；不要声称已经生成或交付视频。
+本阶段不能登记或提交任何视频任务，也不能生成配音或拼接成片；不要声称已经生成或交付视频。
 供应商、模型、规格、能力与价格版本及逐桶预算由服务端据此生成计划，用户随后显式授权。"""
 
 PROVIDER_CURRENCIES = {"wan": "CNY", "kling": "USD", "fal": "USD"}
@@ -87,6 +88,13 @@ EXIT_CODES = {
     "VIDEO_MODEL_UNAVAILABLE": EXIT_ARGUMENT,
     "VIDEO_UNSUPPORTED_SPEC": EXIT_ARGUMENT,
     "VIDEO_UNSUPPORTED_MODE": EXIT_ARGUMENT,
+    "TTS_TEXT_LIMIT": EXIT_ARGUMENT,
+    "TTS_PROVIDER_UNKNOWN": EXIT_ARGUMENT,
+    "TTS_KEY_MISSING": EXIT_ARGUMENT,
+    "VOICE_CONFLICT": EXIT_AUTHORIZATION,
+    "TTS_BUDGET_LIMIT": EXIT_AUTHORIZATION,
+    "AUDIO_ASSET_MISSING": EXIT_ARGUMENT,
+    "AUDIO_FORMAT_UNSUPPORTED": EXIT_ARGUMENT,
     "NOT_FOUND": EXIT_ARGUMENT,
     "CANCELLED": EXIT_CANCELLED,
 }

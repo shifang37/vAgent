@@ -1,11 +1,12 @@
-"""M6 schema 7: the audio media union branch (``kind=audio``, contract version 3).
+"""M6 audio domain: the ``kind=audio`` media branch and append-only audio assets.
 
-E1 freezes the record shape so schema 7 can index audio files; E2 is the first
-stage that writes one. No reader or writer here opens a file: the media service
-keeps rejecting audio delivery until E2 adds the audio pipeline, and the film
-selectors treat an audio record as an incompatible input instead of guessing.
+E1 froze the record shape so schema 7 can index audio files; E2 writes the first
+real records (deterministic local TTS or a verified provider response) and opens
+the read path. Files are still owned by :class:`MediaFiles`; nothing here opens a
+path, so a record and its bytes are committed by the audio service in one step.
 """
 
+from decimal import Decimal
 from typing import Annotated, Literal
 
 from pydantic import Field, model_validator
@@ -27,6 +28,39 @@ AUDIO_EXTENSIONS = {"audio/wav": "wav", "audio/mp4": "m4a"}
 AUDIO_VERSION_LIMIT = 64
 AUDIO_KIND_LIMITS = {"voice": 40, "bgm": 8, "sfx": 16}
 AUDIO_MAX_CUE_SECONDS = 60
+
+# M6 E2 freezes the TTS surface: one request per dialogue line, provider pricing
+# verified from the official CosyVoice page (2 CNY per 10,000 characters).
+TTS_PROVIDERS_VERSION = "tts-providers-v1"
+TTS_EPISODE_CHARACTER_LIMIT = 2000
+TTS_REQUEST_CHARACTER_LIMIT = 500
+TTS_EPISODE_REQUEST_LIMIT = 40
+TTS_PRICE_PER_THOUSAND_CHARACTERS = Decimal("0.20")
+TTS_EPISODE_COST_LIMIT = Decimal("0.40")
+TTS_REQUEST_COST_LIMIT = Decimal("0.10")
+TTS_COST_QUANTUM = Decimal("0.0001")
+NARRATOR_SPEAKER = "画外"
+
+MESSAGES = {
+    "AUDIO_ASSET_MISSING": "引用的音频资产或媒体文件缺失。",
+    "AUDIO_LICENSE_MISSING": "导入音频缺少许可与来源。",
+    "AUDIO_FORMAT_UNSUPPORTED": "音频格式不受支持，本轮只接受 48 kHz PCM WAV。",
+    "TTS_TEXT_LIMIT": "单条台词超过 500 字符或本集累计超过 2000 字符。",
+    "TTS_BUDGET_LIMIT": "本集 TTS 请求次数或金额额度不足。",
+    "TTS_PROVIDER_UNKNOWN": "供应商、模型或音色未在 tts-providers-v1 中核实。",
+    "VOICE_CONFLICT": "同一集同一角色已绑定另一个音色。",
+}
+
+
+def tts_cost(characters: int, price_per_thousand: Decimal | None = None) -> Decimal | None:
+    """Exact per-request cost, quantized to 0.0001 CNY; ``None`` when unpriced."""
+    if price_per_thousand is None:
+        return None
+    return (Decimal(characters) / Decimal(1000) * price_per_thousand).quantize(TTS_COST_QUANTUM)
+
+
+def speaker_of(source: "ProviderAudioSource") -> str:
+    return source.speaker or NARRATOR_SPEAKER
 
 
 class AudioMedia(Contract):
@@ -69,9 +103,45 @@ class ProviderAudioSource(Contract):
     provider: str = Field(min_length=1, max_length=40)
     model: str = Field(min_length=1, max_length=80)
     voice_id: str = Field(min_length=1, max_length=80)
-    text: str = Field(min_length=1, max_length=500)
+    text: str = Field(min_length=1, max_length=TTS_REQUEST_CHARACTER_LIMIT)
     speed: float = Field(default=1.0, ge=0.5, le=2.0, allow_inf_nan=False)
     character_id: Identifier | None = None
+    # E2: the episode and dialogue role freeze TTS accounting and voice binding.
+    episode_id: Identifier | None = None
+    speaker: str | None = Field(default=None, min_length=1, max_length=40)
+
+
+class AudioLineRef(Contract):
+    """One frozen dialogue line: scene plus paragraph, optionally disambiguated by text."""
+
+    scene_id: Identifier
+    paragraph: int = Field(ge=0, le=100)
+    text: str | None = Field(default=None, min_length=1, max_length=TTS_REQUEST_CHARACTER_LIMIT)
+
+
+class AudioVoice(Contract):
+    """A speaker-to-voice mapping; the provider/model comes from the mode's table."""
+
+    speaker: str = Field(min_length=1, max_length=40)
+    voice_id: str = Field(min_length=1, max_length=80)
+    speed: float = Field(default=1.0, ge=0.5, le=2.0, allow_inf_nan=False)
+
+
+class AudioGenerateArgs(Contract):
+    episode_id: Identifier
+    lines: JsonTuple[AudioLineRef] | None = Field(default=None, max_length=256)
+    voices: JsonTuple[AudioVoice] = Field(min_length=1, max_length=20)
+    confirm: bool = False
+
+    @model_validator(mode="after")
+    def unique_targets(self):
+        if len({voice.speaker for voice in self.voices}) != len(self.voices):
+            raise ValueError("Each speaker may appear only once in voices")
+        if self.lines is not None:
+            keys = [(line.scene_id, line.paragraph) for line in self.lines]
+            if len(set(keys)) != len(keys):
+                raise ValueError("A dialogue line may appear only once in lines")
+        return self
 
 
 class ImportedAudioSource(Contract):
@@ -127,19 +197,27 @@ class AudioAsset(Contract):
         return self
 
 
+def _voice_bucket(state: dict, asset: "AudioAsset", source: "ProviderAudioSource") -> str:
+    """Per-episode voice assets count against that episode; others stay project-wide."""
+    if asset.kind != "voice" or source.episode_id is None:
+        return "project"
+    raw = state["episodes"].get(source.episode_id)
+    if raw is None or raw["projectId"] != asset.project_id:
+        raise AppError("AUDIO_CONFLICT", "配音资产引用了不存在或跨项目的分集。")
+    return source.episode_id
+
+
 def validate_audio_changes(previous: dict[str, dict], state: dict) -> None:
     """Every Store commit re-checks append-only audio history and its media record."""
     assets = state.get("audio", {})
     if previous.keys() - assets.keys():
         raise AppError("AUDIO_IMMUTABLE", "已保存的音频资产不能删除。")
-    counts = {"voice": 0, "bgm": 0, "sfx": 0}
+    counts: dict[tuple[str, str], int] = {}
     for key, raw in assets.items():
         asset = AudioAsset.model_validate(raw)
         if asset.id != key or asset.project_id not in state["projects"]:
             raise AppError("AUDIO_CONFLICT", "音频资产 ID 或所属项目不匹配。")
-        counts[asset.kind] += 1
-        if counts[asset.kind] > AUDIO_KIND_LIMITS[asset.kind]:
-            raise AppError("AUDIO_CONFLICT", "音频资产数量超过冻结上限。")
+        bucket = "project"
         for version in asset.versions:
             media_raw = state["media"].get(version.media_id)
             if media_raw is None or media_raw.get("kind") != "audio":
@@ -154,6 +232,14 @@ def validate_audio_changes(previous: dict[str, dict], state: dict) -> None:
                 or media.channels != version.channels
             ):
                 raise AppError("AUDIO_ASSET_MISSING", "音频版本与本地音频媒体的测量不一致。")
+            if version.duration_seconds > AUDIO_MAX_CUE_SECONDS:
+                raise AppError("AUDIO_CONFLICT", "单条音频超过 60 秒的冻结上限。")
+            source = version.source
+            if bucket == "project" and isinstance(source, ProviderAudioSource):
+                bucket = _voice_bucket(state, asset, source)
+        counts[(asset.kind, bucket)] = counts.get((asset.kind, bucket), 0) + 1
+        if counts[(asset.kind, bucket)] > AUDIO_KIND_LIMITS[asset.kind]:
+            raise AppError("AUDIO_CONFLICT", "音频资产数量超过冻结上限。")
         old_raw = previous.get(key)
         if old_raw is None:
             if asset.revision != 0 or len(asset.versions) != 1:

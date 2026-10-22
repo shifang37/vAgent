@@ -1,8 +1,9 @@
-"""M6 E1: schema 7, the v6->v7 migration, the audio media union and baseline drift."""
+"""M6: schema 7, the v6->v7 migration, the audio media union and baseline drift."""
 
 import hashlib
 import importlib
 import json
+from decimal import Decimal
 from pathlib import Path
 
 import pytest
@@ -185,9 +186,11 @@ def test_audio_media_branch_round_trips_and_is_not_a_video(store):
     state = store.snapshot()
     assert parse_media(state["media"][media_id]).__class__.__name__ == "AudioMedia"
     service = JobService(store, [MockVideoAdapter(store)])
-    with pytest.raises(AppError) as error:
-        service.media.view(media_id)
-    assert error.value.code == "MEDIA_NOT_FOUND"
+    view = service.media.view(media_id)
+    assert view["kind"] == "audio"
+    assert view["mimeType"] == "audio/wav"
+    assert view["durationSeconds"] == 1.5
+    assert view["mediaAvailable"] is True
     # An audio record is never a film input: the union keeps the branches separate.
     assert state["audio"][asset_id]["versions"][0]["mediaId"] == media_id
 
@@ -317,7 +320,7 @@ def test_e1_keeps_every_baseline_schema_hash_except_the_declared_change():
 
 
 def test_frozen_tts_and_subtitle_limits_match_the_contract():
-    from vagent.video import films
+    from vagent.video import audio, films
     from vagent.video.subtitles import (
         SUBTITLE_CUE_LIMIT,
         SUBTITLE_CUE_MAX_CHARS,
@@ -331,6 +334,16 @@ def test_frozen_tts_and_subtitle_limits_match_the_contract():
     assert films.RENDER_TIMEOUT_SECONDS == 120.0
     assert films.RENDER_JOB_TIMEOUT_SECONDS == 600.0
     assert films.TITLE_CARD_LIMIT == 4
+    assert audio.TTS_PROVIDERS_VERSION == "tts-providers-v1"
+    assert (
+        audio.TTS_EPISODE_CHARACTER_LIMIT,
+        audio.TTS_REQUEST_CHARACTER_LIMIT,
+        audio.TTS_EPISODE_REQUEST_LIMIT,
+    ) == (2000, 500, 40)
+    assert str(audio.TTS_PRICE_PER_THOUSAND_CHARACTERS) == "0.20"
+    assert str(audio.TTS_EPISODE_COST_LIMIT) == "0.40"
+    assert str(audio.TTS_REQUEST_COST_LIMIT) == "0.10"
+    assert audio.tts_cost(500, audio.TTS_PRICE_PER_THOUSAND_CHARACTERS) == Decimal("0.1000")
 
 
 def test_bundled_font_matches_its_manifest_licence_and_pinned_digest():
