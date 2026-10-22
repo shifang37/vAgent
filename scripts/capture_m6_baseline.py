@@ -262,7 +262,7 @@ def main() -> int:
         "limits": frozen_limits(),
         "ffmpeg": ffmpeg_facts(),
     }
-    OUTPUT.write_text(json.dumps(report, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
+    OUTPUT.write_text(json.dumps(report, ensure_ascii=False, indent=2) + "\n", encoding="utf-8", newline="\n")
     print(f"wrote {OUTPUT.relative_to(ROOT)}")
     return 0
 
