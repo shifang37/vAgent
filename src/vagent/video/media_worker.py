@@ -58,14 +58,60 @@ class MediaWorker:
                 pass
 
     def _save(self, job, **changes):
-        return self.jobs.save(
-            changed_download(job, self.jobs.timestamp(), **changes), expected_revision=job.revision
-        )
+        """Persist download changes against the latest revision, never losing progress.
+
+        A set wait refreshes media availability on the same Job while a download is in
+        flight; treating its revision bump as a fatal conflict used to leave the
+        ``writing`` phase behind and re-download the whole clip. Retrying against the
+        latest record keeps the prepared bytes and merges the concurrent availability.
+        """
+        for _ in range(4):
+            latest = self.jobs.get(job.id)
+            updated = changed_download(latest, self.jobs.timestamp(), **changes)
+            try:
+                return self.jobs.save(updated, expected_revision=latest.revision)
+            except AppError as error:
+                if error.code != "JOB_REVISION_CONFLICT":
+                    raise
+                job = latest
+        raise AppError("JOB_REVISION_CONFLICT", "下载状态持续变化，本次写入未提交。")
+
+    def _start_download(self, job):
+        for _ in range(4):
+            latest = self.jobs.get(job.id)
+            timestamp = self.jobs.timestamp()
+            updated = changed_download(
+                latest,
+                timestamp,
+                download={
+                    "phase": "writing",
+                    "attempts": latest.download.attempts + 1,
+                    "windowAttempts": latest.download.window_attempts + 1,
+                    "nextAttemptAt": None,
+                    "startedAt": timestamp,
+                    "deadlineAt": after_seconds(timestamp, latest.download_policy.total_timeout_seconds),
+                    "error": None,
+                },
+            )
+            try:
+                return self.jobs.save(updated, expected_revision=latest.revision)
+            except AppError as error:
+                if error.code != "JOB_REVISION_CONFLICT":
+                    raise
+                job = latest
+        raise AppError("JOB_REVISION_CONFLICT", "下载状态持续变化，本次写入未提交。")
 
     def _fail(self, job, error, *, failure_at=None):
-        latest = self.jobs.get(job.id)
-        updated = failed_download(latest, error, self.jobs.timestamp(), failure_at=failure_at)
-        return self.jobs.save(updated, expected_revision=latest.revision)
+        for _ in range(4):
+            latest = self.jobs.get(job.id)
+            updated = failed_download(latest, error, self.jobs.timestamp(), failure_at=failure_at)
+            try:
+                return self.jobs.save(updated, expected_revision=latest.revision)
+            except AppError as conflict:
+                if conflict.code != "JOB_REVISION_CONFLICT":
+                    raise
+                job = latest
+        raise AppError("JOB_REVISION_CONFLICT", "下载状态持续变化，本次失败未提交。")
 
     async def run_once(self):
         async with self._turn_lock:
@@ -125,19 +171,8 @@ class MediaWorker:
             return await self._finish(job)
         if job.download.window_attempts >= job.download_policy.max_attempts_per_window:
             raise MediaError("DOWNLOAD_NETWORK")
-        timestamp = self.jobs.timestamp()
-        job = self._save(
-            job,
-            download={
-                "phase": "writing",
-                "attempts": job.download.attempts + 1,
-                "windowAttempts": job.download.window_attempts + 1,
-                "nextAttemptAt": None,
-                "startedAt": timestamp,
-                "deadlineAt": after_seconds(timestamp, job.download_policy.total_timeout_seconds),
-                "error": None,
-            },
-        )
+        job = self._start_download(job)
+        timestamp = job.download.started_at
         part = job.download.relative_path + ".part"
         await disk_io(self.files.remove_part, part)
         try:

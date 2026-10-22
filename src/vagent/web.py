@@ -271,6 +271,14 @@ def create_app(config, *, port=3210, model=None, policy=None):
     async def storyboards(projectId: str):
         return {"storyboards": app.state.service.storyboards(projectId)}
 
+    @app.get("/api/episodes")
+    async def episodes(projectId: str):
+        return await file_io(app.state.service.episodes, projectId)
+
+    @app.get("/api/episodes/{episode_id}")
+    async def episode_detail(episode_id: str, projectId: str):
+        return await file_io(app.state.service.episode, projectId, episode_id)
+
     @app.get("/api/storyboards/{storyboard_id}")
     async def storyboard_detail(storyboard_id: str, projectId: str):
         return app.state.service.storyboard(projectId, storyboard_id)
@@ -386,6 +394,7 @@ def create_app(config, *, port=3210, model=None, policy=None):
                 "job-state.js",
                 "storyboard-state.js",
                 "film-state.js",
+                "episode-state.js",
                 "styles.css",
                 "mark.svg",
             }

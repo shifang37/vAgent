@@ -23,11 +23,22 @@ import {
   shotVersions,
 } from "./storyboard-state.js";
 
+import {
+  episodeBudget,
+  episodeMeta,
+  episodeProgress,
+  filmStatusLabel,
+  sceneGeneration,
+  sceneSummary,
+  shotStatusLabel,
+} from "./episode-state.js";
+
 const $ = (selector) => document.querySelector(selector);
 const paths = {
   "plus-square":
     '<rect x="4" y="4" width="16" height="16" rx="5"/><path d="M12 8v8m-4-4h8"/>',
   plus: '<path d="M12 5v14M5 12h14"/>',
+  episode: '<path d="M4 6h16M4 12h16M4 18h10"/>',
   folder:
     '<path d="M3 7V5a2 2 0 0 1 2-2h5l2 3h7a2 2 0 0 1 2 2v11a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V7h18"/>',
   layers: '<path d="m12 3 9 5-9 5-9-5 9-5Zm-9 9 9 5 9-5M3 16l9 5 9-5"/>',
@@ -115,6 +126,7 @@ let viewGeneration = 0;
 let dialogGeneration = 0,
   configSubmitting = false;
 let panelMode = null,
+  storyboardOverride = null,
   assets = [],
   assetsLoaded = false,
   usageReport = null,
@@ -314,8 +326,10 @@ function resetStoryboardUi() {
   pendingBatch = null;
   sequence = { items: null, index: -1 };
   panelMode = null;
+  storyboardOverride = null;
   $("#storyboard-panel").hidden = true;
   $("#artifact-panel").hidden = true;
+  $("#episode-panel").hidden = true;
 }
 async function selectSession(id) {
   const generation = ++viewGeneration;
@@ -509,6 +523,7 @@ function render() {
   updateSend();
   renderObserve();
   renderStoryboardPanel();
+  renderEpisodePanel();
 }
 function metric(label, value) {
   return `<div class="metric"><small>${label}</small><strong>${value ?? "—"}</strong></div>`;
@@ -541,7 +556,8 @@ function renderObserve() {
     <h3>执行事件</h3><div class="event-list">${(run?.events || []).map((e) => `<div><small>#${e.sequence}</small> ${escapeHTML(e.type)} ${escapeHTML(e.name || "")}${e.ok === false ? " ×" : ""}</div>`).join("") || "暂无事件"}</div>`;
   icons($("#observe-panel"));
 }
-const storyboard = () => snapshot?.storyboard || null;
+const storyboard = () => storyboardOverride || snapshot?.storyboard || null;
+const episode = () => snapshot?.episode || null;
 const shotIdOf = (event) => event.target.closest("[data-shot-id]")?.dataset.shotId || null;
 
 function selectedShots() {
@@ -570,6 +586,15 @@ async function refreshSession(id) {
   const next = await api(`/api/sessions/${encodeURIComponent(id)}`);
   if (snapshot?.id === id) {
     applySnapshot(next);
+    if (storyboardOverride?.storyboardId) {
+      try {
+        storyboardOverride = await api(
+          `/api/storyboards/${encodeURIComponent(storyboardOverride.storyboardId)}?projectId=${encodeURIComponent(id)}`,
+        );
+      } catch {
+        storyboardOverride = null;
+      }
+    }
     render();
   }
   return next;
@@ -579,6 +604,7 @@ function openStoryboardPanel() {
   panelMode = "storyboard";
   $("#artifact-panel").hidden = true;
   $("#observe-panel").hidden = true;
+  $("#episode-panel").hidden = true;
   $("#storyboard-panel").hidden = false;
   renderStoryboardPanel();
 }
@@ -586,8 +612,39 @@ function openStoryboardPanel() {
 function openInspector(mode) {
   panelMode = mode;
   $("#storyboard-panel").hidden = true;
+  $("#episode-panel").hidden = true;
   $("#observe-panel").hidden = true;
   $("#artifact-panel").hidden = false;
+}
+
+function openEpisodePanel() {
+  panelMode = "episode";
+  $("#artifact-panel").hidden = true;
+  $("#observe-panel").hidden = true;
+  $("#storyboard-panel").hidden = true;
+  $("#episode-panel").hidden = false;
+  renderEpisodePanel();
+}
+
+async function openSceneStoryboard(storyboardId) {
+  if (!storyboardId || !activeId) return;
+  try {
+    storyboardOverride = await api(
+      `/api/storyboards/${encodeURIComponent(storyboardId)}?projectId=${encodeURIComponent(activeId)}`,
+    );
+  } catch (error) {
+    toast(error.message);
+    return;
+  }
+  panelMode = "storyboard";
+  $("#artifact-panel").hidden = true;
+  $("#observe-panel").hidden = true;
+  $("#episode-panel").hidden = true;
+  $("#storyboard-panel").hidden = false;
+  filmLoadedKey = null;
+  filmState = null;
+  filmError = null;
+  renderStoryboardPanel();
 }
 
 async function showAssets() {
@@ -614,6 +671,78 @@ async function showUsage() {
   usageReport = report;
   openInspector("usage");
   renderUsagePanel();
+}
+
+function renderEpisodePanel() {
+  const panel = $("#episode-panel");
+  if (panelMode !== "episode") {
+    panel.hidden = true;
+    return;
+  }
+  panel.hidden = false;
+  const view = episode();
+  if (!view || !view.episode) {
+    panel.innerHTML = `${panelHeading("分集", "close-episode")}<p class="empty">当前项目还没有分集。让 Agent 用 episode_plan 与 episode_save 保存分集后，这里会显示场记、预算、生成进度与逐场成片。</p>`;
+    icons(panel);
+    return;
+  }
+  const meta = episodeMeta(view);
+  const budget = episodeBudget(view);
+  const progress = episodeProgress(view);
+  const rows = sceneGeneration(view);
+  const scenes = view.scenes || [];
+  const characters = view.consistency?.characters || [];
+  const scenesHTML = scenes
+    .map((scene, index) => {
+      const row = rows.get(scene.sceneId);
+      const film = scene.film;
+      const latest = film?.latest;
+      const playable = Boolean(latest?.mediaAvailable && latest?.mediaUrl);
+      return `<article class="episode-scene" data-scene-id="${escapeHTML(scene.sceneId)}">
+        <div class="episode-scene-head">
+          <strong>${index + 1}. ${escapeHTML(scene.heading)}</strong>
+          <span>${scene.shotCount} 镜 · ${scene.durationSeconds} 秒</span>
+        </div>
+        <p class="meta">${escapeHTML(scene.synopsis || "")}</p>
+        <p class="meta">${escapeHTML(sceneSummary(scene, row))}</p>
+        <p class="meta">分镜：${scene.storyboardId ? "已绑定" : "未绑定"} · 成片：${escapeHTML(filmStatusLabel(film))}</p>
+        <div class="episode-actions">
+          ${scene.storyboardId ? `<button class="secondary" data-action="open-scene-storyboard" data-storyboard-id="${escapeHTML(scene.storyboardId)}">查看分镜与镜头</button>` : ""}
+          ${playable ? `<a class="primary" href="${escapeHTML(latest.mediaUrl)}" target="_blank" rel="noopener">播放成片 v${film.currentVersion}</a>` : ""}
+          ${playable ? `<a class="secondary" href="${escapeHTML(latest.mediaUrl)}?download=1" download="${escapeHTML(latest.outputMediaId)}.mp4">下载</a>` : ""}
+        </div>
+      </article>`;
+    })
+    .join("");
+  const charactersHTML = characters.length
+    ? characters
+        .map((character) => {
+          const reviews = character.reviews || [];
+          const score = reviews.length ? ` · 人工评分 ${reviews.at(-1).score}/5` : "";
+          return `<li><strong>${escapeHTML(character.name || character.characterId)}</strong>：${character.shotCount} 个镜头 · ${
+            character.consistent ? "同一素材" : "素材不一致"
+          }${score}</li>`;
+        })
+        .join("")
+    : '<li class="meta">这个分集还没有引用角色圣经。</li>';
+  panel.innerHTML = `${panelHeading("分集", "close-episode")}
+    <p class="meta">${escapeHTML(meta.title)} · 当前版本 ${meta.currentVersion} · revision ${meta.revision} · ${meta.sceneCount} 场 / ${meta.shotCount} 镜 / ${meta.targetDurationSeconds} 秒</p>
+    <div class="episode-budget">
+      <span>镜头交付 <strong>${progress.delivered}/${progress.planned}</strong></span>
+      <span>集级任务 <strong>${budget.usedJobs}/${budget.jobCap}</strong></span>
+      <span>集级估算 <strong>${escapeHTML(budget.usedAmount)} / ${escapeHTML(budget.episodeCapAmount)} ${escapeHTML(budget.currency)}</strong></span>
+      <span>剩余 <strong>${escapeHTML(budget.remainingAmount)} ${escapeHTML(budget.currency)}</strong></span>
+    </div>
+    ${
+      budget.foreignCurrencyJobs.length
+        ? `<p class="meta">有 ${budget.foreignCurrencyJobs.length} 个任务使用其他币种报价，不进入集级 CNY 额度。</p>`
+        : ""
+    }
+    <div class="episode-scenes">${scenesHTML || '<p class="empty">分集还没有冻结的场记。</p>'}</div>
+    <h3>角色一致性</h3>
+    <ul class="episode-consistency">${charactersHTML}</ul>
+    <p class="meta">分集、场记与角色圣经由 Agent 的 episode_* / bible_* 工具保存；整集登记与逐镜头重做通过对话显式确认或 CLI 执行，这里只读展示。</p>`;
+  icons(panel);
 }
 
 function renderStoryboardPanel() {
@@ -1494,7 +1623,12 @@ document.addEventListener("click", async (event) => {
     }
     if (action === "close-storyboard") {
       panelMode = null;
+      storyboardOverride = null;
       $("#storyboard-panel").hidden = true;
+    }
+    if (action === "close-episode") {
+      panelMode = null;
+      $("#episode-panel").hidden = true;
     }
     if (action === "close-observe") $("#observe-panel").hidden = true;
     if (action === "observe") {
@@ -1504,6 +1638,11 @@ document.addEventListener("click", async (event) => {
       renderObserve();
     }
     if (action === "storyboard") openStoryboardPanel();
+    if (action === "episode") openEpisodePanel();
+    if (action === "open-scene-storyboard")
+      await openSceneStoryboard(
+        event.target.closest("[data-storyboard-id]")?.dataset.storyboardId,
+      );
     if (action === "assets") await showAssets();
     if (action === "usage") await showUsage();
     if (action === "refresh-storyboard")

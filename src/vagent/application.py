@@ -28,6 +28,7 @@ from vagent.usage import summarize_usage
 from vagent.video import clients
 from vagent.video.assets import asset_reference_loader
 from vagent.video.contracts import ImageInputRule
+from vagent.video.episodes import episode_summaries, read_episode
 from vagent.video.jobs import JobService
 from vagent.video.media import file_io
 from vagent.video.media_http import MediaHttpClient
@@ -249,6 +250,23 @@ class ApplicationService:
         assert_id(storyboard_id)
         return storyboard_view(state, storyboard_in_state(state, session_id, storyboard_id))
 
+    def episodes(self, session_id):
+        """Episode summaries of one project; never another project's records."""
+        assert_id(session_id)
+        state = self.store.snapshot()
+        return {"episodes": episode_summaries(state, session_id)}
+
+    def episode(self, session_id, episode_id=None):
+        """The one episode view shared by the panel, the CLI and the tools."""
+        assert_id(session_id)
+        if episode_id is not None:
+            assert_id(episode_id)
+        view = read_episode({"episodeId": episode_id}, self.store.snapshot(), session_id)
+        for scene in view["scenes"]:
+            storyboard_id = scene.get("storyboardId")
+            scene["film"] = self.films.view(session_id, storyboard_id)["film"] if storyboard_id else None
+        return view
+
     def assets(self, project_id=None):
         """Asset metadata in the whole library, or one project's own imports."""
         if project_id is not None:
@@ -289,6 +307,17 @@ class ApplicationService:
             storyboard_id=request["storyboardId"],
             storyboard_version=request["storyboardVersion"],
             shot_ids=request["shotIds"],
+            confirm=request["confirm"],
+        )
+
+    def generate_episode(self, session_id, request: dict) -> dict:
+        """Whole-episode registration from the local UI, under its own client Run."""
+        assert_id(session_id)
+        return clients.generate_episode(
+            self.video_jobs,
+            session_id=session_id,
+            client_request_id=request["clientRequestId"],
+            episode_id=request["episodeId"],
             confirm=request["confirm"],
         )
 
@@ -734,6 +763,7 @@ class ApplicationService:
             "artifacts": [a for a in state["artifacts"].values() if a["projectId"] == session_id],
             "jobs": self.jobs(session_id),
             "storyboard": current_storyboard_view(state, session_id),
+            "episode": self.episode(session_id),
             "wait": self._wait_view(state["waits"].get((run or {}).get("activeWaitId"))),
             "draft": copy.deepcopy(self.drafts.get(session_id)),
         }

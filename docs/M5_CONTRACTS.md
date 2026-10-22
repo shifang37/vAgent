@@ -168,4 +168,4 @@ E3 未新增错误码：集级任务数（`jobCap`）或金额（`episodeCapAmou
 - **E1**：`text-split-zh-v1` 确定性、对白零丢失、预算合成、`episode_plan`/`episode_save`/`episode_read` 工具与 7/7 冻结变体、6/6 与 7/7 共存恢复、v5→v6 真实迁移与字节备份、3 篇固定样例离线可复现（模型调用=0）。
 - **E2**：角色圣经与参考图导入、跨镜头一致性引用、缺素材拒绝、人工一致性评分记录。已交付：场景绑定、`characterIds`→冻结素材、`style-prompt-zh-v1`、`episode_read` 证据与 `consistency_review`（tools/rules 8/8，冻结 7/7），见 [E2 验收](./M5_E2_ACCEPTANCE.md)。
 - **E3**：集级批量登记与预算原子性、逐镜头重做隔离、集合等待、失败隔离、submit 与预算一致（真实样本需单独授权）。已交付：`episode_generate`/`shot_redo` 与 tools/rules **9/9**（冻结 8/8）、集级额度跨 Run 累计与 Store 重算、20 成员集合等待、`episode_read.generation`，见 [E3 验收](./M5_E3_ACCEPTANCE.md)。
-- **E4**：离线端到端套件、经批准的最小真实样本成片、CLI/Web 流程与验收文档；未做真实样本的能力保持标注。
+- **E4**：离线端到端套件、经批准的最小真实样本成片、CLI/Web 流程与验收文档；未做真实样本的能力保持标注。已交付：`scripts/evaluate_m5.py` 5 用例（42 次受控提交、18 个成片版本、真实供应商/模型调用 0）、CLI `episode plan/save/show/generate`、Web 只读分集面板、安装态 wheel 与受控浏览器；真实样本为 `fridge-notes` 18 镜头 / 90 秒 / 7 场（18 次 Wan 提交，估算 54.00 CNY，实际账单 unknown，7 条逐场成片）；逐场成片口径不变，整集成片仍属 M6。见 [E4 验收](./M5_E4_ACCEPTANCE.md)。

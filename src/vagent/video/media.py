@@ -399,6 +399,10 @@ class MediaService:
     def refresh(self, job):
         if not isinstance(job, LiveJob) or job.status != "succeeded":
             return job
+        # A download in flight owns the Job's revision; its availability is not final
+        # yet, and writing here would contend with the worker's own progress saves.
+        if job.download is not None and job.download.phase in {"writing", "prepared"}:
+            return job
         asset = self.asset(job.result.media_refs[0].media_id, project_id=job.context.project_id)
         for _ in range(3):
             status, reason = self._availability(asset)

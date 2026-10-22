@@ -934,6 +934,134 @@ def smoke_m3_evaluation(directory):
     return report
 
 
+def smoke_m5_evaluation(directory):
+    output = Path(directory) / "m5-evaluation.json"
+    run_command(
+        [
+            sys.executable,
+            "-I",
+            str(Path(__file__).with_name("evaluate_m5.py").resolve()),
+            "--home",
+            str(Path(directory) / "m5-state"),
+            "--output",
+            str(output),
+        ],
+        env=isolated_environment(Path(directory) / "unused-config"),
+        timeout=1500,
+    )
+    report = json.loads(output.read_text(encoding="utf-8"))
+    assert report["status"] == "passed" and report["mode"] == "offline-fixture"
+    assert report["totals"]["passedCases"] == report["totals"]["plannedCases"] == 5
+    assert report["totals"]["submitCalls"] == 42
+    assert report["totals"]["filmVersions"] == 18
+    assert report["totals"]["redos"] == 2
+    assert not (Path(report["dataDirectory"]) / "instance.lock").exists()
+    return report
+
+
+async def smoke_m5_workbench(directory):
+    """Installed M5 surface: episode state, CLI read view and the read-only Web panel."""
+    from vagent.video.adaptation import plan_episode
+
+    home = Path(directory) / "m5-workbench"
+    text = (
+        Path(__file__).resolve().parent.parent / "tests" / "fixtures" / "m5" / "texts" / "fridge-notes.md"
+    ).read_text(encoding="utf-8")
+    plan = plan_episode(text, title="冰箱上的便条")
+    with FileStore.open(home) as store:
+        store.ensure_session("m5")
+        registry = register_video_tools(
+            create_project_tools(), JobService(store, [MockVideoAdapter(store)]), mode="mock"
+        )
+        saved = registry.execute(
+            "episode_save",
+            {
+                "title": "冰箱上的便条",
+                "scenes": [
+                    {
+                        "heading": scene["heading"],
+                        "location": scene["location"],
+                        "timeOfDay": scene["timeOfDay"],
+                        "synopsis": scene["synopsis"],
+                        "dialogue": [
+                            {
+                                "text": line["text"],
+                                "speaker": line.get("speaker"),
+                                "paragraph": line["paragraph"],
+                            }
+                            for line in scene["dialogue"]
+                        ],
+                        "shotCount": scene["shotCount"],
+                        "durationSeconds": scene["durationSeconds"],
+                    }
+                    for scene in plan["scenes"]
+                ],
+            },
+            store=store,
+            project_id="m5",
+            operation_key="wheel-m5-episode",
+        )
+        assert saved["ok"], saved
+        for index, scene_id in enumerate(saved["data"]["sceneIds"], start=1):
+            shots = [
+                {
+                    "description": shot["description"],
+                    "framing": shot["framing"],
+                    "cameraMovement": shot["cameraMovement"],
+                    "durationSeconds": shot["durationSeconds"],
+                    "mode": "t2v",
+                }
+                for shot in plan["shots"]
+                if shot["sceneIndex"] == index
+            ]
+            result = registry.execute(
+                "storyboard_save",
+                {"sceneId": scene_id, "title": plan["scenes"][index - 1]["heading"], "shots": shots},
+                store=store,
+                project_id="m5",
+                operation_key=f"wheel-m5-board-{index}",
+            )
+            assert result["ok"], result
+    episode_id = saved["data"]["episodeId"]
+
+    view = json.loads(
+        run_command(
+            [sys.executable, "-m", "vagent", "episode", "show", "-s", "m5"],
+            env=isolated_environment(home),
+            timeout=180,
+        )
+    )
+    assert view["episodeId"] == episode_id
+    assert len(view["scenes"]) == len(plan["scenes"]) == 7
+    assert view["episode"]["shotBudget"]["shotCount"] == 18
+    assert view["generation"]["counts"]["planned"] == 18
+    assert all(scene["storyboardId"] and scene["film"] is None for scene in view["scenes"])
+
+    config = load_config({"VAGENT_HOME": str(home), "VAGENT_VIDEO_MODE": "mock"})
+    app = create_app(config)
+    async with app.router.lifespan_context(app):
+        async with httpx.AsyncClient(
+            transport=httpx.ASGITransport(app=app), base_url="http://127.0.0.1:3210"
+        ) as client:
+            for name in ("app.js", "episode-state.js", "styles.css", "index.html"):
+                assert (await client.get(f"/{name}")).status_code == 200
+            episodes = (await client.get("/api/episodes?projectId=m5")).json()
+            assert [item["episodeId"] for item in episodes["episodes"]] == [episode_id]
+            detail = (await client.get(f"/api/episodes/{episode_id}?projectId=m5")).json()
+            assert len(detail["scenes"]) == 7 and detail["generation"]["counts"]["planned"] == 18
+            snapshot = (await client.get("/api/sessions/m5")).json()
+            assert snapshot["episode"]["episodeId"] == episode_id
+            assert len(snapshot["episode"]["scenes"]) == 7
+    return {
+        "episodeId": episode_id,
+        "scenes": len(view["scenes"]),
+        "shotCount": view["episode"]["shotBudget"]["shotCount"],
+        "cliShow": True,
+        "httpEpisodeView": True,
+        "episodePanelAssets": True,
+    }
+
+
 def seed_keys_only_storyboard(home):
     """One fresh project with a single 5 s t2v shot; nothing else exists yet."""
     home.mkdir(parents=True, exist_ok=True)
@@ -1252,6 +1380,8 @@ async def main(output=None):
             m2_report = smoke_m2_evaluation(directory)
             m3_film = await smoke_m3_film(directory)
             m3_report = smoke_m3_evaluation(directory)
+            m5_workbench = await smoke_m5_workbench(directory)
+            m5_report = smoke_m5_evaluation(directory)
             keys_only_report = await smoke_keys_only_live(directory)
             report = {
                 "status": "passed",
@@ -1273,6 +1403,8 @@ async def main(output=None):
                     "sevenCaseM2Suite": True,
                     "m3FilmWorkbenchCliAndHttp": True,
                     "sixCaseM3Suite": True,
+                    "m5EpisodeWorkbenchCliAndHttp": True,
+                    "fiveCaseM5Suite": True,
                     "keysOnlyLiveSharedHost": True,
                 },
                 "videoRestart": video_report,
@@ -1283,6 +1415,8 @@ async def main(output=None):
                 "m2Evaluation": m2_report,
                 "m3Film": m3_film,
                 "m3Evaluation": m3_report,
+                "m5EpisodeWorkbench": m5_workbench,
+                "m5Evaluation": m5_report,
                 "keysOnlyLive": keys_only_report,
             }
     report["temporaryDataCleaned"] = not Path(directory).exists()
@@ -1290,7 +1424,7 @@ async def main(output=None):
         output.parent.mkdir(parents=True, exist_ok=True)
         output.write_text(json.dumps(report, ensure_ascii=False, indent=2), encoding="utf-8")
     print(
-        "PASS: installed wheel, Web assets, config, streaming, text/quality, MCP, mock video tools, durable wait, original Run restart/automatic continuation, readonly delivery, unchanged budgets, CLI list/get/usage, five M1-B cases, live protocol with local media restart and CLI media evidence, seven M1-C cases, M2 storyboard/asset CLI and HTTP surface, seven M2 cases, M3 local film assembly with film media HTTP/CLI replay and provider settings, six M3 cases, keys-only live shared-host fixture with zero-cost save probe and hot registration, cleanup."
+        "PASS: installed wheel, Web assets, config, streaming, text/quality, MCP, mock video tools, durable wait, original Run restart/automatic continuation, readonly delivery, unchanged budgets, CLI list/get/usage, five M1-B cases, live protocol with local media restart and CLI media evidence, seven M1-C cases, M2 storyboard/asset CLI and HTTP surface, seven M2 cases, M3 local film assembly with film media HTTP/CLI replay and provider settings, six M3 cases, M5 episode CLI/HTTP workbench and five M5 cases, keys-only live shared-host fixture with zero-cost save probe and hot registration, cleanup."
     )
     return report
 

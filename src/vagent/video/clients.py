@@ -28,8 +28,9 @@ CLIENT_PROMPTS = {
     "shot_generate": "本地界面发起的镜头批量登记（不调用模型）。",
     "shot_redo": "本地界面发起的镜头重做（不调用模型）。",
     "film_assemble": "本地界面发起的成片拼接（不调用模型）。",
+    "episode_generate": "本地界面发起的分集整批登记（不调用模型）。",
 }
-CLIENT_GROUPS = ("shot_generate", "shot_redo", "film_assemble")
+CLIENT_GROUPS = ("shot_generate", "shot_redo", "film_assemble", "episode_generate")
 
 
 def client_run_id(session_id: str, client_request_id: str) -> str:
@@ -157,7 +158,7 @@ def _replay_or_conflict(service, session_id: str, client_request_id: str, group:
     result = entry["result"]
     if not result.get("ok"):
         raise AppError(result["error"]["code"], result["error"]["message"])
-    return _result(service, result["data"], run_id, result["data"]["storyboardId"])
+    return _result(service, result["data"], run_id, result["data"].get("storyboardId"))
 
 
 def generate_shots(
@@ -188,6 +189,31 @@ def generate_shots(
     if not result.get("ok"):
         raise AppError(result["error"]["code"], result["error"]["message"])
     return _result(service, result["data"], context.run_id, storyboard_id)
+
+
+def generate_episode(
+    service,
+    *,
+    session_id: str,
+    client_request_id: str,
+    episode_id: str,
+    confirm: bool = True,
+) -> dict:
+    """Register every shot of one episode as an explicit local user action."""
+    args = {"episodeId": episode_id, "confirm": confirm}
+    replayed = _replay_or_conflict(service, session_id, client_request_id, "episode_generate", args)
+    if replayed is not None:
+        return replayed
+    raw = service.store.snapshot()["episodes"].get(episode_id)
+    if raw is None or raw["projectId"] != session_id:
+        raise AppError("EPISODE_NOT_FOUND", "当前项目中没有这个分集。")
+    context = client_context(
+        service, session_id=session_id, client_request_id=client_request_id, group="episode_generate"
+    )
+    result = service.episode_generate(args, context=context)
+    if not result.get("ok"):
+        raise AppError(result["error"]["code"], result["error"]["message"])
+    return _result(service, result["data"], context.run_id)
 
 
 def redo_shot(
@@ -275,11 +301,13 @@ async def assemble_film(
     return _result(service, result["data"], context.run_id, storyboard_id)
 
 
-def _result(service, data: dict, run_id: str, storyboard_id: str) -> dict:
-    raw = service.store.snapshot()["storyboards"].get(storyboard_id) or {}
-    return {
+def _result(service, data: dict, run_id: str, storyboard_id: str | None = None) -> dict:
+    result = {
         **data,
         "runId": run_id,
         "mode": service.generation_mode(),
-        "storyboardRevision": raw.get("revision"),
     }
+    if storyboard_id is not None:
+        raw = service.store.snapshot()["storyboards"].get(storyboard_id) or {}
+        result["storyboardRevision"] = raw.get("revision")
+    return result

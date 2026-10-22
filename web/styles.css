@@ -1750,3 +1750,74 @@ footer {
   color: #fca5a5;
   margin-top: 8px;
 }
+
+/* M5 E4: 分集侧栏、场记进度与逐场成片 */
+.episode-panel {
+  width: 460px;
+}
+.episode-budget {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px 16px;
+  margin: 12px 0 6px;
+  padding: 10px 12px;
+  border: 1px solid #dfe7ef;
+  border-radius: 10px;
+  background: #f8fafd;
+  font-size: 12px;
+  color: #65758a;
+}
+.episode-budget strong {
+  color: #334a61;
+  font-weight: 600;
+}
+.episode-scenes {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  margin-top: 12px;
+}
+.episode-scene {
+  border: 1px solid #dfe7ef;
+  border-radius: 12px;
+  padding: 12px 14px;
+  background: #fcfdff;
+  font-size: 12px;
+  line-height: 1.7;
+  overflow-wrap: anywhere;
+}
+.episode-scene-head {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 10px;
+}
+.episode-scene-head strong {
+  font-size: 13px;
+  font-weight: 600;
+  color: #536c85;
+}
+.episode-scene-head span {
+  color: #8a9aab;
+  white-space: nowrap;
+}
+.episode-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-top: 8px;
+}
+.episode-consistency {
+  list-style: none;
+  padding: 0;
+  margin: 8px 0 14px;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  font-size: 12px;
+  color: #65758a;
+}
+.episode-consistency strong {
+  color: #334a61;
+  font-weight: 600;
+}

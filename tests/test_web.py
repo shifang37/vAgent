@@ -247,10 +247,12 @@ async def test_web_serves_every_frontend_module_and_import(tmp_path):
         assert shell.status_code == 200
         imported = set(re.findall(r'from "\./([^"]+)"', shell.text))
         assert "film-state.js" in imported
+        assert "episode-state.js" in imported
         for name in {
             "index.html",
             "app.js",
             "film-state.js",
+            "episode-state.js",
             "job-state.js",
             "storyboard-state.js",
             "styles.css",
@@ -259,3 +261,50 @@ async def test_web_serves_every_frontend_module_and_import(tmp_path):
             response = await client.get(f"/{name}")
             assert response.status_code == 200, name
             assert response.content, name
+
+
+async def test_web_exposes_the_episode_view_and_the_storyboard_link(tmp_path):
+    import pathlib
+
+    from vagent.video.adaptation import plan_episode
+    from vagent.video.episodes import save_episode
+
+    text = (pathlib.Path(__file__).parent / "fixtures" / "m5" / "texts" / "fridge-notes.md").read_text(
+        encoding="utf-8"
+    )
+    async with client_for(tmp_path) as (client, service):
+        session_id = (await client.post("/api/sessions", json={})).json()["id"]
+        plan = plan_episode(text, title="冰箱上的便条")
+        scenes = [
+            {
+                "heading": scene["heading"],
+                "location": scene["location"],
+                "timeOfDay": scene["timeOfDay"],
+                "synopsis": scene["synopsis"],
+                "dialogue": [
+                    {"text": line["text"], "speaker": line.get("speaker"), "paragraph": line["paragraph"]}
+                    for line in scene["dialogue"]
+                ],
+                "shotCount": scene["shotCount"],
+                "durationSeconds": scene["durationSeconds"],
+            }
+            for scene in plan["scenes"]
+        ]
+        with service.store.locked():
+            service.store.transaction(
+                lambda draft: save_episode(
+                    {"title": "冰箱上的便条", "scenes": scenes},
+                    draft,
+                    session_id,
+                )
+            )
+        summaries = (await client.get(f"/api/episodes?projectId={session_id}")).json()
+        assert len(summaries["episodes"]) == 1
+        episode_id = summaries["episodes"][0]["episodeId"]
+        detail = (await client.get(f"/api/episodes/{episode_id}?projectId={session_id}")).json()
+        assert detail["episodeId"] == episode_id
+        assert len(detail["scenes"]) == len(scenes)
+        assert all(scene["film"] is None for scene in detail["scenes"])
+        snapshot = (await client.get(f"/api/sessions/{session_id}")).json()
+        assert snapshot["episode"]["episodeId"] == episode_id
+        assert snapshot["episode"]["episodes"][0]["shotCount"] == plan["shotBudget"]["shotCount"]

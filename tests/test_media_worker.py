@@ -102,3 +102,38 @@ async def test_network_window_exhaustion_is_durable_and_retry_is_idempotent(stor
     with FileStore.open(home) as reopened:
         record = reopened.snapshot()["jobs"][job.id]
         assert record["download"]["attempts"] == 3 and record["download"]["generation"] == 2
+
+
+async def test_worker_merges_a_concurrent_availability_write(store, video_clock):
+    """A set wait refreshing availability must not discard download progress."""
+
+    def handler(_):
+        return httpx.Response(200, content=SAMPLE.read_bytes(), headers={"Content-Type": "video/mp4"})
+
+    async with download_service(store, video_clock) as (jobs, job, _submissions):
+        async with MediaHttpClient(transport=httpx.MockTransport(handler)) as client:
+            worker = MediaWorker(jobs.media, client)
+            writing = worker._start_download(job)
+            assert writing.download.phase == "writing" and writing.download.attempts == 1
+            bumped = jobs.update(
+                writing,
+                mediaAvailability={"status": "unavailable", "reason": "missing"},
+            )
+            assert bumped.revision == writing.revision + 1
+            merged = worker._save(writing, download={"phase": "pending", "nextAttemptAt": None})
+            assert merged.revision == bumped.revision + 1
+            assert merged.download.phase == "pending"
+            assert merged.media_availability.status == "unavailable"
+
+
+async def test_refresh_does_not_write_while_a_download_is_in_flight(store, video_clock):
+    def handler(_):
+        return httpx.Response(200, content=SAMPLE.read_bytes(), headers={"Content-Type": "video/mp4"})
+
+    async with download_service(store, video_clock) as (jobs, job, _submissions):
+        async with MediaHttpClient(transport=httpx.MockTransport(handler)) as client:
+            worker = MediaWorker(jobs.media, client)
+            writing = worker._start_download(job)
+            assert jobs.media.refresh(writing).revision == writing.revision
+            settled = worker._save(writing, download={"phase": "pending", "nextAttemptAt": None})
+            assert jobs.media.refresh(settled).revision == settled.revision

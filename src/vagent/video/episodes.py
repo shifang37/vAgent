@@ -1001,10 +1001,8 @@ def _style_summary(record: Style) -> dict:
     }
 
 
-def read_episode(args: dict, state: dict, project_id: str) -> dict:
-    """The current episode with its frozen scenes and re-derivable shot drafts."""
-    from vagent.video.adaptation import draft_stored_scene
-
+def episode_summaries(state: dict, project_id: str) -> list[dict]:
+    """One project's episode list, without scenes, evidence or generation work."""
     summaries = []
     for raw in state["episodes"].values():
         if raw["projectId"] != project_id:
@@ -1022,6 +1020,14 @@ def read_episode(args: dict, state: dict, project_id: str) -> dict:
             }
         )
     summaries.sort(key=lambda item: (item["title"], item["episodeId"]))
+    return summaries
+
+
+def read_episode(args: dict, state: dict, project_id: str) -> dict:
+    """The current episode with its frozen scenes and re-derivable shot drafts."""
+    from vagent.video.adaptation import draft_stored_scene
+
+    summaries = episode_summaries(state, project_id)
     episode_id = args.get("episodeId")
     if episode_id:
         raw = state["episodes"].get(episode_id)

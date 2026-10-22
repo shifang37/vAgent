@@ -84,7 +84,7 @@ node --test tests/test_job_state.mjs tests/test_storyboard_state.mjs tests/test_
 ## 4. 明确未做
 
 - **真实付费生成**：E3 只登记与交付受控上游任务；真实 Wan 集级批次、真实账单与真实失败隔离需要 E4 的单独授权（明确模型、次数与金额）后才能执行。真实 DeepSeek 分集编排同样未执行（模型调用=0）。
-- **CLI/Web 分集流程**：E4。CLI/Web 的逐镜头 `redo_shot` 已存在，并因客户端 Run 记录 9/9 而自动受集级额度约束；但还没有 `vagent episode generate` 之类的新命令或 Web 分集面板。
+- **CLI/Web 分集流程**：E4。CLI/Web 的逐镜头 `redo_shot` 已存在，并因客户端 Run 记录 9/9 而自动受集级额度约束；但还没有 `vagent episode generate` 之类的新命令或 Web 分集面板。**E4 已完成**：CLI `episode plan/save/show/generate`、Web 只读分集面板与逐场成片入口、安装态与浏览器证据均通过；见 [E4 验收](./M5_E4_ACCEPTANCE.md)。
 - **整集成片**：M6。M5 仍按 `storyboardId` 单分镜成片，一场一版本；跨场组合成片、字幕、配音与转场不在 E3。
 - **Kling/fal 集级批量**：不进入集级额度（不换汇）；它们的镜头仍可走 `shot_generate` 的逐 Run 4 个/12 USD 上限。
 - **9:16 竖屏、LoRA/角色微调、声音克隆**：仍不在 M5。

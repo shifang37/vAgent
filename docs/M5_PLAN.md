@@ -1,6 +1,6 @@
 # 后续规划：从“可拼接成片”到 AI 短剧流水线
 
-状态：规划稿（2026-10-22）。基线：`master` `00d087f`（M4 自动时间线归一化已合入，尚未打新 tag）；`v0.3.0` tag 仍指向 `4c456f6`。当前能力：16:9 720P、Wan t2v/i2v/flf2v 真实样本、Kling/fal 受控接入、copy 优先 + 自动转码拼接、CLI/Web/headless。**本规划不包含 9:16 竖屏**，竖屏单列为后续独立话题。
+状态：**E0–E4 已完成（2026-10-22）**；M5 已交付。基线：`master` `00d087f`（M4 自动时间线归一化已合入，尚未打新 tag）；`v0.3.0` tag 仍指向 `4c456f6`。当前能力：16:9 720P、Wan t2v/i2v/flf2v 真实样本、Kling/fal 受控接入、copy 优先 + 自动转码拼接、CLI/Web/headless，以及剧本/小说 → 分集分场分镜与逐场成片。**本规划不包含 9:16 竖屏**，竖屏单列为后续独立话题。
 
 > **E0 已完成（2026-10-22）**：契约见 [M5_CONTRACTS](./M5_CONTRACTS.md)（schema v6 外壳、Episode/Scene/Character/Style、`text-split-zh-v1`、镜头/时长/预算、错误码），证据见 [M5 E0 验收](./M5_E0_ACCEPTANCE.md)。E0 的 `schemaVersion 6` 与本文第 4 节 M6 的“成片版本 v6”不是同一个编号空间：M6 若需新的存储形状必须用 v7。
 >
@@ -9,6 +9,8 @@
 > **E2 已完成（2026-10-22）**：场景绑定、镜头 `characterIds` → 冻结角色版本与参考图、`style-prompt-zh-v1` 风格提示模板、`episode_read` 跨镜头证据与人工评分 `consistency_review`；tools/rules 8/8（冻结 7/7），模型调用=0、submit=0；见 [E2 验收](./M5_E2_ACCEPTANCE.md)。
 >
 > **E3 已完成（2026-10-22）**：`episode_generate` 整集批量登记与 `shot_redo` 逐镜头重做、集级额度（`jobCap`/`episodeCapAmount` 跨 Run 累计、不换汇）、20 成员集合等待、失败隔离与 `episode_read.generation`；tools/rules 9/9（冻结 8/8），受控 HTTP + 本地测试媒体，视频 **submit=0**；见 [E3 验收](./M5_E3_ACCEPTANCE.md)。
+>
+> **E4 已完成（2026-10-22）**：离线端到端套件 5/5（42 次受控提交、18 个成片版本、真实供应商与模型调用 0）、CLI `episode plan/save/show/generate`、Web 只读分集面板、安装态 wheel 5 用例与 M5 工作台、受控浏览器 5 阶段；真实样本用 `fridge-notes` 全篇 18 镜头 / 90 秒 / 7 场完成 **18 次 Wan 真实提交（估算 54.00 CNY，实际账单 unknown）** 与 7 条逐场成片。期间修复媒体 Worker 版本冲突丢失 prepared 进度、Web 会话快照缺少成片投影与套件数据目录隔离三个缺陷。见 [E4 验收](./M5_E4_ACCEPTANCE.md)。
 
 ## 1. 产品目标与当前差距
 
@@ -54,7 +56,7 @@
 | E1 文本改编 | 章节/场景切分、对白抽取、镜头草案、角色识别 | 固定 3 篇样例文稿，输出结构完整；不丢对白；可复现。**已交付**：[E1 验收](./M5_E1_ACCEPTANCE.md) |
 | E2 角色/风格一致性 | 角色圣经、参考图导入、镜头引用角色 ID、风格提示模板 | 同一角色跨镜头引用同一组素材；缺素材拒绝；人工一致性评分记录。**已交付**：[E2 验收](./M5_E2_ACCEPTANCE.md) |
 | E3 生成与重做 | 批量登记、逐镜头重做、预算、集合等待、失败隔离 | 60–90 秒样例全链路；重做只影响目标镜头；submit 与预算一致。**已交付**：[E3 验收](./M5_E3_ACCEPTANCE.md) |
-| E4 验收与文档 | 离线端到端套件、真实小样本、CLI/Web 流程、验收文档 | 3 篇样例中至少 1 篇真实生成并成片；失败保留；CI 通过 |
+| E4 验收与文档 | 离线端到端套件、真实小样本、CLI/Web 流程、验收文档 | 3 篇样例中至少 1 篇真实生成并成片；失败保留；CI 通过。**已交付**：[E4 验收](./M5_E4_ACCEPTANCE.md)（离线 5/5、安装态 PASS、浏览器 5 阶段、`fridge-notes` 真实 18 镜头 / 7 条逐场成片） |
 
 ### 3.3 验收样例
 
@@ -119,17 +121,11 @@
 
 ## 8. 新对话启动方式
 
-建议新对话第一句：
+M5 已全部完成（E0–E4）。下一阶段为 **M6 成片后期**（字幕、TTS、BGM/SFX、响度、转场、片头片尾、720P/1080P 导出），启动时先按 M5 的 E0 流程冻结契约与本轮范围，再进入编码：
 
-> 基于 M5 E3 的 `master`（schema 6、tools/rules 9/9、冻结 8/8），按 `docs/M5_PLAN.md` 做 **M5 E4 验收与文档**；不要做 9:16 竖屏；先读 `docs/M5_CONTRACTS.md`、`docs/M5_E3_ACCEPTANCE.md`、`docs/M4_NORMALIZATION.md` 与 `docs/M3_CONTRACTS.md`。先给实施计划和需要我确认的决策点，不要直接提交付费任务。
+> 基于 M5 E4 后的 `master`（schema 6、tools/rules 9/9、冻结 8/8），按 `docs/M5_PLAN.md` 的 M6 范围做契约冻结；不要做 9:16 竖屏；先读 `docs/M5_CONTRACTS.md`、[E4 验收](./M5_E4_ACCEPTANCE.md)、`docs/M4_NORMALIZATION.md` 与 `docs/M3_CONTRACTS.md`。先给实施计划和需要我确认的决策点，不要直接提交付费任务。
 
-第一批任务建议：
-
-1. 读现有 `storyboards.py`/`jobs.py`/`tools.py`，设计 Episode/Scene/Character 数据对象与 schema v6 迁移。
-2. 用 3 篇固定中文故事做文本切分/镜头草案的离线夹具，先不调用模型。
-3. 明确角色一致性方案（参考图 + i2v/flf2v；是否训练 LoRA 另议）。
-4. 冻结每集时长/镜头数/预算/失败策略。
-5. 再进入 E1 编码。
+M6 决策点沿用 [M5 计划](./M5_PLAN.md) §4.3：TTS 供应商/音色、音乐/音效许可、字幕默认烧录或软字幕、是否引入 1080P、供应商水印。
 
 ## 9. 本轮明确不做
 

@@ -5,6 +5,7 @@ import re
 import sys
 from contextlib import AsyncExitStack
 from dataclasses import asdict, replace
+from pathlib import Path
 from uuid import uuid4
 
 from dotenv import load_dotenv
@@ -18,10 +19,13 @@ from vagent.errors import AppError, public_error
 from vagent.models import DemoModel
 from vagent.skills import discover_for
 from vagent.storage import FileStore
+from vagent.tools import create_project_tools
 from vagent.usage import summarize_usage
 from vagent.video import clients
+from vagent.video.adaptation import plan_episode
 from vagent.video.assets import asset_reference_loader
 from vagent.video.contracts import ImageInputRule
+from vagent.video.episodes import read_episode
 from vagent.video.film_service import FilmService
 from vagent.video.jobs import JobService
 from vagent.video.media import DownloadRetry
@@ -30,6 +34,7 @@ from vagent.video.providers.kling import KlingAdapter
 from vagent.video.providers.mock import MockVideoAdapter
 from vagent.video.providers.wan import WanAdapter
 from vagent.video.storyboards import find_shot, storyboard_in_state
+from vagent.video.tools import register_video_tools
 from vagent.video.usage import summarize_records
 from vagent.video.views import cli_job_view, current_storyboard_view, storyboard_view
 
@@ -331,6 +336,134 @@ def local_storyboard(state, args) -> dict:
     if view is None:
         raise AppError("NOT_FOUND", "当前项目还没有结构化分镜，请先保存。")
     return view
+
+
+def _episode_text(path: str) -> str:
+    """Read one plain-text script; the tool contract owns length and splitting rules."""
+    try:
+        return Path(path).read_text(encoding="utf-8")
+    except OSError:
+        raise AppError("NOT_FOUND", "没有找到这个剧本文本文件。") from None
+
+
+def _bible_character_ids(state, project_id: str, names: list[str], overrides: dict[str, str]) -> list[str]:
+    """Resolve plan character names to this project's character bible, in plan order."""
+    resolved = []
+    for name in names:
+        if name in overrides:
+            character_id = overrides[name]
+        else:
+            matches = [
+                raw["id"]
+                for raw in state["characters"].values()
+                if raw["projectId"] == project_id
+                and (
+                    raw["versions"][-1]["name"] == name or name in (raw["versions"][-1].get("aliases") or [])
+                )
+            ]
+            if len(matches) != 1:
+                continue
+            character_id = matches[0]
+        if character_id not in resolved:
+            resolved.append(character_id)
+    return resolved
+
+
+def _episode_scenes(plan: dict, state, project_id: str, overrides: dict[str, str]) -> list[dict]:
+    scenes = []
+    for scene in plan["scenes"]:
+        scenes.append(
+            {
+                "heading": scene["heading"],
+                "location": scene["location"],
+                "timeOfDay": scene["timeOfDay"],
+                "synopsis": scene["synopsis"],
+                "characterIds": _bible_character_ids(state, project_id, scene["characterNames"], overrides),
+                "dialogue": [
+                    {"text": item["text"], "speaker": item.get("speaker"), "paragraph": item["paragraph"]}
+                    for item in scene["dialogue"]
+                ],
+                "shotCount": scene["shotCount"],
+                "durationSeconds": scene["durationSeconds"],
+            }
+        )
+    return scenes
+
+
+def local_episode_read(state, args, films=None) -> dict:
+    """Read the episode view without a model, Worker or provider call."""
+    assert_id(args.project)
+    if args.episode_id:
+        assert_id(args.episode_id)
+    view = read_episode({"episodeId": args.episode_id}, state, args.project)
+    if films is not None:
+        for scene in view["scenes"]:
+            storyboard_id = scene.get("storyboardId")
+            scene["film"] = films.view(args.project, storyboard_id)["film"] if storyboard_id else None
+    return view
+
+
+def local_episode_plan(args) -> dict:
+    """Deterministic text adaptation only: no Store write, no Job, no model call."""
+    plan = plan_episode(_episode_text(args.text), title=args.title)
+    return plan
+
+
+def local_episode_save(config, store, args) -> int:
+    """Save one episode draft as an explicit local action; registers nothing."""
+    assert_id(args.project)
+    store.ensure_session(args.project)
+    overrides = {}
+    for value in args.character:
+        name, separator, character_id = value.partition("=")
+        if not separator or not name or not character_id:
+            raise AppError("INVALID_ARGUMENTS", "--character 需要“姓名=角色ID”的形式。")
+        assert_id(character_id)
+        overrides[name] = character_id
+    plan = plan_episode(_episode_text(args.text), title=args.title)
+    episode_args = {
+        "title": args.title or plan["title"],
+        "scenes": _episode_scenes(plan, store.snapshot(), args.project, overrides),
+    }
+    if args.style:
+        assert_id(args.style)
+        episode_args["styleId"] = args.style
+    if args.request_id is None:
+        args.request_id = str(uuid4())
+    registry = register_video_tools(
+        create_project_tools(), JobService(store, [MockVideoAdapter(store)], config=config)
+    )
+    result = registry.execute(
+        "episode_save",
+        episode_args,
+        store=store,
+        project_id=args.project,
+        operation_key=f"cli-episode-save:{args.request_id}",
+    )
+    if not result.get("ok"):
+        raise AppError(result["error"]["code"], result["error"]["message"])
+    print_json(result["data"])
+    return 0
+
+
+async def local_episode_generate(config, store, args) -> int:
+    """Register one whole episode as an explicit local action; submits nothing."""
+    assert_id(args.project)
+    assert_id(args.episode_id)
+    if not args.confirm:
+        raise AppError("CONFIRMATION_REQUIRED", "整集登记需要显式 --confirm。")
+    async with AsyncExitStack() as stack:
+        adapters = await live_adapters(config, store, stack)
+        service = JobService(store, adapters, config=config)
+        result = clients.generate_episode(
+            service,
+            session_id=args.project,
+            client_request_id=args.request_id or str(uuid4()),
+            episode_id=args.episode_id,
+            confirm=True,
+        )
+    print_json(result)
+    return 0
 
 
 def local_assets(config, store, args) -> int:
@@ -678,6 +811,34 @@ def parser() -> argparse.ArgumentParser:
     film_show = film_actions.add_parser("show", help="读取当前成片、历史版本与受控媒体地址")
     film_show.add_argument("-s", "--project", default="default")
     film_show.add_argument("--storyboard", dest="storyboard_id", help="指定分镜；省略时读取最新分镜")
+    episode = commands.add_parser("episode", help="分集：离线改编、保存、查看与整批登记；不调用模型")
+    episode_actions = episode.add_subparsers(dest="action", required=True)
+    episode_plan = episode_actions.add_parser("plan", help="离线切分剧本并返回分集草案；不写存储、不登记任务")
+    episode_plan.add_argument("--text", required=True, help="纯文本剧本文件（txt/markdown）")
+    episode_plan.add_argument("--title", help="分集标题；省略时使用文件名")
+    episode_save = episode_actions.add_parser("save", help="保存改编出的分集；不创建分镜、不登记任务")
+    episode_save.add_argument("--text", required=True, help="纯文本剧本文件（txt/markdown）")
+    episode_save.add_argument("-s", "--project", default="default")
+    episode_save.add_argument("--title", help="分集标题；省略时使用文件名")
+    episode_save.add_argument("--style", help="绑定同项目的风格圣经 ID")
+    episode_save.add_argument(
+        "--character",
+        action="append",
+        default=[],
+        metavar="NAME=ID",
+        help="把草案中的角色姓名显式绑定到角色圣经 ID；可重复",
+    )
+    episode_save.add_argument("--request-id", dest="request_id", help="同一请求 ID 重放原结果")
+    episode_show = episode_actions.add_parser("show", help="读取当前分集、场记、对白、生成进度与逐场成片")
+    episode_show.add_argument("-s", "--project", default="default")
+    episode_show.add_argument("--episode", dest="episode_id", help="指定分集；省略时读取本项目最新分集")
+    episode_generate = episode_actions.add_parser(
+        "generate", help="为整集已绑定分镜登记任务；只登记，不提交上游"
+    )
+    episode_generate.add_argument("-s", "--project", default="default")
+    episode_generate.add_argument("--episode", dest="episode_id", required=True)
+    episode_generate.add_argument("--confirm", action="store_true", help="显式确认整批镜头与集级预算")
+    episode_generate.add_argument("--request-id", dest="request_id", help="同一请求 ID 重放原结果")
     headless = commands.add_parser("headless", help="无 Web 的计划-授权-交付流程；默认只规划，不登记视频任务")
     headless.add_argument("prompt", nargs="?", help="创作需求；只用于第一次规划")
     headless.add_argument("-s", "--project", default="default")
@@ -776,6 +937,17 @@ def main() -> None:
         elif args.command == "film":
             with FileStore.open(config.home) as store:
                 raise SystemExit(asyncio.run(local_film(config, store, args)))
+        elif args.command == "episode" and args.action == "plan":
+            print_json(local_episode_plan(args))
+        elif args.command == "episode":
+            with FileStore.open(config.home) as store:
+                if args.action == "show":
+                    films = FilmService(JobService(store, [MockVideoAdapter(store)], config=config))
+                    print_json(local_episode_read(store.snapshot(), args, films))
+                elif args.action == "save":
+                    raise SystemExit(local_episode_save(config, store, args))
+                else:
+                    raise SystemExit(asyncio.run(local_episode_generate(config, store, args)))
         elif args.command == "usage" and args.project is not None:
             with FileStore.open(config.home) as store:
                 print_json(local_usage(store.snapshot(), args.project))
