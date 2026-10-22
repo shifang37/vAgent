@@ -331,10 +331,16 @@ def local_storyboard(state, args) -> dict:
     assert_id(args.project)
     if args.storyboard_id:
         assert_id(args.storyboard_id)
-        return storyboard_view(state, storyboard_in_state(state, args.project, args.storyboard_id))
-    view = current_storyboard_view(state, args.project)
-    if view is None:
-        raise AppError("NOT_FOUND", "当前项目还没有结构化分镜，请先保存。")
+        view = storyboard_view(state, storyboard_in_state(state, args.project, args.storyboard_id))
+    else:
+        view = current_storyboard_view(state, args.project)
+        if view is None:
+            raise AppError("NOT_FOUND", "当前项目还没有结构化分镜，请先保存。")
+    from vagent.video.subtitles import subtitle_for
+
+    view["subtitle"] = subtitle_for(
+        state, args.project, storyboard_id=view["storyboardId"], include_cues=False, include_digests=False
+    )
     return view
 
 
@@ -400,6 +406,16 @@ def local_episode_read(state, args, films=None) -> dict:
         for scene in view["scenes"]:
             storyboard_id = scene.get("storyboardId")
             scene["film"] = films.view(args.project, storyboard_id)["film"] if storyboard_id else None
+    if view.get("episodeId"):
+        from vagent.video.subtitles import subtitle_for
+
+        view["subtitle"] = subtitle_for(
+            state,
+            args.project,
+            episode_id=view["episodeId"],
+            include_cues=False,
+            include_digests=False,
+        )
     return view
 
 
@@ -521,8 +537,9 @@ async def local_redo(config, store, args) -> int:
 class LocalActionHost:
     """The ApplicationService surface a local client action needs, without Workers."""
 
-    def __init__(self, store, films, config):
+    def __init__(self, store, films, config, subtitles=None):
         self.store, self.films, self.config = store, films, config
+        self.subtitles = subtitles
 
     def generation_mode(self):
         return self.config.video_mode
@@ -562,6 +579,64 @@ async def local_film(config, store, args) -> int:
         client_request_id=args.request_id or str(uuid4()),
         storyboard_id=storyboard_id,
         expected_revision=args.expected_revision,
+    )
+    print_json(result)
+    return 0
+
+
+async def local_subtitle(config, store, args) -> int:
+    """Local subtitle generate/save/export; zero provider calls and no Job."""
+    assert_id(args.project)
+    films = FilmService(JobService(store, [MockVideoAdapter(store)], config=config))
+    host = LocalActionHost(store, films, config, films.jobs.subtitles)
+    if args.action == "show":
+        for name in ("storyboard_id", "episode_id", "track_id"):
+            value = getattr(args, name, None)
+            if value:
+                assert_id(value)
+        print_json(
+            host.subtitles.view(
+                args.project,
+                storyboard_id=args.storyboard_id,
+                episode_id=args.episode_id,
+                track_id=args.track_id,
+            )
+        )
+        return 0
+    request_id = args.request_id or str(uuid4())
+    if args.action == "save":
+        cues = None
+        if args.cues:
+            path = Path(args.cues)
+            try:
+                cues = json.loads(path.read_text(encoding="utf-8"))
+            except (OSError, ValueError):
+                raise AppError("INVALID_ARGUMENTS", "字幕修正文件必须是 UTF-8 JSON 数组。") from None
+            if not isinstance(cues, list):
+                raise AppError("INVALID_ARGUMENTS", "字幕修正文件必须是 JSON 数组。")
+        scope = "storyboard" if args.storyboard_id else "episode"
+        result = clients.save_subtitles(
+            host,
+            session_id=args.project,
+            client_request_id=request_id,
+            scope=scope,
+            storyboard_id=args.storyboard_id,
+            episode_id=args.episode_id,
+            cues=cues,
+            track_id=args.track_id,
+            expected_revision=args.expected_revision,
+        )
+        print_json(result)
+        return 0
+    assert_id(args.track_id)
+    result = await clients.export_subtitles(
+        host,
+        session_id=args.project,
+        client_request_id=request_id,
+        track_id=args.track_id,
+        mode=args.mode,
+        profile=args.profile,
+        track_version=args.version,
     )
     print_json(result)
     return 0
@@ -839,6 +914,33 @@ def parser() -> argparse.ArgumentParser:
     episode_generate.add_argument("--episode", dest="episode_id", required=True)
     episode_generate.add_argument("--confirm", action="store_true", help="显式确认整批镜头与集级预算")
     episode_generate.add_argument("--request-id", dest="request_id", help="同一请求 ID 重放原结果")
+    subtitle = commands.add_parser("subtitle", help="字幕：确定性对齐、保存修正与本地软/烧录导出")
+    subtitle_actions = subtitle.add_subparsers(dest="action", required=True)
+    subtitle_show = subtitle_actions.add_parser("show", help="读取当前字幕轨、版本与逐条 cue")
+    subtitle_show.add_argument("-s", "--project", default="default")
+    subtitle_show.add_argument("--storyboard", dest="storyboard_id", help="指定分镜；省略时读取最新分镜")
+    subtitle_show.add_argument("--episode", dest="episode_id", help="改为读取整集字幕轨")
+    subtitle_show.add_argument("--track", dest="track_id", help="直接按字幕轨 ID 读取")
+    subtitle_save = subtitle_actions.add_parser(
+        "save", help="按冻结台词与时间线生成字幕，或用 --cues 提交人工修正"
+    )
+    subtitle_save.add_argument("-s", "--project", default="default")
+    subtitle_target = subtitle_save.add_mutually_exclusive_group(required=True)
+    subtitle_target.add_argument("--storyboard", dest="storyboard_id")
+    subtitle_target.add_argument("--episode", dest="episode_id")
+    subtitle_save.add_argument("--cues", help="人工修正 JSON 数组文件（startMs/endMs/text/speaker）")
+    subtitle_save.add_argument("--track", dest="track_id", help="给已有字幕轨追加新版本")
+    subtitle_save.add_argument("--expected-revision", dest="expected_revision", type=int)
+    subtitle_save.add_argument("--request-id", dest="request_id", help="同一请求 ID 重放原结果")
+    subtitle_export = subtitle_actions.add_parser(
+        "export", help="把字幕软封装或烧录到当前成片，追加一个新成片版本"
+    )
+    subtitle_export.add_argument("-s", "--project", default="default")
+    subtitle_export.add_argument("--track", dest="track_id", required=True)
+    subtitle_export.add_argument("--mode", choices=("soft", "burn", "both"), default="soft")
+    subtitle_export.add_argument("--profile", choices=("720p", "1080p"), default="720p")
+    subtitle_export.add_argument("--version", type=int, help="指定字幕版本；省略时用当前版本")
+    subtitle_export.add_argument("--request-id", dest="request_id", help="同一请求 ID 重放原结果")
     headless = commands.add_parser("headless", help="无 Web 的计划-授权-交付流程；默认只规划，不登记视频任务")
     headless.add_argument("prompt", nargs="?", help="创作需求；只用于第一次规划")
     headless.add_argument("-s", "--project", default="default")
@@ -937,6 +1039,13 @@ def main() -> None:
         elif args.command == "film":
             with FileStore.open(config.home) as store:
                 raise SystemExit(asyncio.run(local_film(config, store, args)))
+        elif args.command == "subtitle":
+            if args.action == "export" and args.profile == "1080p":
+                args.profile = "1080p-h264-aac-v1"
+            elif args.action == "export":
+                args.profile = "720p-h264-aac-v1"
+            with FileStore.open(config.home) as store:
+                raise SystemExit(asyncio.run(local_subtitle(config, store, args)))
         elif args.command == "episode" and args.action == "plan":
             print_json(local_episode_plan(args))
         elif args.command == "episode":

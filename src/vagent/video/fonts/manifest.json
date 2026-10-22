@@ -1,0 +1,29 @@
+{
+  "font": "VAgentSubtitleSC-400.ttf",
+  "family": "VAgent Subtitle SC",
+  "weight": 400,
+  "purpose": "M6 E1 subtitle burn-in; shipped as a Mod Version under the SIL Open Font License 1.1",
+  "license": "OFL-1.1",
+  "licenseFile": "LICENSE-OFL.txt",
+  "source": {
+    "file": "NotoSansSC-VF.ttf",
+    "sha256": "763146584cf0710223441356b4395e279021b0806c196614377a7a0174ae074a",
+    "sizeBytes": 17773244,
+    "family": "Noto Sans SC",
+    "version": "Version 2.04;241114210130;non-release",
+    "variableAxes": [
+      "wght"
+    ],
+    "upstream": "https://github.com/notofonts/noto-cjk"
+  },
+  "subset": {
+    "sha256": "3cb33efa90a2c6ee51fdf9fda02cb071e812260d09a42a9c23774ab92d5606cb",
+    "sizeBytes": 1213160,
+    "glyphCount": 4315,
+    "charset": "ASCII 0x20-0x7E + GB2312 level-1 hanzi + CJK subtitle punctuation",
+    "characterCount": 3876,
+    "covers": true
+  },
+  "builder": "scripts/build_subtitle_font.py",
+  "fontTools": "4.67.0"
+}

@@ -1751,6 +1751,22 @@ footer {
   margin-top: 8px;
 }
 
+/* M6 E1: subtitle track section below the film, same card language. */
+.subtitle-section {
+  border: 1px solid rgba(148, 163, 184, 0.22);
+  border-radius: 14px;
+  padding: 12px 14px;
+  margin: -8px 0 18px;
+  background: rgba(15, 23, 42, 0.22);
+}
+.subtitle-section .film-head strong {
+  font-size: 13px;
+}
+.subtitle-section .film-versions {
+  margin-top: 6px;
+}
+
+
 /* M5 E4: 分集侧栏、场记进度与逐场成片 */
 .episode-panel {
   width: 460px;

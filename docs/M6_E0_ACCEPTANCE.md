@@ -2,7 +2,7 @@
 
 日期：**2026-10-22**。基线 `master` `b8df786`（**v0.4.0**：schema 6、tools/rules 9/9、冻结 8/8…1/1）。范围见 [M5 计划](./M5_PLAN.md) §4 的 M6，冻结契约见 [M6 契约](./M6_CONTRACTS.md)。**E0 不改变产品代码（`src/`、`web/`、`tests/`）、不注册工具、不调用模型或供应商：视频 submit=0、文本模型调用=0、TTS 请求=0。**
 
-E0 的产出是「契约 + 基线 + 可行性证据」，实现从 E1 开始。
+E0 的产出是「契约 + 基线 + 可行性证据」，实现从 E1 开始。 **E1 已按 §5 的入口实施**（schema 7、`subtitle-align-zh-v1`、`subtitle_save`、SRT/ASS、软字幕/旁挂/烧录、包内 OFL 字体、tools/rules 10/10），证据见 [E1 验收](./M6_E1_ACCEPTANCE.md)；E0 基线 `docs/M6_E0_BASELINE.json` 保持冻结，未被改写。
 
 ## 1. 交付内容
 

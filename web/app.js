@@ -22,6 +22,16 @@ import {
   shotThumbnail,
   shotVersions,
 } from "./storyboard-state.js";
+import {
+  latestSubtitle,
+  renderModeLabel,
+  subtitleDownloadUrl,
+  subtitleErrorLabel,
+  subtitleExportBody,
+  subtitleSaveBody,
+  subtitleSummary,
+  subtitleVersions,
+} from "./subtitle-state.js";
 
 import {
   episodeBudget,
@@ -644,6 +654,9 @@ async function openSceneStoryboard(storyboardId) {
   filmLoadedKey = null;
   filmState = null;
   filmError = null;
+  subtitleLoadedKey = null;
+  subtitleState = null;
+  subtitleError = null;
   renderStoryboardPanel();
 }
 
@@ -768,6 +781,10 @@ function renderStoryboardPanel() {
     filmLoadedKey = filmKey;
     loadFilm(board).catch((error) => toast(error.message));
   }
+  if (filmKey !== subtitleLoadedKey) {
+    subtitleLoadedKey = filmKey;
+    loadSubtitle(board).catch((error) => toast(error.message));
+  }
   const grouped = groupJobsByShot(snapshot?.jobs || [], board.shots);
   const playlist = playList(board.shots, snapshot?.jobs || []);
   const playing = sequence.index >= 0 ? sequence.items?.[sequence.index] : null;
@@ -783,6 +800,7 @@ function renderStoryboardPanel() {
     ${playing ? sequencePlayer(playing, playlist) : ""}
     ${playlist.missing.length ? `<p class="meta">${playlist.missing.length} 个镜头还没有本地媒体，连播会跳过：${playlist.missing.map((item) => escapeHTML(item.label)).join("、")}</p>` : ""}
     ${filmSection(board)}
+    ${subtitleSection(board)}
     <div class="shot-list">${board.shots.map((shot) => shotCard(shot, grouped.byShot[shot.id] || [])).join("")}</div>
     ${grouped.ungrouped.length ? `<h3>其他视频任务</h3>${grouped.ungrouped.map((job) => jobCard(job, false)).join("")}` : ""}`;
   icons(panel);
@@ -869,6 +887,117 @@ async function assembleFilm() {
     toast(filmErrorLabel(filmError));
   } finally {
     filmBusy = false;
+    if (panelMode === "storyboard") renderStoryboardPanel();
+  }
+}
+
+// Subtitle state belongs to the same storyboard snapshot as the film: saving or
+// exporting never changes the storyboard revision, so the key stays stable.
+let subtitleState = null;
+let subtitleLoadedKey = null;
+let subtitleBusy = false;
+let subtitleError = null;
+
+async function loadSubtitle(board) {
+  if (!board?.storyboardId || !activeId) return;
+  const query = `?projectId=${encodeURIComponent(activeId)}&storyboardId=${encodeURIComponent(board.storyboardId)}`;
+  try {
+    const result = await api(`/api/subtitles${query}`);
+    subtitleState = result.track || null;
+    subtitleError = null;
+  } catch (error) {
+    subtitleError = { code: error.code, message: error.message };
+  }
+  if (panelMode === "storyboard") renderStoryboardPanel();
+}
+
+function latestRenderLabel(film) {
+  const latest = film?.latest;
+  if (!latest?.render) return "";
+  const mode = renderModeLabel(latest.render.subtitle?.mode);
+  return mode ? `${mode}（成片 v${latest.currentVersion || latest.version}）` : "";
+}
+
+function subtitleSection(board) {
+  const track = subtitleState;
+  const versions = subtitleVersions(track);
+  const latest = latestSubtitle(track);
+  const canSave = Boolean(subtitleSaveBody(board, "probe"));
+  const canExport = Boolean(latest && hasFilm(filmState));
+  const rows = versions
+    .slice(0, 4)
+    .map((version) => {
+      const srt = subtitleDownloadUrl(track, version, "srt");
+      const ass = subtitleDownloadUrl(track, version, "ass");
+      const source = version.timelineSource === "film" ? "成片时间线" : "分镜时间线";
+      return `<li><span>${escapeHTML(version.label)}${version.current ? "（当前）" : "（历史）"} · ${escapeHTML(version.cueLabel)} · ${source}</span>
+        ${srt ? `<a class="secondary" href="${escapeHTML(srt)}" download="subtitles-${escapeHTML(track.trackId)}-${version.index}.srt">SRT</a>` : ""}
+        ${ass ? `<a class="secondary" href="${escapeHTML(ass)}" download="subtitles-${escapeHTML(track.trackId)}-${version.index}.ass">ASS</a>` : ""}</li>`;
+    })
+    .join("");
+  const rendered = latestRenderLabel(filmState);
+  return `<section class="subtitle-section" aria-label="字幕">
+    <div class="film-head"><strong>字幕</strong><span class="meta">${escapeHTML(subtitleSummary(track))}${rendered ? ` · 已导出 ${escapeHTML(rendered)}` : ""}</span></div>
+    ${rows ? `<ul class="film-versions">${rows}</ul>` : '<p class="meta">生成会用该场冻结的台词与成片/分镜时间线确定性对齐；人工修正按毫秒提交，不自动改写时间。</p>'}
+    <div class="film-actions">
+      <button class="primary" data-action="save-subtitle" ${subtitleBusy || !canSave ? "disabled" : ""}>${subtitleBusy ? "正在处理…" : track ? "按当前台词重新生成" : "生成字幕"}</button>
+      <button class="secondary" data-action="export-subtitle" data-mode="soft" ${subtitleBusy || !canExport ? "disabled" : ""}>导出软字幕</button>
+      <button class="secondary" data-action="export-subtitle" data-mode="burn" ${subtitleBusy || !canExport ? "disabled" : ""}>导出烧录字幕</button>
+      <button class="secondary" data-action="refresh-subtitle" ${subtitleBusy ? "disabled" : ""}>刷新字幕</button>
+    </div>
+    ${subtitleError ? `<p class="meta film-error">${escapeHTML(subtitleErrorLabel(subtitleError))}</p>` : ""}
+  </section>`;
+}
+
+async function saveSubtitle() {
+  const board = storyboard();
+  const body = subtitleSaveBody(board, crypto.randomUUID());
+  if (!body) {
+    toast("还没有可保存字幕的分镜。");
+    return;
+  }
+  if (subtitleBusy) return;
+  subtitleBusy = true;
+  subtitleError = null;
+  renderStoryboardPanel();
+  try {
+    subtitleState = await post(
+      `/api/sessions/${encodeURIComponent(activeId)}/subtitles/save`,
+      body,
+    );
+    toast("字幕已保存。");
+  } catch (error) {
+    subtitleError = { code: error.code, message: error.message };
+    toast(subtitleErrorLabel(subtitleError));
+  } finally {
+    subtitleBusy = false;
+    if (panelMode === "storyboard") renderStoryboardPanel();
+  }
+}
+
+async function exportSubtitle(mode) {
+  const board = storyboard();
+  const body = subtitleExportBody(subtitleState, mode, crypto.randomUUID());
+  if (!body) {
+    toast("需要先保存字幕，并有一次成片。");
+    return;
+  }
+  if (subtitleBusy) return;
+  subtitleBusy = true;
+  subtitleError = null;
+  renderStoryboardPanel();
+  try {
+    filmState = await post(
+      `/api/sessions/${encodeURIComponent(activeId)}/subtitles/export`,
+      body,
+    );
+    filmLoadedKey = `${board.storyboardId}:${board.revision}`;
+    toast(`已导出${renderModeLabel(mode)}成片。`);
+  } catch (error) {
+    subtitleError = { code: error.code, message: error.message };
+    toast(subtitleErrorLabel(subtitleError));
+  } finally {
+    subtitleBusy = false;
     if (panelMode === "storyboard") renderStoryboardPanel();
   }
 }
@@ -1649,6 +1778,15 @@ document.addEventListener("click", async (event) => {
       await refreshSession(activeId).catch((error) => toast(error.message));
     if (action === "toggle-all-shots") toggleAllShots();
     if (action === "assemble-film") await assembleFilm();
+    if (action === "save-subtitle") await saveSubtitle();
+    if (action === "export-subtitle")
+      await exportSubtitle(event.target.closest("[data-mode]")?.dataset.mode || "soft");
+    if (action === "refresh-subtitle") {
+      subtitleLoadedKey = null;
+      subtitleState = null;
+      subtitleError = null;
+      if (panelMode === "storyboard") renderStoryboardPanel();
+    }
     if (action === "refresh-film") {
       filmLoadedKey = null;
       filmState = null;

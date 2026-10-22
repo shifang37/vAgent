@@ -9,7 +9,7 @@ from conftest import video_request, video_run
 from wan_support import VIDEO_URL, live_arguments, live_config, live_run, live_service, provider_response
 
 from vagent.errors import AppError
-from vagent.storage import Database, FileStore
+from vagent.storage import DatabaseV7, FileStore
 from vagent.tools import create_project_tools
 from vagent.video.contracts import JobV2, ProviderTaskSnapshotV2, VideoPrice, parse_job, wan_price
 from vagent.video.jobs import JobService
@@ -93,7 +93,7 @@ async def test_live_job_freezes_quote_and_enters_download_only_once(store, video
             ):
                 assert private not in public
         stored = store.snapshot()
-        assert isinstance(Database.model_validate(stored).jobs[job.id], JobV2)
+        assert isinstance(DatabaseV7.model_validate(stored).jobs[job.id], JobV2)
         home = store.home
         store.close()
         with FileStore.open(home) as reopened:
@@ -470,7 +470,7 @@ async def test_v3_holds_both_job_versions_without_reencoding_mock_data(store, vi
     live_context = live_run(store)
     async with live_service(store, video_clock, responded()) as (service, _):
         live = generate(service, live_context)
-        database = Database.model_validate(store.snapshot())
+        database = DatabaseV7.model_validate(store.snapshot())
         assert database.jobs[live.id].contract_version == 2
         assert database.jobs[old_raw["id"]].contract_version == 1
         assert store.snapshot()["jobs"][old_raw["id"]] == old_raw

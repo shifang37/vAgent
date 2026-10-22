@@ -82,6 +82,7 @@ class ApplicationService:
         self.media = None
         self.media_worker = None
         self.films = None
+        self.subtitles = None
         self._event_loop = None
         self._job_revisions = {key: job["revision"] for key, job in store.snapshot()["jobs"].items()}
         self.on_event = on_event
@@ -144,6 +145,7 @@ class ApplicationService:
             service.fal_adapter = fal
             service.media = video_jobs.media
             service.films = video_jobs.films
+            service.subtitles = video_jobs.subtitles
             service._event_loop = asyncio.get_running_loop()
             video_jobs.on_change = service._job_event
             service.job_worker = JobWorker(video_jobs)
@@ -246,9 +248,23 @@ class ApplicationService:
             view = current_storyboard_view(state, session_id)
             if view is None:
                 raise AppError("NOT_FOUND", "当前项目还没有结构化分镜，请先保存。")
+            view["subtitle"] = self._subtitle_summary(state, session_id, view["storyboardId"])
             return view
         assert_id(storyboard_id)
-        return storyboard_view(state, storyboard_in_state(state, session_id, storyboard_id))
+        view = storyboard_view(state, storyboard_in_state(state, session_id, storyboard_id))
+        view["subtitle"] = self._subtitle_summary(state, session_id, storyboard_id)
+        return view
+
+    def _subtitle_summary(self, state, project_id, storyboard_id):
+        from vagent.video.subtitles import subtitle_for
+
+        return subtitle_for(
+            state,
+            project_id,
+            storyboard_id=storyboard_id,
+            include_cues=False,
+            include_digests=False,
+        )
 
     def episodes(self, session_id):
         """Episode summaries of one project; never another project's records."""
@@ -261,10 +277,21 @@ class ApplicationService:
         assert_id(session_id)
         if episode_id is not None:
             assert_id(episode_id)
-        view = read_episode({"episodeId": episode_id}, self.store.snapshot(), session_id)
+        state = self.store.snapshot()
+        view = read_episode({"episodeId": episode_id}, state, session_id)
         for scene in view["scenes"]:
             storyboard_id = scene.get("storyboardId")
             scene["film"] = self.films.view(session_id, storyboard_id)["film"] if storyboard_id else None
+        if view.get("episodeId"):
+            from vagent.video.subtitles import subtitle_for
+
+            view["subtitle"] = subtitle_for(
+                state,
+                session_id,
+                episode_id=view["episodeId"],
+                include_cues=False,
+                include_digests=False,
+            )
         return view
 
     def assets(self, project_id=None):
@@ -351,6 +378,59 @@ class ApplicationService:
             storyboard_id=request["storyboardId"],
             expected_revision=request["expectedRevision"],
         )
+
+    def subtitle(self, session_id, *, storyboard_id=None, episode_id=None, track_id=None):
+        """Current subtitle track of one target; read-only and provider-free."""
+        assert_id(session_id)
+        if storyboard_id is None and episode_id is None and track_id is None:
+            from vagent.video.views import storyboard_summaries
+
+            summaries = storyboard_summaries(self.store.snapshot(), session_id)
+            storyboard_id = summaries[0]["storyboardId"] if summaries else None
+        return self.subtitles.view(
+            session_id,
+            storyboard_id=storyboard_id,
+            episode_id=episode_id,
+            track_id=track_id,
+        )
+
+    def save_subtitles(self, session_id, request: dict) -> dict:
+        """Explicit local subtitle save; never a model turn and never a provider call."""
+        assert_id(session_id)
+        return clients.save_subtitles(
+            self.video_jobs,
+            session_id=session_id,
+            client_request_id=request["clientRequestId"],
+            scope=request["scope"],
+            storyboard_id=request.get("storyboardId"),
+            episode_id=request.get("episodeId"),
+            cues=request.get("cues"),
+            track_id=request.get("trackId"),
+            expected_revision=request.get("expectedRevision"),
+        )
+
+    async def export_subtitles(self, session_id, request: dict) -> dict:
+        """Explicit local soft/burn export; zero provider calls."""
+        assert_id(session_id)
+        return await clients.export_subtitles(
+            self.video_jobs,
+            session_id=session_id,
+            client_request_id=request["clientRequestId"],
+            track_id=request["trackId"],
+            mode=request["mode"],
+            profile=request.get("profile") or "720p-h264-aac-v1",
+            track_version=request.get("trackVersion"),
+        )
+
+    def subtitle_sidecar(self, track_id: str, version: int, *, kind: str = "srt") -> tuple[str, str]:
+        """Deterministic SRT/ASS bytes of one immutable subtitle version."""
+        from vagent.video.subtitles import render_ass, render_srt, track_version
+
+        state = self.store.snapshot()
+        track, frozen = track_version(state, track_id, version)
+        text = render_srt(frozen.cues) if kind == "srt" else render_ass(frozen.cues)
+        suffix = "srt" if kind == "srt" else "ass"
+        return text, f"subtitles-{track.id}-v{frozen.version}.{suffix}"
 
     def usage(self, project_id=None):
         """Local aggregation of Jobs, estimates, tokens and the asset library."""

@@ -1043,8 +1043,12 @@ async def smoke_m5_workbench(directory):
         async with httpx.AsyncClient(
             transport=httpx.ASGITransport(app=app), base_url="http://127.0.0.1:3210"
         ) as client:
-            for name in ("app.js", "episode-state.js", "styles.css", "index.html"):
+            for name in ("app.js", "episode-state.js", "subtitle-state.js", "styles.css", "index.html"):
                 assert (await client.get(f"/{name}")).status_code == 200
+            from vagent.video.subtitle_font import bundled_font_path
+
+            # The installed wheel ships the OFL subtitle font, verified by SHA-256.
+            assert bundled_font_path().name == "VAgentSubtitleSC-400.ttf"
             episodes = (await client.get("/api/episodes?projectId=m5")).json()
             assert [item["episodeId"] for item in episodes["episodes"]] == [episode_id]
             detail = (await client.get(f"/api/episodes/{episode_id}?projectId=m5")).json()
@@ -1309,6 +1313,7 @@ async def main(output=None):
                         "/app.js",
                         "/film-state.js",
                         "/job-state.js",
+                        "/subtitle-state.js",
                         "/storyboard-state.js",
                         "/styles.css",
                         "/mark.svg",

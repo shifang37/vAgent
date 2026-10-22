@@ -180,7 +180,10 @@ class MP4:
     def track(self, track: Box, mdats: list[Box]):
         mdia = self.children(self.one(self.children(track), b"mdia"))
         handler = self.data(self.one(mdia, b"hdlr"), 12)[8:12]
-        if handler not in {b"vide", b"soun"}:
+        # M6 soft-subtitle films carry a mov_text track next to video and audio; it
+        # still has to reference only local sample bytes, but its sample entry is not
+        # an AVC/AAC description.
+        if handler not in {b"vide", b"soun", b"sbtl", b"text", b"subt"}:
             raise ValueError("Unsupported media track")
         timescale, duration = self.timing(self.one(mdia, b"mdhd"))
         minf = self.children(self.one(mdia, b"minf"))
@@ -192,16 +195,23 @@ class MP4:
         if any(ref.kind != b"url " or self.data(ref) != b"\0\0\0\1" for ref in refs):
             raise ValueError("External data references are forbidden")
         tables = self.children(self.one(minf, b"stbl"))
-        codecs, dimensions = self.descriptions(self.one(tables, b"stsd"), handler, len(refs))
+        if handler in {b"vide", b"soun"}:
+            codecs, dimensions = self.descriptions(self.one(tables, b"stsd"), handler, len(refs))
+        else:
+            codecs, dimensions = [b"subt"], None
         sizes = self.sample_sizes(tables)
-        timings = self.table(self.one(tables, b"stts"), 2)
-        ticks = sum(count * delta for count, delta in timings)
-        if any(not count or not delta for count, delta in timings) or sum(x[0] for x in timings) != len(
-            sizes
-        ):
-            raise ValueError("Invalid sample timing")
-        if abs(ticks - duration) > 1:
-            raise ValueError("Media duration disagrees with samples")
+        if handler in {b"vide", b"soun"}:
+            timings = self.table(self.one(tables, b"stts"), 2)
+            ticks = sum(count * delta for count, delta in timings)
+            if any(not count or not delta for count, delta in timings) or sum(x[0] for x in timings) != len(
+                sizes
+            ):
+                raise ValueError("Invalid sample timing")
+            if abs(ticks - duration) > 1:
+                raise ValueError("Media duration disagrees with samples")
+        else:
+            # An empty mov_text sample may legitimately have zero duration.
+            timings = []
         offsets = [box for box in tables if box.kind in {b"stco", b"co64"}]
         if len(offsets) != 1:
             raise ValueError("Missing chunk offsets")
@@ -229,7 +239,7 @@ class MP4:
             sample += count
         if sample != len(sizes):
             raise ValueError("Unaddressed media samples")
-        rate = Fraction(len(sizes) * timescale, ticks)
+        rate = Fraction(len(sizes) * timescale, ticks) if handler in {b"vide", b"soun"} else Fraction(0)
         return handler, dimensions, duration / timescale, rate, codecs, ranges
 
     def metadata(self) -> MediaMetadata:
@@ -247,6 +257,8 @@ class MP4:
         audio = [track for track in tracks if track[0] == b"soun"]
         if len(videos) != 1 or len(audio) > 1 or not mdats:
             raise ValueError("Expected one complete video track")
+        # Every track, including an M6 subtitle track, must address distinct local
+        # sample bytes: an overlap would let one stream's payload hide in another's.
         ranges = sorted(span for track in tracks for span in track[5])
         if any(end > start for (_, end), (start, _) in zip(ranges, ranges[1:])):
             raise ValueError("Overlapping media samples")

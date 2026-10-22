@@ -18,10 +18,12 @@ from pydantic.alias_generators import to_camel
 
 from vagent.config import assert_id
 from vagent.errors import AppError, failure
+from vagent.video.audio import AudioAsset, AudioMedia, validate_audio_changes
 from vagent.video.contracts import Job, MediaAsset, StoredJob
 from vagent.video.episodes import Character, Episode, Scene, Style
 from vagent.video.films import Film, FilmMedia
 from vagent.video.storyboards import Asset, Storyboard
+from vagent.video.subtitles import SubtitleTrack, validate_subtitle_changes
 from vagent.waiting import WAIT_EXECUTION_VERSIONS, StoredWait, WaitBinding, parse_wait
 
 T = TypeVar("T")
@@ -240,10 +242,19 @@ class Database(DatabaseV5):
     styles: dict[str, Style]
 
 
+class DatabaseV7(Database):
+    """Schema 7 adds the M6 audio/subtitle domains and the audio media branch."""
+
+    schema_version: Literal[7]
+    media: dict[str, MediaAsset | FilmMedia | AudioMedia]
+    audio: dict[str, AudioAsset]
+    subtitle_tracks: dict[str, SubtitleTrack]
+
+
 def migrated_state(state: dict) -> dict:
     """Mechanical envelope upgrade; never re-encode historical domain objects."""
     version = state["schemaVersion"]
-    if type(version) is not int or version not in {1, 2, 3, 4, 5, 6}:
+    if type(version) is not int or version not in {1, 2, 3, 4, 5, 6, 7}:
         raise ValueError("Unsupported schema version")
     upgraded = copy.deepcopy(state)
     if version == 1:
@@ -256,6 +267,8 @@ def migrated_state(state: dict) -> dict:
         upgraded.update(schemaVersion=5, films={})
     if version < 6:
         upgraded.update(schemaVersion=6, episodes={}, scenes={}, characters={}, styles={})
+    if version < 7:
+        upgraded.update(schemaVersion=7, audio={}, subtitleTracks={})
     return upgraded
 
 
@@ -284,7 +297,7 @@ class FileStore:
                 raw = (home / "state.json").read_bytes()
             except FileNotFoundError:
                 state = {
-                    "schemaVersion": 6,
+                    "schemaVersion": 7,
                     "projects": {},
                     "sessions": {},
                     "artifacts": {},
@@ -300,16 +313,24 @@ class FileStore:
                     "scenes": {},
                     "characters": {},
                     "styles": {},
+                    "audio": {},
+                    "subtitleTracks": {},
                 }
             else:
                 try:
                     state = json.loads(raw)
                     version = state["schemaVersion"]
-                    if type(version) is not int or version not in {1, 2, 3, 4, 5, 6}:
+                    if type(version) is not int or version not in {1, 2, 3, 4, 5, 6, 7}:
                         raise ValueError("Unsupported schema version")
-                    {1: DatabaseV1, 2: DatabaseV2, 3: DatabaseV3, 4: DatabaseV4, 5: DatabaseV5, 6: Database}[
-                        version
-                    ].model_validate(state)
+                    {
+                        1: DatabaseV1,
+                        2: DatabaseV2,
+                        3: DatabaseV3,
+                        4: DatabaseV4,
+                        5: DatabaseV5,
+                        6: Database,
+                        7: DatabaseV7,
+                    }[version].model_validate(state)
                     for collection in (state["sessions"], state["runs"]):
                         for item in collection.values():
                             messages_from_dict(item["messages"])
@@ -326,7 +347,7 @@ class FileStore:
                         validate_storyboard_changes,
                     )
 
-                    checked = migrated_state(state) if version < 6 else state
+                    checked = migrated_state(state) if version < 7 else state
                     validate_job_changes(checked["jobs"], checked)
                     validate_storyboard_changes(checked["storyboards"], checked)
                     validate_asset_changes(checked["assets"], checked)
@@ -335,15 +356,17 @@ class FileStore:
                     validate_scene_changes(checked["scenes"], checked)
                     validate_character_changes(checked["characters"], checked)
                     validate_style_changes(checked["styles"], checked)
+                    validate_audio_changes(checked["audio"], checked)
+                    validate_subtitle_changes(checked["subtitleTracks"], checked)
                 except (ValueError, TypeError, KeyError, AppError):
                     raise AppError(
                         "INVALID_STORE", "本地状态损坏或版本不支持，已保留原文件，未重置数据。"
                     ) from None
-                if version < 6:
+                if version < 7:
                     # Keep the exact pre-migration bytes, including legacy message encoding.
                     atomic_write_bytes(home / f"state-v{version}-{uuid4()}.json", raw)
                     state = migrated_state(state)
-                    Database.model_validate(state)
+                    DatabaseV7.model_validate(state)
                     # Migration and runtime recovery are distinct commits. In particular,
                     # no fingerprints/default fields or SQLite checkpoints are rewritten.
                     atomic_write_json(home / "state.json", state)
@@ -431,7 +454,7 @@ class FileStore:
         with self.locked():
             draft = copy.deepcopy(self._state)
             value = mutate(draft)
-            Database.model_validate(draft)
+            DatabaseV7.model_validate(draft)
             validate_job_changes(self._state["jobs"], draft)
             validate_media_changes(self._state["media"], draft)
             validate_storyboard_changes(self._state["storyboards"], draft)
@@ -441,6 +464,8 @@ class FileStore:
             validate_scene_changes(self._state["scenes"], draft)
             validate_character_changes(self._state["characters"], draft)
             validate_style_changes(self._state["styles"], draft)
+            validate_audio_changes(self._state["audio"], draft)
+            validate_subtitle_changes(self._state["subtitleTracks"], draft)
             atomic_write_json(self.home / "state.json", draft)
             self._state = draft
             return copy.deepcopy(value)

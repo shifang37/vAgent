@@ -7,7 +7,7 @@ from pathlib import Path
 import pytest
 
 from vagent.errors import AppError
-from vagent.storage import Database, DatabaseV4, DatabaseV5, FileStore
+from vagent.storage import DatabaseV4, DatabaseV5, DatabaseV7, FileStore
 from vagent.video.contracts import canonical_fingerprint, parse_job
 from vagent.waiting import parse_wait
 
@@ -90,17 +90,20 @@ def test_v4_baseline_migrates_to_the_frozen_v5_envelope(tmp_path, entry):
     v5_envelope = {**original, "schemaVersion": 5, "films": {}}
     assert canonical_fingerprint(v5_envelope) == entry["expectedV5CanonicalSha256"]
     DatabaseV5.model_validate(v5_envelope)
-    # The current migration continues mechanically into the v6 episode collections.
+    # The current migration continues mechanically into the v6 episode collections
+    # and then the v7 audio/subtitle collections.
     expected = {
         **v5_envelope,
-        "schemaVersion": 6,
+        "schemaVersion": 7,
         "episodes": {},
         "scenes": {},
         "characters": {},
         "styles": {},
+        "audio": {},
+        "subtitleTracks": {},
     }
     assert migrated == expected
-    Database.model_validate(migrated)
+    DatabaseV7.model_validate(migrated)
     backups = list(tmp_path.glob("state-v4-*.json"))
     assert len(backups) == 1 and backups[0].read_bytes() == raw
     for name, content in sentinels.items():

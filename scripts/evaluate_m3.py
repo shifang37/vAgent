@@ -1450,6 +1450,7 @@ def base_config(args, case):
         video_workspace_id="offline-fixture",
         kling_api_key="offline-kling-placeholder",
         fal_api_key="offline-fal-placeholder",
+        context_bytes=98304,
         redis_url=None,
         skills_root=None,
         mcp_config=None,

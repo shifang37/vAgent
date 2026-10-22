@@ -16,7 +16,7 @@ def options(tmp_path, *, limit=60):
         home=tmp_path / "data",
         output=tmp_path / "report.json",
         live=False,
-        context_bytes=65536,
+        context_bytes=98304,
         max_model_calls=limit,
         continue_from=None,
     )

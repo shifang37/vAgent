@@ -6,7 +6,7 @@ from conftest import video_run
 from langchain_core.messages import HumanMessage, messages_to_dict
 
 from vagent.errors import AppError
-from vagent.storage import Database, FileStore
+from vagent.storage import DatabaseV7, FileStore
 from vagent.tools import create_project_tools
 from vagent.waiting import ExternalResourceRef, WaitBinding
 
@@ -37,6 +37,8 @@ def legacy_state(home):
         state.pop("scenes")
         state.pop("characters")
         state.pop("styles")
+        state.pop("audio")
+        state.pop("subtitleTracks")
         state["schemaVersion"] = 1
         run = state["runs"][context.run_id]
         run.update(
@@ -79,7 +81,7 @@ def test_migration_keeps_exact_backup_and_all_legacy_domain_data(tmp_path):
         migrated = store.snapshot()
         assert migrated == {
             **original,
-            "schemaVersion": 6,
+            "schemaVersion": 7,
             "jobs": {},
             "waits": {},
             "media": {},
@@ -90,10 +92,12 @@ def test_migration_keeps_exact_backup_and_all_legacy_domain_data(tmp_path):
             "scenes": {},
             "characters": {},
             "styles": {},
+            "audio": {},
+            "subtitleTracks": {},
         }
         assert next(home.glob("state-v1-*.json")).read_bytes() == raw
         assert checkpoint.read_bytes() == b"untouched-checkpoint-fixture"
-        parsed = Database.model_validate(migrated)
+        parsed = DatabaseV7.model_validate(migrated)
         assert parsed.runs["video-run"].video_mode == "off"
         assert parsed.runs["video-run"].external_wait_seconds == 0
         assert "videoMode" not in migrated["runs"]["video-run"]
@@ -128,10 +132,10 @@ def test_migration_failure_preserves_original_and_releases_lock(tmp_path, monkey
         assert backups[0].read_bytes() == raw
     monkeypatch.undo()
     with FileStore.open(home) as store:
-        assert store.snapshot()["schemaVersion"] == 6
+        assert store.snapshot()["schemaVersion"] == 7
 
 
-@pytest.mark.parametrize("version", [0, 7, True, "1", None])
+@pytest.mark.parametrize("version", [0, 8, True, "1", None])
 def test_unknown_or_coerced_versions_are_not_migrated(tmp_path, version):
     state = tmp_path / "state.json"
     raw = json.dumps({"schemaVersion": version, "projects": {}}).encode()

@@ -29,8 +29,17 @@ CLIENT_PROMPTS = {
     "shot_redo": "本地界面发起的镜头重做（不调用模型）。",
     "film_assemble": "本地界面发起的成片拼接（不调用模型）。",
     "episode_generate": "本地界面发起的分集整批登记（不调用模型）。",
+    "subtitle_save": "本地界面发起的字幕保存（不调用模型）。",
+    "subtitle_export": "本地界面发起的字幕导出（不调用模型）。",
 }
-CLIENT_GROUPS = ("shot_generate", "shot_redo", "film_assemble", "episode_generate")
+CLIENT_GROUPS = (
+    "shot_generate",
+    "shot_redo",
+    "film_assemble",
+    "episode_generate",
+    "subtitle_save",
+    "subtitle_export",
+)
 
 
 def client_run_id(session_id: str, client_request_id: str) -> str:
@@ -311,3 +320,106 @@ def _result(service, data: dict, run_id: str, storyboard_id: str | None = None) 
         raw = service.store.snapshot()["storyboards"].get(storyboard_id) or {}
         result["storyboardRevision"] = raw.get("revision")
     return result
+
+
+def save_subtitles(
+    service,
+    *,
+    session_id: str,
+    client_request_id: str,
+    scope: str,
+    storyboard_id: str | None = None,
+    episode_id: str | None = None,
+    cues=None,
+    track_id: str | None = None,
+    expected_revision: int | None = None,
+) -> dict:
+    """Save or correct a subtitle track as one explicit local action."""
+    from vagent.video.subtitles import save_subtitles
+
+    args = {
+        "scope": scope,
+        **({"storyboardId": storyboard_id} if storyboard_id is not None else {}),
+        **({"episodeId": episode_id} if episode_id is not None else {}),
+        **({"cues": cues} if cues is not None else {}),
+        **({"trackId": track_id} if track_id is not None else {}),
+        **({"expectedRevision": expected_revision} if expected_revision is not None else {}),
+    }
+    replayed = _replay_or_conflict(service, session_id, client_request_id, "subtitle_save", args)
+    if replayed is not None:
+        return replayed
+    if scope == "storyboard":
+        if storyboard_id is None:
+            raise AppError("INVALID_ARGUMENTS", "保存分镜字幕需要 storyboardId。")
+        target = service.store.snapshot()["storyboards"].get(storyboard_id)
+        if target is None or target["projectId"] != session_id:
+            raise AppError("NOT_FOUND", "当前项目中没有这个分镜。")
+    elif scope == "episode":
+        if episode_id is None:
+            raise AppError("INVALID_ARGUMENTS", "保存整集字幕需要 episodeId。")
+        target = service.store.snapshot()["episodes"].get(episode_id)
+        if target is None or target["projectId"] != session_id:
+            raise AppError("EPISODE_NOT_FOUND", "当前项目中没有这个分集。")
+    else:
+        raise AppError("INVALID_ARGUMENTS", "scope 必须是 storyboard 或 episode。")
+    context = client_context(
+        service,
+        session_id=session_id,
+        client_request_id=client_request_id,
+        group="subtitle_save",
+        require_mode_config=False,
+    )
+    result = service.store.operation(
+        _operation_key(context.run_id, "subtitle_save"),
+        "subtitle_save",
+        args,
+        lambda draft: save_subtitles(args, draft, session_id),
+    )
+    if not result.get("ok"):
+        raise AppError(result["error"]["code"], result["error"]["message"])
+    data = result["data"]
+    return _result(service, data, context.run_id, data.get("storyboardId"))
+
+
+async def export_subtitles(
+    service,
+    *,
+    session_id: str,
+    client_request_id: str,
+    track_id: str,
+    mode: str,
+    profile: str = "720p-h264-aac-v1",
+    track_version: int | None = None,
+) -> dict:
+    """Render soft/burn subtitles onto the current film as one local action."""
+    args = {
+        "trackId": track_id,
+        "mode": mode,
+        "profile": profile,
+        **({"trackVersion": track_version} if track_version is not None else {}),
+    }
+    replayed = _replay_or_conflict(service, session_id, client_request_id, "subtitle_export", args)
+    if replayed is not None:
+        return replayed
+    raw = service.store.snapshot()["subtitleTracks"].get(track_id)
+    if raw is None or raw["projectId"] != session_id:
+        raise AppError("SUBTITLE_TRACK_MISSING", "当前项目中没有这个字幕轨。")
+    context = client_context(
+        service,
+        session_id=session_id,
+        client_request_id=client_request_id,
+        group="subtitle_export",
+        require_mode_config=False,
+    )
+    result = await service.subtitles.export(
+        project_id=session_id,
+        track_id=track_id,
+        mode=mode,
+        profile_name=profile,
+        track_version=track_version,
+        operation_key=_operation_key(context.run_id, "subtitle_export"),
+        args=args,
+    )
+    if not result.get("ok"):
+        raise AppError(result["error"]["code"], result["error"]["message"])
+    return _result(service, result["data"], context.run_id, result["data"].get("storyboardId"))

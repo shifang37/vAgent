@@ -4,6 +4,16 @@
 
 本文规定 E1–E4 的实现要求。**E0 不改变产品代码（`src/`、`web/`、`tests/`）、不注册工具、不调用模型或供应商：视频 submit=0、文本模型调用=0、TTS 请求=0。** 本轮**不做 9:16 竖屏**，画幅仍为 16:9。
 
+> **E1 已实施（2026-10-22）**：schema 7、`subtitle-align-zh-v1`、`subtitle_save`、SRT/ASS、软字幕/旁挂/烧录、包内 OFL 字体、tools/rules 10/10（冻结 9/9）、CLI/Web/HTTP 与验收见 [E1 验收](./M6_E1_ACCEPTANCE.md)。实现中对本文件的细化（不改冻结语义）：
+>
+> - **时间基**：`SubtitleCue.start/end` 是精确有理数（分母 1 000 000 的微秒），`subtitle_save` 的人工修正输入用整数毫秒；对齐与校验都以“每个镜头窗口的边界只舍入一次”的规范微秒窗口为准，最后一 cue 精确落在冻结时间线末端。
+> - **字幕轨冻结输入**：`SubtitleTrackVersion` 追加 `timeline[]`、`timelineSource`、`filmVersion`、`timelineSha256`、`sourceSha256`；`storyboardVersion` 在分镜作用域记录，`episodeVersion` 在整集作用域记录。分镜已有成片时按成片实际（有理数）时间线对齐，否则按分镜镜头时长；导出只接受与成片时间线逐段相等的字幕轨，否则 `RENDER_TIMELINE_MISMATCH`。
+> - **导出范围（E1）**：`ffmpeg-render-v1` 只实现“对已拼接成片的字幕封装/烧录”子集（`scope=storyboard`，720P，音频原样复制；软字幕写 `mov_text` + 旁挂 SRT，烧录用 `subtitles` 滤镜 + 包内字体，`both` 两者都做）。整集导出、音频/响度、转场、标题卡与 1080P 上采样仍属 E2/E3；请求 1080P 或整集导出返回 `RENDER_PROFILE_UNSUPPORTED` / `RENDER_SOURCE_MISSING`，不静默降级。
+> - **音频测量**：E1 复制源音频、不做混音，因此 `render.audio` 为默认空轨道/空测量，`render.measurements.audio` 记录实测编码/采样率/声道（无声源为 `null`）；响度目标在 E2/E3 生效。
+> - **字体**：包内 `VAgentSubtitleSC-400.ttf`（Noto Sans SC 子集，改名以符合 OFL 对修改版保留名的要求），`fontRef` 固定名称与 SHA-256；文件缺失或哈希不符返回 `FONT_MISSING`。
+> - **错误码**：E1 额外使用 `RENDER_ENCODE_FAILED` 与 `RENDER_VALIDATION_FAILED` 表示本地编码/输出校验失败（§7 的 18 个码保持不变，仅为新增本地导出失败细分）。
+> - **媒体联合**：soft 成片含 `mov_text` 轨，`mp4-avc-v1` 解析接受 `sbtl/text/subt` 字幕轨（仍拒绝外部数据引用、重叠样本与未知轨道）；音频 `kind=audio`（`contractVersion=3`）在 E1 只冻结记录形状，读取/写入由 E2 实施。
+
 ## 1. 决策与版本
 
 E0 前的 7 个决策点已确认，冻结如下：
@@ -155,7 +165,7 @@ E0 前的 7 个决策点已确认，冻结如下：
 
 | 包 | 交付 | 验收 |
 |---|---|---|
-| E1 字幕 | schema v7（两个空集合 + media kind=audio）、`subtitle_save`、`subtitle-align-zh-v1`、SRT/ASS 生成、软字幕与旁挂、烧录 profile 与包内字体；tools/rules **10/10**（冻结 9/9） | 60 秒样例字幕零漂移；中文渲染正确；人工修正可重渲染；重叠/越界/缺轨全部拒绝；submit=0、模型调用=0 |
+| E1 字幕 | **已交付（2026-10-22）**：schema v7（两个空集合 + media kind=audio）、`subtitle_save`、`subtitle-align-zh-v1`、SRT/ASS 生成、软字幕与旁挂、烧录 profile 与包内字体；tools/rules **10/10**（冻结 9/9）。见 [E1 验收](./M6_E1_ACCEPTANCE.md) | 60 秒样例字幕零漂移；中文渲染正确；人工修正可重渲染；重叠/越界/缺轨全部拒绝；submit=0、模型调用=0 |
 | E2 音频 | `audio_generate`、`tts-providers-v1`、`local-tts-v1` 与 CosyVoice 适配器、音色绑定、混音与 ducking、两遍响度测量；tools/rules **11/11**（冻结 10/10） | 人声清晰无削波；响度测量在容差内；来源与许可可追溯；字符/次数/金额额度超限整批拒绝；离线全链路零真实请求 |
 | E3 转场/片头尾/导出/整集 | `cut/fade/crossfade`、标题卡、跨场整集渲染、`720p`/`1080p` profile、旁挂 SRT；tools/rules **13/13**（冻结 11/11） | 转场无黑帧、音画同步；时长与时间线一致；整集 60–90 秒成片；单场失败隔离；同指纹幂等 |
 | E4 验收 | 60–90 秒整集成片（复用真实镜头 + 离线套件）、浏览器播放与字幕开关、响度与字幕检查、安装态与 CI、验收文档 | 一条完整短剧成片可播放、字幕可开关、音频测量达标；失败保留；CI 通过；真实付费样本需单独授权 |

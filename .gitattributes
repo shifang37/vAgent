@@ -6,5 +6,7 @@
 *.md text eol=lf
 *.yml text eol=lf
 *.mp4 binary
+*.ttf binary
+*.otf binary
 # Preserve the exact CRLF bytes used by the legacy migration backup fixture.
 tests/fixtures/m1c/legacy-v1.json -text -eol whitespace=cr-at-eol

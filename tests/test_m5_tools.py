@@ -67,19 +67,19 @@ def episode_args(plan, cast, *, title="雨夜咖啡店"):
     return {"title": title, "scenes": scenes}
 
 
-def test_tool_versions_are_nine_and_eight_is_frozen():
-    assert (VIDEO_TOOLS_VERSION, VIDEO_RULES_VERSION) == (9, 9)
-    assert (LIVE_VIDEO_TOOLS_VERSION, LIVE_VIDEO_RULES_VERSION) == (9, 9)
+def test_tool_versions_are_ten_and_nine_is_frozen():
+    assert (VIDEO_TOOLS_VERSION, VIDEO_RULES_VERSION) == (10, 10)
+    assert (LIVE_VIDEO_TOOLS_VERSION, LIVE_VIDEO_RULES_VERSION) == (10, 10)
     assert "episode_plan" in video_tools.M5_TOOL_NAMES
     assert "consistency_review" in video_tools.M5_E2_TOOL_NAMES
     assert "episode_generate" in video_tools.M5_E3_TOOL_NAMES
     assert "shot_redo" in video_tools.M5_E3_TOOL_NAMES
 
 
-def test_new_runs_publish_nine_and_old_snapshots_restore(store):
+def test_new_runs_publish_ten_and_old_snapshots_restore(store):
     registry, service, _adapter, _context = mock_tools(store, clock=None)
     features = registry.features["video"]
-    assert (features["toolsVersion"], features["rulesVersion"]) == (9, 9)
+    assert (features["toolsVersion"], features["rulesVersion"]) == (10, 10)
     names = {spec["function"]["name"] for spec in registry.specs()}
     assert set(M5_TOOLS) <= names
     assert "consistency_review" in names
@@ -412,4 +412,5 @@ def test_episode_read_without_an_episode_is_empty(store):
         "style": None,
         "consistency": None,
         "generation": None,
+        "subtitle": None,
     }

@@ -73,9 +73,9 @@ def disk_error(error: OSError) -> MediaError:
     return MediaError(code)
 
 
-async def file_io(function, *args, cancel_cleanup=None):
+async def file_io(function, *args, cancel_cleanup=None, **kwargs):
     """Cancellation waits for the outstanding file operation before closing its handle."""
-    task = asyncio.create_task(asyncio.to_thread(function, *args))
+    task = asyncio.create_task(asyncio.to_thread(function, *args, **kwargs))
     try:
         return await asyncio.shield(task)
     except asyncio.CancelledError as cancelled:
@@ -356,7 +356,8 @@ class MediaService:
         self.files = MediaFiles(self.store.home)
 
     def record(self, media_id, *, project_id=None):
-        """The media index is a union: a generation clip or an assembled film."""
+        """The media index is a union: a generation clip, an assembled film or audio."""
+        from vagent.video.audio import AudioMedia
         from vagent.video.films import FilmMedia, parse_media
 
         state = self.store.snapshot()
@@ -364,7 +365,7 @@ class MediaService:
         if raw is None or (project_id is not None and raw["projectId"] != project_id):
             raise AppError("MEDIA_NOT_FOUND", "当前项目中没有这个媒体。")
         media = parse_media(raw)
-        if isinstance(media, FilmMedia):
+        if isinstance(media, (FilmMedia, AudioMedia)):
             return media
         return self.asset(media_id, project_id=project_id)
 
@@ -373,8 +374,8 @@ class MediaService:
         raw = state["media"].get(media_id)
         if raw is None or (project_id is not None and raw["projectId"] != project_id):
             raise AppError("MEDIA_NOT_FOUND", "当前项目中没有这个媒体。")
-        if raw.get("kind") == "film":
-            raise AppError("MEDIA_NOT_FOUND", "成片媒体不属于生成任务的媒体索引。")
+        if raw.get("kind") in {"film", "audio"}:
+            raise AppError("MEDIA_NOT_FOUND", "这个媒体不属于生成任务的视频索引。")
         asset = MediaAsset.model_validate(raw)
         job = parse_job(state["jobs"][asset.job_id])
         if (
@@ -432,9 +433,12 @@ class MediaService:
             self.refresh(job)
 
     def view(self, media_id, *, project_id=None):
+        from vagent.video.audio import AudioMedia
         from vagent.video.films import FilmMedia, verify_film_media
 
         media = self.record(media_id, project_id=project_id)
+        if isinstance(media, AudioMedia):
+            raise AppError("MEDIA_NOT_FOUND", "音频媒体读取属于 M6 E2，E1 只冻结其记录形状。")
         if isinstance(media, FilmMedia):
             state = self.store.snapshot()
             verify_film_media(state, media)
@@ -464,9 +468,12 @@ class MediaService:
         }
 
     def open_content(self, media_id):
+        from vagent.video.audio import AudioMedia
         from vagent.video.films import FilmMedia, verify_film_media
 
         media = self.record(media_id)
+        if isinstance(media, AudioMedia):
+            raise AppError("MEDIA_NOT_FOUND", "音频媒体读取属于 M6 E2，E1 只冻结其记录形状。")
         if isinstance(media, FilmMedia):
             verify_film_media(self.store.snapshot(), media)
             try:

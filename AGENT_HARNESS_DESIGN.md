@@ -316,6 +316,18 @@ E3 headless 复用 ApplicationService/Runner/Store 与原等待/恢复机制：�
 
 **E3 实现状态（2026-10-21）**：`vagent headless PROMPT` 以收窄后的分镜工具视图运行普通 Agent Runner（保留 `storyboard_save`/读取工具，移除 `shot_generate`、`video_generate`、`film_assemble`），计划冻结有序规范请求、provider/model/profile、能力/价格版本与逐桶估算并作为 Run 的可选 `headless` 字段持久化，不新增 schema。第二次命令以 Run ID、计划指纹、`--confirm` 与逐桶 `--max-cost`/`--max-units`/`--max-jobs` 授权固定集合；授权本身不登记，登记事务内再核对计划、当前分镜 revision、请求指纹与所有预算桶，任一不符整批不写。等待复用 Job/Media Worker 与既有终态判定，交付复用 `FilmService` 与本地拼接；`--resume` 只从持久状态继续，不增额度、不重新提交。`--json` 固定字段与退出码 0/2/3/4/5/6/130，无 TTY 不交互。用户 skills 默认按「内置根 → `VAGENT_HOME/skills`」合并，内置名优先、坏文件只诊断；显式 `VAGENT_SKILLS_DIR` 仍整体替换，新增/修改 skill 改变签名并以 `RESUME_CONFIG_CHANGED` 拒绝旧 Run。全部证据为受控 HTTP 与本地测试媒体，视频 submit=0。
 
+### 8.7 M6 字幕（E0 冻结，E1 已实施）
+
+M6 契约见 [M6 契约](./docs/M6_CONTRACTS.md)，E0 基线与 FFmpeg 能力见 [E0 验收](./docs/M6_E0_ACCEPTANCE.md)；**E1（字幕）已于 2026-10-22 实施**，证据见 [E1 验收](./docs/M6_E1_ACCEPTANCE.md)，视频 submit=0、模型调用=0、TTS 请求=0。
+
+E1 的边界选择：
+
+- **存储**：schema 7 只加 `audio`/`subtitleTracks` 两个空集合，并让 media 联合新增 `kind=audio`（`contractVersion=3`）；`v6→v7` 仍是机械迁移 + 逐字节备份。`FilmVersion` 只追加可选 `render`，因此 `Film` 与嵌入它的 `DatabaseV5`/`Database` 的 schema 哈希随之内联变化；其余 E0 模型逐字节不变。
+- **字幕时间轴**：`subtitle-align-zh-v1` 只读冻结的 `SceneVersion.dialogue[]` 与时间线；所有时间在内部是整数微秒，镜头窗口边界只舍入一次，人工修正只校验不重排。分镜已有成片时按成片有理数时间线对齐，否则按分镜镜头时长；导出要求逐段相等，否则 `RENDER_TIMELINE_MISMATCH`。
+- **工具面**：`subtitle_save` 是普通同步写工具（无 Job、无费用、走 `store.operation` 重放），tools/rules 10/10，并按 `toolFeatures` 冻结 9/9 及其之前的全部变体；`storyboard_read`/`episode_read` 只追加 `subtitle` 投影。
+- **导出**：`ffmpeg-render-v1` 在 E1 只实现字幕子集——锁内冻结源成片与字幕版本，锁外 FFmpeg 软封装/烧录，锁内复核源哈希与产物后把文件、`FilmVersion(render)`、`FilmMedia` 与 Operation 一次提交；音频原样复制，1080P/整集/响度留给 E2/E3。
+- **字体**：烧录只使用包内 OFL 子集（固定名称 + SHA-256），缺失即 `FONT_MISSING`，不回退系统字体；`mp4-avc-v1` 结构校验接受 `mov_text` 字幕轨，但仍拒绝外部数据引用、重叠样本和未知轨道。
+
 ## 9. 首版规模边界与演进条件
 
 首版做单 Agent、少量受限创作工具、持久会话、检查点与一个后台任务类型。无需先实现通用 shell、任意文件系统、子 Agent、插件市场、向量数据库或复杂工作流编辑器。

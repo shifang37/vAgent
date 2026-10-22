@@ -13,8 +13,16 @@ from typing import Literal
 
 from pydantic import Field, JsonValue, model_validator
 
-from vagent.contracts import Contract, Fingerprint, Identifier, JsonTuple, UtcTimestamp
+from vagent.contracts import (
+    Contract,
+    Fingerprint,
+    Identifier,
+    JsonTuple,
+    PositiveSeconds,
+    UtcTimestamp,
+)
 from vagent.errors import AppError
+from vagent.video.audio import AudioMedia, is_audio_media
 from vagent.video.contracts import (
     MediaAsset,
     MediaId,
@@ -26,6 +34,7 @@ from vagent.video.storyboards import (
     latest_shot_version,
     storyboard_in_state,
 )
+from vagent.video.subtitle_font import FontRef
 
 FILM_INPUT_LIMIT = 64
 FILM_VERSION_LIMIT = 64
@@ -35,6 +44,20 @@ NORMALIZATION_PROFILE = "h264-1280x720-30fps-aac-48k-stereo-v1"
 COMPATIBILITY_VERSION = "mp4-copy-signature-v1"
 FILM_MEDIA_CONTRACT_VERSION = 2
 MEDIA_VALIDATION_VERSION = "mp4-avc-v1"
+
+RENDER_VERSION = "ffmpeg-render-v1"
+PROFILE_720P = "720p-h264-aac-v1"
+PROFILE_1080P = "1080p-h264-aac-v1"
+EXPORT_PROFILES = (PROFILE_720P, PROFILE_1080P)
+SUBTITLE_MODES = ("soft", "burn", "both")
+RENDER_TIMEOUT_SECONDS = 120.0
+RENDER_JOB_TIMEOUT_SECONDS = 600.0
+RENDER_MAX_SECONDS = 90
+TITLE_CARD_LIMIT = 4
+TRANSITION_SECONDS_MIN = 0.1
+TRANSITION_SECONDS_MAX = 1.0
+MAX_RENDER_AUDIO_TRACKS = 64
+MICROSECONDS = 1_000_000
 
 
 class Rational(Contract):
@@ -47,8 +70,18 @@ class Rational(Contract):
     def of(cls, value: Fraction) -> "Rational":
         return cls(numerator=value.numerator, denominator=value.denominator)
 
+    @classmethod
+    def microseconds(cls, value: int) -> "Rational":
+        """One exact microsecond count; the subtitle time base."""
+        return cls(numerator=int(value), denominator=MICROSECONDS)
+
     def fraction(self) -> Fraction:
         return Fraction(self.numerator, self.denominator)
+
+    def total_microseconds(self) -> int:
+        """Round to the nearest microsecond (half up); the value is never negative."""
+        scaled = self.numerator * MICROSECONDS
+        return (scaled * 2 + self.denominator) // (2 * self.denominator)
 
 
 def rational(value: Fraction) -> dict:
@@ -58,6 +91,216 @@ def rational(value: Fraction) -> dict:
 def canonical_sha256(value: JsonValue) -> str:
     encoded = json.dumps(value, sort_keys=True, ensure_ascii=False, allow_nan=False, separators=(",", ":"))
     return hashlib.sha256(encoded.encode("utf-8")).hexdigest()
+
+
+# --- M6 render records (E1 carries the subtitle-only subset) -----------------
+
+
+FailureStage = Literal["source", "subtitle", "audio", "mix", "encode", "validate"]
+
+
+def profile_for(mode: str, *, name: str = PROFILE_720P) -> dict:
+    """The frozen 720P/1080P parameter sets; 1080P is only an upscale profile."""
+    if name == PROFILE_720P:
+        width, height, upscaled = 1280, 720, False
+    elif name == PROFILE_1080P:
+        width, height, upscaled = 1920, 1080, True
+    else:
+        raise ValueError("Unknown export profile")
+    if mode not in SUBTITLE_MODES:
+        raise ValueError("Unknown subtitle mode")
+    return {
+        "name": name,
+        "width": width,
+        "height": height,
+        "fps": 30,
+        "videoCodec": "h264",
+        "crf": 20,
+        "videoBitrate": None,
+        "pixFmt": "yuv420p",
+        "audioCodec": "aac",
+        "sampleRate": 48000,
+        "channels": 2,
+        "audioBitrate": "192k",
+        "subtitleMode": mode,
+        "upscaled": upscaled,
+    }
+
+
+class ExportProfile(Contract):
+    name: Literal["720p-h264-aac-v1", "1080p-h264-aac-v1"]
+    width: int = Field(gt=0)
+    height: int = Field(gt=0)
+    fps: int = Field(gt=0)
+    video_codec: Literal["h264"] = "h264"
+    crf: int | None = Field(default=20, ge=0, le=51)
+    video_bitrate: str | None = Field(default=None, min_length=1, max_length=20)
+    pix_fmt: Literal["yuv420p"] = "yuv420p"
+    audio_codec: Literal["aac"] = "aac"
+    sample_rate: int = Field(gt=0)
+    channels: int = Field(gt=0)
+    audio_bitrate: str = Field(min_length=1, max_length=20)
+    subtitle_mode: Literal["soft", "burn", "both"]
+    upscaled: bool
+
+    @model_validator(mode="after")
+    def matches_the_frozen_geometry(self):
+        expected = {
+            PROFILE_720P: (1280, 720, False),
+            PROFILE_1080P: (1920, 1080, True),
+        }[self.name]
+        if (self.width, self.height, self.upscaled) != expected:
+            raise ValueError("An export profile must use its frozen geometry")
+        return self
+
+
+class RenderEngine(Contract):
+    version: str = Field(min_length=1, max_length=120)
+    configuration_sha256: Fingerprint
+
+
+class RenderSubtitle(Contract):
+    track_id: Identifier
+    track_version: int = Field(ge=1)
+    track_sha256: Fingerprint
+    mode: Literal["soft", "burn", "both"]
+    font_ref: FontRef
+    sidecar_sha256: Fingerprint | None = None
+
+
+class RenderAudioTrack(Contract):
+    audio_id: Identifier
+    audio_version: int = Field(ge=1)
+    kind: Literal["voice", "bgm", "sfx"]
+    gain_db: float = Field(ge=-60, le=12, allow_inf_nan=False)
+    start: Rational
+    ducking: bool = False
+    voice_binding: dict[str, object] | None = None
+
+
+class RenderDucking(Contract):
+    threshold_db: float = Field(default=-20, allow_inf_nan=False)
+    ratio: float = Field(default=8, ge=1, allow_inf_nan=False)
+    attack_ms: float = Field(default=20, ge=0, allow_inf_nan=False)
+    release_ms: float = Field(default=400, ge=0, allow_inf_nan=False)
+
+
+class RenderLoudness(Contract):
+    target_lufs: float = Field(default=-16, allow_inf_nan=False)
+    target_true_peak_db: float = Field(default=-1, allow_inf_nan=False)
+    input: dict[str, object] | None = None
+    output: dict[str, object] | None = None
+
+
+class RenderAudio(Contract):
+    tracks: JsonTuple[RenderAudioTrack] = Field(default=(), max_length=MAX_RENDER_AUDIO_TRACKS)
+    ducking: RenderDucking = Field(default_factory=RenderDucking)
+    loudness: RenderLoudness = Field(default_factory=RenderLoudness)
+
+
+class RenderTransition(Contract):
+    after_shot_id: Identifier
+    type: Literal["fade", "crossfade"]
+    duration: Rational
+
+    @model_validator(mode="after")
+    def bounded_duration(self):
+        seconds = self.duration.fraction()
+        if not TRANSITION_SECONDS_MIN <= seconds <= TRANSITION_SECONDS_MAX:
+            raise ValueError("A transition must last between 0.1 and 1.0 seconds")
+        return self
+
+
+class RenderTitleCard(Contract):
+    text: str = Field(min_length=1, max_length=120)
+    start: Rational
+    duration: Rational
+    style_profile: str = Field(min_length=1, max_length=60)
+
+
+class RenderWatermark(Contract):
+    required: Literal[True] = True
+    source: Literal["provider"] = "provider"
+
+
+class RenderVideoFacts(Contract):
+    codec: Literal["h264"]
+    width: int = Field(gt=0)
+    height: int = Field(gt=0)
+    # A soft export copies the assembled film's cadence; E3's full render encodes the
+    # profile's nominal rate. The value is the observed measurement either way.
+    fps: float = Field(gt=0, allow_inf_nan=False)
+
+
+class RenderAudioFacts(Contract):
+    codec: str = Field(min_length=1, max_length=20)
+    sample_rate: int = Field(gt=0)
+    channels: int = Field(gt=0)
+
+
+class RenderMeasurements(Contract):
+    duration_seconds: PositiveSeconds
+    size_bytes: int = Field(gt=0)
+    sha256: Fingerprint
+    video: RenderVideoFacts
+    audio: RenderAudioFacts | None = None
+
+
+class RenderSubtitleSource(Contract):
+    track_id: Identifier
+    track_version: int = Field(ge=1)
+    track_sha256: Fingerprint
+
+
+class RenderSources(Contract):
+    episode_id: Identifier | None = None
+    storyboard_version: int = Field(ge=1)
+    shot_version_ids: JsonTuple[Identifier] = Field(min_length=1, max_length=64)
+    audio_assets: JsonTuple[Identifier] = Field(default=(), max_length=MAX_RENDER_AUDIO_TRACKS)
+    subtitle_track: RenderSubtitleSource
+    font: FontRef
+
+    @model_validator(mode="after")
+    def unique_shots(self):
+        if len(set(self.shot_version_ids)) != len(self.shot_version_ids):
+            raise ValueError("Rendered shot versions must be distinct")
+        return self
+
+
+class FilmRender(Contract):
+    """A rendered film: the frozen export profile plus everything that shaped it."""
+
+    render_version: Literal["ffmpeg-render-v1"] = RENDER_VERSION
+    export_profile: ExportProfile
+    engine: RenderEngine
+    subtitle: RenderSubtitle
+    audio: RenderAudio = Field(default_factory=RenderAudio)
+    transitions: JsonTuple[RenderTransition] = Field(default=(), max_length=63)
+    title_cards: JsonTuple[RenderTitleCard] = Field(default=(), max_length=TITLE_CARD_LIMIT)
+    watermark: RenderWatermark = Field(default_factory=RenderWatermark)
+    measurements: RenderMeasurements
+    sources: RenderSources
+    failure_stage: FailureStage | None = None
+    fingerprint: Fingerprint
+
+    @model_validator(mode="after")
+    def coherent_render(self):
+        if self.subtitle.mode != self.export_profile.subtitle_mode:
+            raise ValueError("The subtitle mode must match the export profile")
+        if (self.measurements.video.width, self.measurements.video.height) != (
+            self.export_profile.width,
+            self.export_profile.height,
+        ):
+            raise ValueError("Rendered dimensions must match the export profile")
+        if self.subtitle.mode in {"burn", "both"} and (
+            abs(self.measurements.video.fps - self.export_profile.fps) > 0.01
+        ):
+            raise ValueError("A re-encoded render must use the profile frame rate")
+        if self.subtitle.sidecar_sha256 is None and self.subtitle.mode in {"soft", "both"}:
+            raise ValueError("soft and both exports carry a sidecar subtitle digest")
+        if self.failure_stage is not None:
+            raise ValueError("Only successful renders are committed as a film version")
+        return self
 
 
 class FilmInput(Contract):
@@ -138,6 +381,9 @@ class FilmVersion(Contract):
     inputs: JsonTuple[FilmInput] = Field(min_length=1, max_length=FILM_INPUT_LIMIT)
     output_media_id: MediaId
     assembly: FilmAssembly
+    # E1 renders (soft/burn subtitles) append to the same film history; an
+    # assembled copy film keeps this null and a rendered film never omits it.
+    render: FilmRender | None = None
     size_bytes: int = Field(gt=0)
     sha256: Fingerprint
     metadata: MediaMetadata
@@ -196,10 +442,12 @@ class FilmMedia(Contract):
         return self
 
 
-def parse_media(raw: dict) -> "MediaAsset | FilmMedia":
-    """The media index is a union; film records are told apart by their frozen tag."""
+def parse_media(raw: dict) -> "MediaAsset | FilmMedia | AudioMedia":
+    """The media index is a union; records are told apart by their frozen tag."""
     if raw.get("contractVersion") == FILM_MEDIA_CONTRACT_VERSION and raw.get("kind") == "film":
         return FilmMedia.model_validate(raw)
+    if is_audio_media(raw):
+        return AudioMedia.model_validate(raw)
     return MediaAsset.model_validate(raw)
 
 
@@ -286,7 +534,7 @@ def select_inputs(state: dict, project_id: str, storyboard_id: str, expected_rev
         if media is None or job is None:
             incompatible.append({"shotId": shot.id, "fields": ["mediaId", "jobId"]})
             continue
-        if isinstance(media, FilmMedia) or media.project_id != project_id:
+        if isinstance(media, (FilmMedia, AudioMedia)) or media.project_id != project_id:
             incompatible.append({"shotId": shot.id, "fields": ["mediaId"]})
             continue
         if job.get("status") != "succeeded" or job.get("context", {}).get("projectId") != project_id:
@@ -364,6 +612,68 @@ def verify_film_media(state: dict, media: FilmMedia) -> None:
         raise AppError("FILM_MEDIA_INVALID", "成片媒体与对应的成片版本不一致。")
 
 
+def render_view(render: FilmRender | None) -> dict | None:
+    """Bounded projection of a rendered version: no path, only controlled URLs."""
+    if render is None:
+        return None
+    subtitle = render.subtitle
+    sidecar = (
+        f"/api/subtitles/{subtitle.track_id}/{subtitle.track_version}/srt"
+        if subtitle.mode in {"soft", "both"}
+        else None
+    )
+    return {
+        "renderVersion": render.render_version,
+        "exportProfile": render.export_profile.model_dump(mode="json", by_alias=True),
+        "engine": render.engine.model_dump(mode="json", by_alias=True),
+        "subtitle": {
+            **subtitle.model_dump(mode="json", by_alias=True),
+            "sidecarUrl": sidecar,
+        },
+        "audio": render.audio.model_dump(mode="json", by_alias=True),
+        "transitions": [item.model_dump(mode="json", by_alias=True) for item in render.transitions],
+        "titleCards": [item.model_dump(mode="json", by_alias=True) for item in render.title_cards],
+        "watermark": render.watermark.model_dump(mode="json", by_alias=True),
+        "measurements": render.measurements.model_dump(mode="json", by_alias=True),
+        "sources": render.sources.model_dump(mode="json", by_alias=True),
+        "failureStage": None,
+        "fingerprint": render.fingerprint,
+    }
+
+
+def verify_film_render(state: dict, film: Film, version: FilmVersion) -> None:
+    """A rendered version only appends to one assembled source version."""
+    render = version.render
+    if render is None:
+        return
+    if [item.shot_version_id for item in version.inputs] != list(render.sources.shot_version_ids):
+        raise AppError("FILM_MEDIA_INVALID", "渲染记录的镜头来源与成片版本不一致。")
+    raw = state.get("subtitleTracks", {}).get(render.subtitle.track_id)
+    track_version = None
+    if raw is not None:
+        track_version = next(
+            (item for item in raw["versions"] if item["version"] == render.subtitle.track_version), None
+        )
+    if track_version is None:
+        raise AppError("SUBTITLE_TRACK_MISSING", "渲染记录引用的字幕版本不存在。")
+    from vagent.video.subtitles import SubtitleTrackVersion, track_version_sha256
+
+    frozen = SubtitleTrackVersion.model_validate(track_version)
+    if track_version_sha256(frozen) != render.subtitle.track_sha256:
+        raise AppError("FILM_MEDIA_INVALID", "渲染引用的字幕版本与登记的指纹不一致。")
+    if (render.measurements.size_bytes, render.measurements.sha256) != (version.size_bytes, version.sha256):
+        raise AppError("FILM_MEDIA_INVALID", "渲染测量值与成片版本不一致。")
+    earlier = [item for item in film.versions if item.version < version.version]
+    source = next((item for item in reversed(earlier) if item.render is None), None)
+    if source is None or (
+        source.inputs != version.inputs
+        or source.assembly != version.assembly
+        or source.storyboard_version != version.storyboard_version
+        or source.storyboard_revision != version.storyboard_revision
+    ):
+        raise AppError("FILM_IMMUTABLE", "渲染版本必须追加在一个未渲染的拼接版本之后，且时间线不变。")
+
+
 def validate_film_changes(previous: dict[str, dict], state: dict) -> None:
     """Every Store commit re-checks append-only film history and media identity."""
     films = state.get("films", {})
@@ -384,6 +694,7 @@ def validate_film_changes(previous: dict[str, dict], state: dict) -> None:
             if media is None:
                 raise AppError("FILM_MEDIA_INVALID", "成片版本缺少对应的本地媒体记录。")
             verify_film_media(state, media)
+            verify_film_render(state, film, version)
         old_raw = previous.get(key)
         if old_raw is None:
             if film.revision != 1:
@@ -482,6 +793,7 @@ def film_view(state: dict, film: Film) -> dict:
                     if version.assembly.normalization is not None
                     else None
                 ),
+                "render": render_view(version.render),
                 "fingerprint": version.assembly.fingerprint,
             }
         )

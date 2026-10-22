@@ -5,10 +5,11 @@ import json
 import secrets
 from contextlib import asynccontextmanager
 from pathlib import Path
+from typing import Literal
 
 from fastapi import FastAPI, Request
 from fastapi.exceptions import RequestValidationError
-from fastapi.responses import FileResponse, JSONResponse, StreamingResponse
+from fastapi.responses import FileResponse, JSONResponse, Response, StreamingResponse
 from pydantic import BaseModel, ConfigDict, Field
 
 from vagent import __version__
@@ -61,6 +62,36 @@ class FilmAssembleInput(BaseModel):
     clientRequestId: str = Field(pattern=r"^[a-zA-Z0-9_-]{1,64}$")
     storyboardId: Identifier
     expectedRevision: int = Field(ge=0)
+
+
+class SubtitleCueInput(BaseModel):
+    model_config = ConfigDict(extra="forbid", strict=True)
+    startMs: int = Field(ge=0, le=90_000)
+    endMs: int = Field(gt=0, le=90_000)
+    text: str = Field(min_length=1, max_length=48)
+    speaker: str | None = Field(default=None, min_length=1, max_length=40)
+    shotId: Identifier | None = None
+    sceneId: Identifier | None = None
+
+
+class SubtitleSaveInput(BaseModel):
+    model_config = ConfigDict(extra="forbid", strict=True)
+    clientRequestId: str = Field(pattern=r"^[a-zA-Z0-9_-]{1,64}$")
+    scope: Literal["storyboard", "episode"]
+    storyboardId: Identifier | None = None
+    episodeId: Identifier | None = None
+    trackId: Identifier | None = None
+    expectedRevision: int | None = Field(default=None, ge=0)
+    cues: list[SubtitleCueInput] | None = Field(default=None, max_length=200)
+
+
+class SubtitleExportInput(BaseModel):
+    model_config = ConfigDict(extra="forbid", strict=True)
+    clientRequestId: str = Field(pattern=r"^[a-zA-Z0-9_-]{1,64}$")
+    trackId: Identifier
+    mode: Literal["soft", "burn", "both"]
+    profile: Literal["720p-h264-aac-v1", "1080p-h264-aac-v1"] = "720p-h264-aac-v1"
+    trackVersion: int | None = Field(default=None, ge=1)
 
 
 def create_app(config, *, port=3210, model=None, policy=None):
@@ -311,6 +342,47 @@ def create_app(config, *, port=3210, model=None, policy=None):
     async def films_assemble(session_id: str, body: FilmAssembleInput):
         return await app.state.service.assemble_film(session_id, body.model_dump())
 
+    @app.get("/api/subtitles")
+    async def subtitle(
+        projectId: str,
+        storyboardId: str | None = None,
+        episodeId: str | None = None,
+        trackId: str | None = None,
+    ):
+        return await file_io(
+            app.state.service.subtitle,
+            projectId,
+            storyboard_id=storyboardId,
+            episode_id=episodeId,
+            track_id=trackId,
+        )
+
+    @app.post("/api/sessions/{session_id}/subtitles/save", status_code=201)
+    async def subtitles_save(session_id: str, body: SubtitleSaveInput):
+        return await file_io(app.state.service.save_subtitles, session_id, body.model_dump(exclude_none=True))
+
+    @app.post("/api/sessions/{session_id}/subtitles/export", status_code=202)
+    async def subtitles_export(session_id: str, body: SubtitleExportInput):
+        return await app.state.service.export_subtitles(session_id, body.model_dump(exclude_none=True))
+
+    @app.get("/api/subtitles/{track_id}/{version}/srt")
+    async def subtitle_srt(track_id: str, version: int):
+        text, filename = await file_io(app.state.service.subtitle_sidecar, track_id, version, kind="srt")
+        return Response(
+            content=text.encode("utf-8"),
+            media_type="application/x-subrip; charset=utf-8",
+            headers={"Content-Disposition": f'attachment; filename="{filename}"'},
+        )
+
+    @app.get("/api/subtitles/{track_id}/{version}/ass")
+    async def subtitle_ass(track_id: str, version: int):
+        text, filename = await file_io(app.state.service.subtitle_sidecar, track_id, version, kind="ass")
+        return Response(
+            content=text.encode("utf-8"),
+            media_type="text/x-ssa; charset=utf-8",
+            headers={"Content-Disposition": f'attachment; filename="{filename}"'},
+        )
+
     @app.get("/api/media/{media_id}")
     async def media(media_id: str):
         return await file_io(app.state.service.media.view, media_id)
@@ -394,6 +466,7 @@ def create_app(config, *, port=3210, model=None, policy=None):
                 "job-state.js",
                 "storyboard-state.js",
                 "film-state.js",
+                "subtitle-state.js",
                 "episode-state.js",
                 "styles.css",
                 "mark.svg",

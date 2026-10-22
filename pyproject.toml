@@ -27,7 +27,7 @@ dependencies = [
 ]
 
 [project.optional-dependencies]
-dev = ["pytest>=8,<10", "pytest-asyncio>=1,<2", "ruff>=0.12,<1", "build>=1.2,<2", "hatchling>=1.27,<2"]
+dev = ["pytest>=8,<10", "pytest-asyncio>=1,<2", "ruff>=0.12,<1", "build>=1.2,<2", "hatchling>=1.27,<2", "fonttools>=4.50,<5"]
 
 [project.scripts]
 vagent = "vagent.cli:main"

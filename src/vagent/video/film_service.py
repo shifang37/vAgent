@@ -22,6 +22,7 @@ from vagent.video.assembler import (
     plan_assembly,
     plan_normalization,
 )
+from vagent.video.audio import AudioMedia
 from vagent.video.copy_signature import read_copy_signature
 from vagent.video.films import (
     Film,
@@ -173,7 +174,7 @@ class FilmService:
         for item in inputs:
             raw = state["media"].get(item.media_id)
             media = parse_media(raw) if raw is not None else None
-            if media is None or isinstance(media, FilmMedia):
+            if media is None or isinstance(media, (FilmMedia, AudioMedia)):
                 raise AppError("FILM_MEDIA_INVALID", f"镜头 {item.shot_id} 的媒体记录不可用。")
             if (media.size_bytes, media.sha256) != (item.size_bytes, item.sha256):
                 raise AppError("FILM_MEDIA_INVALID", f"镜头 {item.shot_id} 的媒体记录与分镜引用不一致。")

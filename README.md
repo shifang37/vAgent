@@ -2,7 +2,7 @@
 
 面向视频创作的 Agent 实习项目，使用 **Python + DeepSeek + LangGraph**，自主设计上下文、项目记忆、Skills、工具执行与护栏，再接入视频生成模型。
 
-当前已实现 **Python CLI + 本地 Web Agent**，前端通过同源 API/SSE 调用共享 LangGraph Runner。M1–M5 已发布并合入 master（M3 合并提交 `ef8bdda` 于 2026-10-21；M4 时间线归一化与 M5 分集分场分镜于 2026-10-22，发布版本 **v0.4.0**，[发布说明](./docs/RELEASE_0.4.0.md)），支持真实万相多镜头本地 MP4 交付、逐镜头重做、素材库、用量统计和客户端序列连播，以及本地拼接成片与自动归一化、Kling/fal 多供应商、headless 与用户 skills；两 Key 直用 K0–K3 已完成。**M4 自动时间线归一化与 M5 剧本→分集分场分镜已随 v0.4.0 发布**：M5 E4 于 2026-10-22 完成离线套件、CLI/Web 分集流程、安装态、受控浏览器与获批真实样本（`fridge-notes` 18 镜头 / 7 场，18 次 Wan 提交、估算 54.00 CNY、7 条逐场成片）。**2026-10-21 完成 M3 E0 契约冻结与 E1 本地拼接成片**：schema v5 的 `films`、`mp4-copy-signature-v1` 流复制签名、包内 FFmpeg 拼接、`film_assemble`/`film_read`（tools/rules 5/5）、`vagent film`、成片媒体分支与 Web 成片面板均已交付，**E1 全程视频 submit=0**。**2026-10-21 完成 M3 E2 多供应商与中转**：Job/Request v6、`multi-provider-v3`（Kling Singapore 直连与 fal standard 静音中转）、逐 provider/currency 与 Kling VIDEO_UNIT 预算桶、认证任务结果来源绑定与公网连接固定、tools/rules 6/6（冻结 5/5 与 4/4 仍可恢复）以及设置页多供应商 Key 均已交付，**E2 全程视频 submit=0**。**2026-10-21 完成 M3 E3 headless 与用户 skills**：`vagent headless` 两阶段计划/授权/集合等待/本地拼接交付、结构化 `--json` 与冻结退出码、`VAGENT_HOME/skills` 合并发现与坏文件隔离均已交付，**E3 离线证据、视频 submit=0**。**2026-10-21 完成 M3 E4 端到端验收与打包**：离线「一句话→多镜头→本地拼接成片」套件 6/6、安装态 wheel 成片工作台与 6 用例 PASS、受控浏览器 7/7、四组 CI 通过，并用 M2 真实分镜与三个真实万相 MP4 以零新增费用完成成片（42 项检查）；新增付费样本未执行。首轮发现见 [编排测试报告](./docs/AGENT_ORCHESTRATION_ACCEPTANCE.md)，当前边界见 [M3 契约](./docs/M3_CONTRACTS.md)、[E0 验收](./docs/M3_E0_ACCEPTANCE.md)、[E1 验收](./docs/M3_E1_ACCEPTANCE.md)、[E2 验收](./docs/M3_E2_ACCEPTANCE.md)、[E3 验收](./docs/M3_E3_ACCEPTANCE.md) 与 [M3 验收](./docs/M3_ACCEPTANCE.md)。
+当前已实现 **Python CLI + 本地 Web Agent**，前端通过同源 API/SSE 调用共享 LangGraph Runner。M1–M5 已发布并合入 master（M3 合并提交 `ef8bdda` 于 2026-10-21；M4 时间线归一化与 M5 分集分场分镜于 2026-10-22，发布版本 **v0.4.0**，[发布说明](./docs/RELEASE_0.4.0.md)），支持真实万相多镜头本地 MP4 交付、逐镜头重做、素材库、用量统计和客户端序列连播，以及本地拼接成片与自动归一化、Kling/fal 多供应商、headless 与用户 skills；两 Key 直用 K0–K3 已完成。**M6 E1 字幕已交付（2026-10-22，schema 7、tools/rules 10/10、离线 submit=0）**：`subtitle-align-zh-v1`、`subtitle_save`、SRT/ASS、软字幕/旁挂/烧录、包内 OFL 字体与只增不改的成片渲染版本，详见 [E1 验收](./docs/M6_E1_ACCEPTANCE.md)。**M4 自动时间线归一化与 M5 剧本→分集分场分镜已随 v0.4.0 发布**：M5 E4 于 2026-10-22 完成离线套件、CLI/Web 分集流程、安装态、受控浏览器与获批真实样本（`fridge-notes` 18 镜头 / 7 场，18 次 Wan 提交、估算 54.00 CNY、7 条逐场成片）。**2026-10-21 完成 M3 E0 契约冻结与 E1 本地拼接成片**：schema v5 的 `films`、`mp4-copy-signature-v1` 流复制签名、包内 FFmpeg 拼接、`film_assemble`/`film_read`（tools/rules 5/5）、`vagent film`、成片媒体分支与 Web 成片面板均已交付，**E1 全程视频 submit=0**。**2026-10-21 完成 M3 E2 多供应商与中转**：Job/Request v6、`multi-provider-v3`（Kling Singapore 直连与 fal standard 静音中转）、逐 provider/currency 与 Kling VIDEO_UNIT 预算桶、认证任务结果来源绑定与公网连接固定、tools/rules 6/6（冻结 5/5 与 4/4 仍可恢复）以及设置页多供应商 Key 均已交付，**E2 全程视频 submit=0**。**2026-10-21 完成 M3 E3 headless 与用户 skills**：`vagent headless` 两阶段计划/授权/集合等待/本地拼接交付、结构化 `--json` 与冻结退出码、`VAGENT_HOME/skills` 合并发现与坏文件隔离均已交付，**E3 离线证据、视频 submit=0**。**2026-10-21 完成 M3 E4 端到端验收与打包**：离线「一句话→多镜头→本地拼接成片」套件 6/6、安装态 wheel 成片工作台与 6 用例 PASS、受控浏览器 7/7、四组 CI 通过，并用 M2 真实分镜与三个真实万相 MP4 以零新增费用完成成片（42 项检查）；新增付费样本未执行。首轮发现见 [编排测试报告](./docs/AGENT_ORCHESTRATION_ACCEPTANCE.md)，当前边界见 [M3 契约](./docs/M3_CONTRACTS.md)、[E0 验收](./docs/M3_E0_ACCEPTANCE.md)、[E1 验收](./docs/M3_E1_ACCEPTANCE.md)、[E2 验收](./docs/M3_E2_ACCEPTANCE.md)、[E3 验收](./docs/M3_E3_ACCEPTANCE.md) 与 [M3 验收](./docs/M3_ACCEPTANCE.md)。
 
 任务 2 已补齐本地配置向导、CLI/Web 流式回复和 9 类固定评测。**2026-10-09 完成 A5：完整真实套件 9/9 通过，M1-A 已验收。** 最终套件包含 3 次显式恢复，累计 27 次模型调用、25 次工具调用；此前失败记录完整保留，详见 [M1-A 验收记录](./docs/M1A_ACCEPTANCE.md)。**2026-10-10 完成 B5，M1-B 的 B0–B5 已验收**：真实 DeepSeek + Mock 套件 5/5 通过，累计 15 次模型调用、14 次工具调用，3 个 Job 各提交一次。应用自动推进模拟任务，持久等待、停止、重启恢复及 CLI/Web 已通过回归和仓库外 wheel 验证。详见 [M1-B 验收](./docs/M1B_ACCEPTANCE.md)；真实视频接入属于后续 M1-C。
 
@@ -20,6 +20,8 @@ M3 E0 已完成 Kling 3.0 Turbo 直连与 fal standard 静音中转的官方核�
 
 **2026-10-22 完成 M6 E0 契约冻结**：M6（成片后期：字幕、配音、配乐、转场、片头尾、720P/1080P 导出）的 7 个决策点已确认——TTS 用阿里云百炼 CosyVoice 并复用视频 Key、音乐仅 CC0/用户导入、默认软字幕（`mov_text` + 旁挂 SRT）且烧录为可选档、720P 为验收口径且 1080P 仅参数化上采样、接受供应商水印、包内附 OFL 中文字体、整集成片纳入 E3。冻结 schema 7 方向（`audio`/`subtitleTracks` + media `kind=audio`）、`AudioAsset`/`SubtitleTrack`/`FilmRender` 三个域对象、`subtitle-align-zh-v1` 与 `mix-zh-v1` 算法、工具面 9/9→13/13 与 18 个错误码。本阶段不改产品代码：视频 submit=0、模型调用=0、TTS 请求=0；基线快照 `docs/M6_E0_BASELINE.json` 记录 126 个契约模型哈希与包内 FFmpeg 7.1 的字幕/转场/响度能力（`ffprobe` 不存在，测量走 FFmpeg 输出）。详见 [M6 契约](./docs/M6_CONTRACTS.md) 与 [E0 验收](./docs/M6_E0_ACCEPTANCE.md)。
 
+
+**2026-10-22 完成 M6 E1 字幕**：schema **7**（`audio`/`subtitleTracks` 两个空集合 + media `kind=audio`/`contractVersion=3`）与 v6→v7 逐字节备份迁移；`subtitle-align-zh-v1` 确定性对齐（终止/次级标点断句、每条 ≤48 字符/每行 ≤24、≥0.5 秒、0.05 秒间隙、绝不跨镜头；整数微秒最大余数分配，最后一条 cue 精确落在冻结时间线末端）；`subtitle_save`（省略 cues 生成、显式 cues 人工修正、相同 cues 重放）与 tools/rules **10/10**（冻结 9/9）；SRT/ASS 确定性生成、包内 OFL 字体（`VAgentSubtitleSC-400.ttf`，1,213,160 字节 / SHA-256 `3cb33efa…5606cb`）、软字幕（`mov_text` + 旁挂 SRT）、烧录与 `both`，以 `FilmVersion.render`/`FilmMedia` 追加只增不改的成片版本；`vagent subtitle show|save|export`、`/api/subtitles*` 与 Web 字幕区。60.256 秒成片验收中字幕零漂移、烧录帧与内置 FFmpeg + 包内字体的固定 SHA 一致；E1 全程视频 submit=0、模型调用=0、TTS 请求=0。详见 [E1 验收](./docs/M6_E1_ACCEPTANCE.md)。
 | 部分 | 状态 | 已交付内容 |
 |---|---|---|
 | 01 Agent 核心 | 已实现 | 自定义 LangGraph model/tools 循环、DeepSeek 适配、CLI、项目与产物工具、版本化存储、执行限额 |
@@ -46,6 +48,7 @@ M3 E0 已完成 Kling 3.0 Turbo 直连与 fal standard 静音中转的官方核�
 | M5 E3 生成与重做 | 已交付（受控 HTTP + 本地测试媒体，视频 submit=0） | `episode_generate` 整集批量登记：事务内重算分集→场记→分镜→镜头，任一场记未绑定分镜（`SCENE_CONFLICT`）或分镜镜头数/时长与冻结场记不一致（`EPISODE_SHOT_BUDGET`/`EPISODE_DURATION_LIMIT`）即整批拒绝；集级额度按冻结 `shotBudget` **跨 Run 累计**（`jobCap` 20 / `episodeCapAmount` 60.00 CNY，逐镜头 0.60 CNY/秒），失败与 `unknown` 仍占额度、不换汇（Kling/fal 的 USD 报价整批拒绝）；`RunLimitsSnapshot` 新增可选 `scope=episode`，Store 每次提交重算集级任务数与估算并核对 `shotRef` 归属、币种与单价，篡改返回 `JOB_CONFLICT`/`EPISODE_COST_LIMIT`；`shot_redo` 只追加目标镜头的新 ShotVersion 与新 Job；`await_job` 集合等待上限 16→20；`episode_read.generation` 给出逐镜头 `unregistered/pending/delivered/failed` 与集级余量；工具面 **9/9**（冻结 8/8）；12 项定向用例覆盖 12 镜头/60 秒全链路交付、单镜头失败隔离与重做修复、跨 Run 额度、submit 与预算一致；详见 [E3 验收](./docs/M5_E3_ACCEPTANCE.md) |
 | M5 E4 分集工作流与验收 | 已交付（离线/安装态/浏览器，真实样本 18 次 Wan 提交、估算 54.00 CNY、实际账单 unknown，文本模型调用 0） | `scripts/evaluate_m5.py` 5 用例（`fridge-notes` 18 镜头/7 场/7 条逐场成片、`rainy-cafe` 19 镜头含 i2v 与一致性评分、超长/未绑定/确认/镜头数/时长/缺素材拒绝矩阵、20 任务集级桶与重做拒绝、上游失败隔离与 v1→v2）；`tests/test_m5_evaluation.py` 10 项；CLI `episode plan/save/show/generate` 与 `clients.generate_episode`；Web `/api/episodes`、会话快照逐场成片投影、只读分集面板、`episode-state.js` 5 项测试；安装态 wheel M5 工作台 + 5 用例 PASS（42 次受控提交、41 个交付、18 个成片版本、2 次重做）；受控浏览器 5/5（7 场、18/18、54.00/60.00 CNY、成片 1280×720 解码与 Range）；真实样本 7 条逐场成片与浏览器证据；修复媒体 Worker 版本冲突丢失 prepared 进度、Web 快照缺少成片投影与套件数据目录隔离三个缺陷；详见 [E4 验收](./docs/M5_E4_ACCEPTANCE.md) |
 | M6 E0 契约冻结 | 已交付（文档 + 基线，submit=0、模型调用=0、TTS 请求=0） | 7 个决策点冻结（百炼 CosyVoice 复用视频 Key、音乐仅 CC0/用户导入、默认软字幕 + 可选烧录、720P 验收且 1080P 仅上采样、接受水印、包内 OFL 字体、整集纳入 E3）；schema 7 方向（`audio`/`subtitleTracks` + media `kind=audio`，`contractVersion=3`）；`AudioAsset`/`AudioAssetVersion`/`SubtitleTrack`/`SubtitleTrackVersion`/`FilmRender` 契约；`subtitle-align-zh-v1`（台词→cue、≤24 字符/行、0.5 秒下限、0.05 秒间隙、不跨镜头）与 `mix-zh-v1`（−16 LUFS/−1 dBTP、ducking；两遍 `loudnorm`）；工具面 9/9→10/10→11/11→13/13 且保留全部冻结变体；TTS 每集 2000 字符、单次 500 字符、40 次请求；18 个错误码；基线 126 个契约模型哈希 + FFmpeg 7.1 能力探针（中文烧录、`mov_text` 软字幕、响度测量实测通过，`ffprobe` 不存在）。见 [M6 契约](./docs/M6_CONTRACTS.md) 与 [E0 验收](./docs/M6_E0_ACCEPTANCE.md) |
+| M6 E1 字幕 | 已交付（离线，submit=0、模型调用=0、TTS 请求=0） | schema 7（`audio`/`subtitleTracks` + media `kind=audio`）与 v6→v7 逐字节备份迁移；`SubtitleTrack`/`SubtitleTrackVersion`/`SubtitleCue` 只增不改、目标唯一、cue 校验（不重叠/不倒序/不跨镜头/≤48 字符/每轨 ≤200/每场 ≤40）；`subtitle-align-zh-v1`（整数微秒、规范镜头窗口、字符比例分配、≥0.5 秒 + 0.05 秒间隙）；`subtitle_save` 与 tools/rules **10/10**（冻结 9/9）；SRT/ASS 与 `srtSha256`/`assSha256`；包内 OFL 字体（子集 3,876 字符 / SHA-256 `3cb33efa…5606cb`，缺失返回 `FONT_MISSING`）；`subtitle_service` 的 soft/burn/both 导出（`ffmpeg-render-v1`、`FilmVersion.render`、720P、音频复制、指纹幂等、锁外可停止）；`mp4-avc-v1` 接受 `mov_text` 轨；`vagent subtitle show|save|export`、`/api/subtitles*`、Web 字幕区与 `subtitle-state.js`；60.256 秒样例字幕零漂移、烧录帧固定 SHA、人工修正重渲染、重叠/越界/缺轨拒绝矩阵；详见 [E1 验收](./docs/M6_E1_ACCEPTANCE.md) |
 
 2026-10-10 完成 C0–C2：固定北京 `wan2.7-t2v-2026-06-12`、5 秒 720P 16:9，官方参考生成费为 3.00 元，采用业务空间专属域名。应用支持 off/mock/live，任务只提交一次，按原 ID 持久查询；云端成功后由独立媒体 Worker 下载，完整文件与索引提交后才进入 `succeeded`。下载重试、重启和媒体修复沿用原 Job/mediaId；Web 可播放、拖动进度和下载。账号视频权限、实际上游媒体与账单未验证，本次未调用收费模型。接口依据及完整阶段范围见 [官方核实](./docs/VIDEO_API_NOTES.md)、[冻结契约](./docs/M1C_CONTRACTS.md)和[任务规划](./docs/M1C_PLAN.md)。2026-10-15 完成 C3.1：`scripts/evaluate_m1c.py` 离线套件 7/7 通过，仓库外安装 wheel 通过含 live 协议夹具、下载中重启、CLI 与媒体 API 证据的完整 smoke；真实提交数保持 0。2026-10-16 完成 C3.2 真实联调：真实 DeepSeek 提交 1 个万相任务（北京 5 秒 720P，生成约 140 秒），应用下载并交付本地 MP4（3,183,756 字节、1280×720/H.264/AAC，浏览器播放、拖动与下载校验通过）；期间修复真实响应的 `usage.SR` 数字形态（`9a49d71`），查询暂停后经 `vagent jobs retry-query` 复用原任务完成交付，全程 submit=1；估算 3.00 元、实际账单未知。C3.1/C3.2 证据见 [M1-C 验收](./docs/M1C_ACCEPTANCE.md)。2026-10-16：M1 全部完成并合入 master（`cc3628e`）；M2（分镜多镜头工作流）进入实施：D0 完成接口核实与契约冻结（[M2 契约](./docs/M2_CONTRACTS.md)；submit=0），D1 完成 schema v4 与结构化分镜域——新增 `storyboards`/`assets` 集合的机械迁移（历史对象逐字节保留）、稳定 Shot ID 与只增不改的分镜版本、`storyboard_read`/`storyboard_save`（mock，工具与规则 4/4）、execution v3 与 pre-M2 Run 原签名恢复；离线全量回归 839 passed / 2 skipped，submit=0。证据见 [D1 验收](./docs/M2_D1_ACCEPTANCE.md)，任务全貌见 [M2 任务规划](./docs/M2_PLAN.md)。2026-10-17：D2 完成多镜头批量登记、三重上限、集合等待与逐镜头重做，并把 live 切换到 4/4 与 `wan27-shot-beijing-v2`（受控 HTTP 驱动冻结协议，视频 submit=0；离线全量 868 passed / 2 skipped），证据见 [D2 验收](./docs/M2_D2_ACCEPTANCE.md)；D3 完成素材库（导入、去重、文件恢复与只读读取）、用量统计读取侧、CLI 命令与 Web 分镜工作台（分镜面板、批量确认对话框、客户端序列连播、素材库页、用量面板），并修复 D2 遗留的两个交付缺陷（`JobResultV3` 与 M2 真实 Job 视图 500），离线全量 917 passed / 2 skipped、受控浏览器 7/7 阶段 0 失败、安装态 wheel smoke PASS，证据见 [D3 验收](./docs/M2_D3_ACCEPTANCE.md)。2026-10-17 完成 D4 的离线与打包部分：`scripts/evaluate_m2.py` 离线端到端套件 7/7（受控上游驱动冻结的 `wan-http-v2`，覆盖批量原子登记与去重、集合等待与逐镜头本地交付、部分失败隔离与逐镜头重做、三重上限与未确认拒绝；10 次提交、9 个镜头交付、2 次重做，视频 submit=0），`tests/test_m2_evaluation.py` 26 项（含评分器反例、显式续跑与预算边界），安装态 wheel smoke 扩展到 M2 工作台（分镜/素材 CLI 与 HTTP 面）与离线套件并 PASS，受控浏览器 7/7 阶段 0 失败，离线全量 **943 passed / 2 skipped**；证据见 [M2 验收](./docs/M2_ACCEPTANCE.md) 与 `output/m2-d4-*.json`。真实双镜头加一次单镜头重做的受控联调（submit≤3、估算≤9.00 CNY）已于同日完成：真实 DeepSeek 走 `video_capabilities → project_read → storyboard_save → shot_generate → await_job`（5 次调用、38,958/1,333 Token、覆盖率完整），一次登记两个镜头（合计估算 6.00），两镜头与一次重做共 **3 次提交全部一次即成**，三个真实 MP4（1280×720 / 5.03 秒 / H.264+AAC，1.93 / 2.54 / 1.96 MB）本地交付；重做只新增目标镜头的版本与任务，其他镜头的 Job 与已交付媒体哈希不变；浏览器播放、序列连播与逐媒体下载哈希校验通过；真实结果主机 `dashscope-a717.oss-accelerate.aliyuncs.com` 仍在 `wan-result-hosts-v2` 允许集内，估算合计 9.00 元、**实际账单未知**。2026-10-17：M2 全部完成并合入 master（`8776482`）；M3 于当日进入规划，并于 2026-10-21 完成 E0：本地拼接、Kling/fal 最小接入、headless 两阶段授权与用户 skills 契约已冻结，E1–E4 已实施，见 [M3 任务规划](./docs/M3_PLAN.md) 与 [E0 验收](./docs/M3_E0_ACCEPTANCE.md)。两 Key 直用的独立小轨道（K0–K3）K0 已于 2026-10-17 冻结，见 [两 Key 直用方案](./docs/KEYS_ONLY_PLAN.md)；K1（契约与服务端）同日完成：V4/V5 契约与分派、适配器按记录形态选主机（共享域名与业务空间专属域名）、keys-only live 校验与恢复、受控 HTTP 全链路与混合目录重启用例，离线全量 947 passed / 2 skipped，视频 submit=0，见 [K1 验收](./docs/KEYS_ONLY_K1_ACCEPTANCE.md)。K2（Web 与探测）于 2026-10-18 完成：设置页最小表单（两个 Key 与模式开关）与「高级（可选）」折叠、保存视频 Key / 业务空间的零费用只读探测（鉴权通过与未验证分列）、首次配置自动切 live 的限定触发、视频配置免重启对新登记生效（含业务空间后补与移除的端点热切换）；受控浏览器 6 阶段 0 失败（探测 3 次 GET、生成前零提交零任务，唯一一次提交带新 Key 打向共享域名并本地交付），离线全量 958 passed / 2 skipped，视频 submit=0，见 [K2 验收](./docs/KEYS_ONLY_K2_ACCEPTANCE.md)。K3（验收与打包）于 2026-10-18 完成：wheel smoke 增加 keys-only 共享域夹具（仅两 Key 保存、零费用探测、免重启自动 live、共享域提交与本地交付，覆盖媒体 API 与 CLI 核验），本地安装态 smoke PASS（含十三项检查）、离线全量 958 passed / 2 skipped、四组 CI 全部通过；并以安装在仓库外独立环境的 wheel 完成共享域真实单镜头样本（`wan2.7-t2v-2026-06-12`，5 秒/720P，submit=1、估算 3.00 CNY，任务 `ad3a4a68-6849-44a8-9b68-1cca1c6877be`，结果主机 `dashscope-a717.oss-accelerate.aliyuncs.com` 仍在 `wan-result-hosts-v2` 允许集内，实际账单 unknown），见 [K3 验收](./docs/KEYS_ONLY_K3_ACCEPTANCE.md)。
 
@@ -244,6 +247,23 @@ vagent headless --resume RUN_ID --json
 - **退出码**：`0` 计划成功或已交付，`2` 参数/领域校验，`3` 授权/预算拒绝，`4` 上游/下载/拼接失败，`5` 等待超时，`6` 恢复条件变化，`130` 用户中断。无 TTY 不交互、不默认同意。
 - headless 规划 Run 使用收窄的分镜工具集（不能登记 Job 或拼接），其普通 `vagent resume` 会因工具集不同而被拒绝；继续 headless 流程请使用 `vagent headless --resume`。真实编排模型仍可能产生文本费用；计划阶段与既有 CLI 回归均保持视频 submit=0。
 
+## 本地字幕（M6 E1）
+
+字幕保存与导出同样是本地动作：不调用供应商、不登记视频 Job、不产生费用。`subtitle save` 省略 `--cues` 时按该场已冻结的 `SceneVersion.dialogue[]` 与冻结时间线做 `subtitle-align-zh-v1` 确定性对齐，显式 `--cues` 时按 JSON 数组做人工修正（整数毫秒，只校验不重排）；`subtitle export` 把某一确定字幕版本软封装（`mov_text` + 旁挂 SRT）或烧录到当前成片，并追加一个只增不改的成片版本（`render` 记录 profile、字体指纹、测量与渲染指纹）。
+
+```powershell
+vagent subtitle show  -s coffee --storyboard STORYBOARD_ID
+vagent subtitle save  -s coffee --storyboard STORYBOARD_ID --request-id sub-1
+vagent subtitle save  -s coffee --storyboard STORYBOARD_ID --track TRACK_ID `
+  --expected-revision 0 --cues cues.json --request-id sub-2
+vagent subtitle export -s coffee --track TRACK_ID --mode soft --request-id export-1
+vagent subtitle export -s coffee --track TRACK_ID --mode burn --request-id export-2
+```
+
+- `show/save` 返回字幕轨、版本、逐条 cue、时间线来源（`film`/`storyboard`）与受控 SRT/ASS 地址；`subtitle_save` 工具与 CLI 共用同一领域写入，相同 cues 重放同一版本，修正追加新版本。
+- `export` 只接受与源成片版本逐段相等的字幕时间线（否则 `RENDER_TIMELINE_MISMATCH`）；E1 只支持 720P 与分镜作用域，1080P/整集导出返回 `RENDER_PROFILE_UNSUPPORTED`/`RENDER_SOURCE_MISSING`。
+- 烧录只使用包内 OFL 字体（`VAgentSubtitleSC-400.ttf`，SHA-256 固定）；字体缺失或被替换返回 `FONT_MISSING`，不会退回系统字体。重叠/倒序/越界/超限的 cue 分别返回 `SUBTITLE_CUE_CONFLICT`/`SUBTITLE_OVERFLOW`，整次拒绝且旧版本保留。
+
 ## 万相真实协议与本地媒体（M1-C C1/C2）
 
 C1/C2 已实现任务登记、一次提交、原任务查询和本地媒体交付，普通回归使用受控 HTTP 响应与本地生成的测试视频。运行 live 会发出收费生成请求；云端成功先进入 `downloading`，文件校验与媒体索引提交完成后才返回本地结果。真实账号与付费验收在 C3。
@@ -398,6 +418,11 @@ src/vagent/
   video/assembler.py E1：包内 FFmpeg 定位/指纹、按样本推导的接缝时间线、concat 流复制与输出校验；M4 在签名不兼容时回退 ffmpeg-concat-normalize-v4（1280×720/30fps + AAC 48k）
   video/films.py E1：Film/FilmVersion/FilmMedia 契约、只增不改校验、输入选择与启动清理
   video/film_service.py E1：锁内冻结、锁外拼接、重获锁复核后一次提交与指纹幂等
+  video/subtitles.py M6 E1：SubtitleTrack/SubtitleTrackVersion 契约、subtitle-align-zh-v1、cue 校验与 SRT/ASS 序列化
+  video/subtitle_service.py M6 E1：锁内冻结、锁外字幕软封装/烧录、复核后一次提交与渲染指纹幂等
+  video/subtitle_font.py M6 E1：包内 OFL 字体定位、SHA-256 校验与 FONT_MISSING
+  video/audio.py M6 E1：schema 7 的 audio 媒体分支与 AudioAsset 域（E2 写入）
+  web/subtitle-state.js M6 E1：字幕面板的纯状态逻辑（版本、cue、导出请求与受控下载）
   web/film-state.js E1：成片面板的纯状态逻辑（版本列表、播放/下载、显式拼接请求）
   video/episodes.py M5 E0：Episode/Scene/Character/Style 契约、只增不改版本与集级预算不变量
   video/adaptation.py M5 E1：text-split-zh-v1 确定性章节/场景/对白切分与镜头草案
@@ -488,9 +513,11 @@ node --check web/app.js
 node --check web/job-state.js
 node --check web/storyboard-state.js
 node --check web/film-state.js
+node --check web/subtitle-state.js
 node --test tests/test_job_state.mjs
 node --test tests/test_storyboard_state.mjs
 node --test tests/test_film_state.mjs
+node --test tests/test_subtitle_state.mjs
 .\.venv\Scripts\python.exe -m pytest -q
 .\.venv\Scripts\python.exe -m build --no-isolation --outdir dist/python
 ```

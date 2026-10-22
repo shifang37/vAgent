@@ -31,10 +31,10 @@ def live_registry(store):
     return asyncio.run(build())
 
 
-def test_the_current_live_toolset_is_nine_nine_and_keeps_every_frozen_view(store):
+def test_the_current_live_toolset_is_ten_ten_and_keeps_every_frozen_view(store):
     tools = live_registry(store)
     features = tools.features["video"]
-    assert (features["toolsVersion"], features["rulesVersion"]) == (9, 9)
+    assert (features["toolsVersion"], features["rulesVersion"]) == (10, 10)
     assert {cap["provider"] for cap in features["capabilities"]} == {"wan"}
     for version, names in ((5, True), (4, False)):
         frozen = tools.for_tools_version(version)
@@ -64,7 +64,7 @@ def mock_registry(store):
     return register_video_tools(create_project_tools(), JobService(store, [MockVideoAdapter(store)]))
 
 
-async def test_a_five_five_run_restores_with_its_frozen_features_under_nine_nine(store):
+async def test_a_five_five_run_restores_with_its_frozen_features_under_ten_ten(store):
     def begin(messages, step):
         if step == 0:
             return tool_call("video_capabilities")
@@ -84,7 +84,7 @@ async def test_a_five_five_run_restores_with_its_frozen_features_under_nine_nine
         resumed_model = ScriptedModel(lambda *_: AIMessage(content="按原 5/5 工具集继续完成"))
         resumed_model.name = "e2-restore-fixture"
         current = AgentRunner(store=reopened, model=resumed_model, tools=mock_registry(reopened))
-        assert current.tools.features["video"]["toolsVersion"] == 9
+        assert current.tools.features["video"]["toolsVersion"] == 10
         restored = current.for_record(reopened.snapshot()["runs"][first["id"]])
         assert restored.tools.features["video"]["toolsVersion"] == 5
         final = await current.resume(first["id"])
@@ -94,4 +94,4 @@ async def test_a_five_five_run_restores_with_its_frozen_features_under_nine_nine
         fresh_model = ScriptedModel(lambda *_: AIMessage(content="新 Run 使用 9/9"))
         fresh_model.name = "e2-restore-fixture"
         fresh = AgentRunner(store=reopened, model=fresh_model, tools=mock_registry(reopened))
-        assert fresh.tools.features["video"]["toolsVersion"] == 9
+        assert fresh.tools.features["video"]["toolsVersion"] == 10

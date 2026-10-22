@@ -495,6 +495,7 @@ def validate_media_changes(previous: dict[str, dict], state: dict) -> None:
     media = state.get("media", {})
     if previous.keys() - media.keys() or any(media[key] != raw for key, raw in previous.items()):
         raise AppError("MEDIA_IMMUTABLE", "已交付媒体的身份、来源和完整性记录不可删除或修改。")
+    from vagent.video.audio import AudioMedia
     from vagent.video.films import FilmMedia, verify_film_media
 
     seen_jobs = set()
@@ -505,6 +506,12 @@ def validate_media_changes(previous: dict[str, dict], state: dict) -> None:
             if film_media.id != media_id:
                 raise AppError("MEDIA_CONFLICT", "成片媒体 ID 不匹配。")
             verify_film_media(state, film_media)
+            continue
+        if raw.get("kind") == "audio":
+            # Schema 7's audio branch is written by E2; E1 only freezes the record.
+            audio = AudioMedia.model_validate(raw)
+            if audio.id != media_id or audio.project_id not in state["projects"]:
+                raise AppError("MEDIA_CONFLICT", "音频媒体 ID 或所属项目不匹配。")
             continue
         asset = MediaAsset.model_validate(raw)
         job_raw = state["jobs"].get(asset.job_id)
@@ -563,6 +570,10 @@ class JobService:
         # Local assembly shares this service's store and media index; it never
         # registers a Job or calls a provider.
         self.films = FilmService(self)
+        from vagent.video.subtitle_service import SubtitleService
+
+        # M6 E1 subtitle save/export is local too: no Job and no provider request.
+        self.subtitles = SubtitleService(self)
         self._adapters = {}
         self._capabilities = {}
         self._published = []

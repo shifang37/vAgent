@@ -7,7 +7,7 @@ from pathlib import Path
 import pytest
 
 from vagent.errors import AppError
-from vagent.storage import Database, DatabaseV1, DatabaseV2, FileStore
+from vagent.storage import DatabaseV1, DatabaseV2, DatabaseV7, FileStore
 from vagent.video.contracts import canonical_fingerprint
 
 FIXTURES = Path(__file__).parent / "fixtures" / "m1c"
@@ -29,16 +29,26 @@ def test_frozen_c0_migration_envelope_and_original_bytes(tmp_path, entry):
         (tmp_path / name).write_bytes(content)
     with FileStore.open(tmp_path) as store:
         state = store.snapshot()
-        assert state["schemaVersion"] == 6 and state["media"] == {}
+        assert state["schemaVersion"] == 7 and state["media"] == {}
         assert state["storyboards"] == {} and state["assets"] == {}
         assert state["episodes"] == state["scenes"] == state["characters"] == state["styles"] == {}
         # The frozen v1/v2->v3 envelope stays byte-identical; v4 adds exactly the
         # two empty M2 collections on top of the recorded v3 shape.
-        added = {"storyboards", "assets", "films", "episodes", "scenes", "characters", "styles"}
+        added = {
+            "storyboards",
+            "assets",
+            "films",
+            "episodes",
+            "scenes",
+            "characters",
+            "styles",
+            "audio",
+            "subtitleTracks",
+        }
         v3_shape = {key: value for key, value in state.items() if key not in added}
         v3_shape["schemaVersion"] = 3
         assert canonical_fingerprint(v3_shape) == entry["expectedV3CanonicalSha256"]
-        Database.model_validate(state)
+        DatabaseV7.model_validate(state)
         for collection, digest in entry["preservedCollectionsSha256"].items():
             assert canonical_fingerprint(state[collection]) == digest
             assert state[collection] == original[collection]
@@ -83,7 +93,7 @@ def test_both_source_versions_preserved_on_migration_write_failure(tmp_path, mon
         assert backups[0].read_bytes() == raw
     monkeypatch.undo()
     with FileStore.open(tmp_path) as store:
-        assert store.snapshot()["schemaVersion"] == 6
+        assert store.snapshot()["schemaVersion"] == 7
 
 
 @pytest.mark.parametrize("corrupt", ["job-version", "fingerprint", "operation", "message"])
