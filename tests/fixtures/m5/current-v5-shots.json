@@ -1,0 +1,3796 @@
+{
+  "schemaVersion": 5,
+  "projects": {
+    "coffee": {
+      "id": "coffee",
+      "revision": 0,
+      "goal": "",
+      "audience": "",
+      "style": "",
+      "constraints": [],
+      "plan": []
+    }
+  },
+  "sessions": {
+    "coffee": {
+      "id": "coffee",
+      "messages": [],
+      "latestRunId": "shared-single"
+    }
+  },
+  "artifacts": {},
+  "runs": {
+    "video-run": {
+      "id": "video-run",
+      "sessionId": "coffee",
+      "requestId": "video-run",
+      "prompt": "offline video fixture",
+      "model": "m3-baseline-fixture",
+      "status": "completed",
+      "messages": [],
+      "modelSteps": 0,
+      "toolCalls": 0,
+      "inputTokens": 0,
+      "outputTokens": 0,
+      "contextBytes": 0,
+      "droppedMessages": 0,
+      "answer": "",
+      "errorCode": null,
+      "createdAt": "2030-01-01T00:00:00+00:00",
+      "updatedAt": "2030-01-01T00:00:00+00:00",
+      "executionVersion": 3,
+      "contextSignature": "5197365466388bafdced606d35ce0816613b5138c3c04f2ae7ac0950df69d5c3",
+      "contextVersion": 2,
+      "policy": null,
+      "resumable": false,
+      "activeSeconds": 0,
+      "inFlightSeconds": 0,
+      "toolCallKeys": [],
+      "usageStartStep": null,
+      "modelCalls": [],
+      "readOnly": false,
+      "answerCache": {},
+      "events": [],
+      "toolFeatures": {
+        "video": {
+          "mode": "mock",
+          "toolsVersion": 4,
+          "rulesVersion": 4,
+          "capabilities": [
+            {
+              "provider": "mock",
+              "model": "mock-t2v",
+              "capabilitiesVersion": "v1",
+              "mode": "mock",
+              "inputTypes": [
+                "text"
+              ],
+              "specs": [
+                {
+                  "durationSeconds": 5.0,
+                  "resolution": "720p",
+                  "aspectRatio": "16:9"
+                },
+                {
+                  "durationSeconds": 10.0,
+                  "resolution": "1080p",
+                  "aspectRatio": "9:16"
+                }
+              ],
+              "supportsCancel": false,
+              "supportsIdempotentSubmit": false
+            }
+          ]
+        }
+      },
+      "videoMode": "mock"
+    },
+    "workspace-shots": {
+      "id": "workspace-shots",
+      "sessionId": "coffee",
+      "requestId": "workspace-shots",
+      "prompt": "offline video fixture",
+      "model": "m3-baseline-fixture",
+      "status": "completed",
+      "messages": [],
+      "modelSteps": 0,
+      "toolCalls": 0,
+      "inputTokens": 0,
+      "outputTokens": 0,
+      "contextBytes": 0,
+      "droppedMessages": 0,
+      "answer": "",
+      "errorCode": null,
+      "createdAt": "2030-01-01T00:00:00+00:00",
+      "updatedAt": "2030-01-01T00:00:00+00:00",
+      "executionVersion": 3,
+      "contextSignature": "62640ad3dcd91ffd4434bdddc39d720934eec1778755ca47c33b90f63b91b69e",
+      "contextVersion": 2,
+      "policy": null,
+      "resumable": false,
+      "activeSeconds": 0,
+      "inFlightSeconds": 0,
+      "toolCallKeys": [],
+      "usageStartStep": null,
+      "modelCalls": [],
+      "readOnly": false,
+      "answerCache": {},
+      "events": [],
+      "videoMode": "live",
+      "toolFeatures": {
+        "video": {
+          "mode": "live",
+          "toolsVersion": 4,
+          "rulesVersion": 4,
+          "capabilities": [
+            {
+              "provider": "wan",
+              "model": "wan2.7-i2v-2026-04-25",
+              "capabilitiesVersion": "wan27-shot-beijing-v2",
+              "mode": "live",
+              "inputTypes": [
+                "text",
+                "image"
+              ],
+              "specs": [
+                {
+                  "mode": "i2v",
+                  "durationSeconds": 2,
+                  "resolution": "720P",
+                  "aspectRatio": null
+                },
+                {
+                  "mode": "i2v",
+                  "durationSeconds": 3,
+                  "resolution": "720P",
+                  "aspectRatio": null
+                },
+                {
+                  "mode": "i2v",
+                  "durationSeconds": 4,
+                  "resolution": "720P",
+                  "aspectRatio": null
+                },
+                {
+                  "mode": "i2v",
+                  "durationSeconds": 5,
+                  "resolution": "720P",
+                  "aspectRatio": null
+                },
+                {
+                  "mode": "i2v",
+                  "durationSeconds": 6,
+                  "resolution": "720P",
+                  "aspectRatio": null
+                },
+                {
+                  "mode": "i2v",
+                  "durationSeconds": 7,
+                  "resolution": "720P",
+                  "aspectRatio": null
+                },
+                {
+                  "mode": "i2v",
+                  "durationSeconds": 8,
+                  "resolution": "720P",
+                  "aspectRatio": null
+                },
+                {
+                  "mode": "i2v",
+                  "durationSeconds": 9,
+                  "resolution": "720P",
+                  "aspectRatio": null
+                },
+                {
+                  "mode": "i2v",
+                  "durationSeconds": 10,
+                  "resolution": "720P",
+                  "aspectRatio": null
+                },
+                {
+                  "mode": "i2v",
+                  "durationSeconds": 11,
+                  "resolution": "720P",
+                  "aspectRatio": null
+                },
+                {
+                  "mode": "i2v",
+                  "durationSeconds": 12,
+                  "resolution": "720P",
+                  "aspectRatio": null
+                },
+                {
+                  "mode": "i2v",
+                  "durationSeconds": 13,
+                  "resolution": "720P",
+                  "aspectRatio": null
+                },
+                {
+                  "mode": "i2v",
+                  "durationSeconds": 14,
+                  "resolution": "720P",
+                  "aspectRatio": null
+                },
+                {
+                  "mode": "i2v",
+                  "durationSeconds": 15,
+                  "resolution": "720P",
+                  "aspectRatio": null
+                },
+                {
+                  "mode": "flf2v",
+                  "durationSeconds": 2,
+                  "resolution": "720P",
+                  "aspectRatio": null
+                },
+                {
+                  "mode": "flf2v",
+                  "durationSeconds": 3,
+                  "resolution": "720P",
+                  "aspectRatio": null
+                },
+                {
+                  "mode": "flf2v",
+                  "durationSeconds": 4,
+                  "resolution": "720P",
+                  "aspectRatio": null
+                },
+                {
+                  "mode": "flf2v",
+                  "durationSeconds": 5,
+                  "resolution": "720P",
+                  "aspectRatio": null
+                },
+                {
+                  "mode": "flf2v",
+                  "durationSeconds": 6,
+                  "resolution": "720P",
+                  "aspectRatio": null
+                },
+                {
+                  "mode": "flf2v",
+                  "durationSeconds": 7,
+                  "resolution": "720P",
+                  "aspectRatio": null
+                },
+                {
+                  "mode": "flf2v",
+                  "durationSeconds": 8,
+                  "resolution": "720P",
+                  "aspectRatio": null
+                },
+                {
+                  "mode": "flf2v",
+                  "durationSeconds": 9,
+                  "resolution": "720P",
+                  "aspectRatio": null
+                },
+                {
+                  "mode": "flf2v",
+                  "durationSeconds": 10,
+                  "resolution": "720P",
+                  "aspectRatio": null
+                },
+                {
+                  "mode": "flf2v",
+                  "durationSeconds": 11,
+                  "resolution": "720P",
+                  "aspectRatio": null
+                },
+                {
+                  "mode": "flf2v",
+                  "durationSeconds": 12,
+                  "resolution": "720P",
+                  "aspectRatio": null
+                },
+                {
+                  "mode": "flf2v",
+                  "durationSeconds": 13,
+                  "resolution": "720P",
+                  "aspectRatio": null
+                },
+                {
+                  "mode": "flf2v",
+                  "durationSeconds": 14,
+                  "resolution": "720P",
+                  "aspectRatio": null
+                },
+                {
+                  "mode": "flf2v",
+                  "durationSeconds": 15,
+                  "resolution": "720P",
+                  "aspectRatio": null
+                }
+              ],
+              "supportsCancel": false,
+              "supportsIdempotentSubmit": false,
+              "region": "cn-beijing",
+              "maxPromptCharacters": 4991,
+              "shotMode": "single",
+              "audioMode": "auto",
+              "promptExtend": false,
+              "watermark": true,
+              "seed": 0,
+              "supportsResultUrlRefresh": false,
+              "price": {
+                "currency": "CNY",
+                "unit": "output_second",
+                "unitPrice": "0.60",
+                "quantity": "1",
+                "amount": "0.60",
+                "priceVersion": "wan27-i2v-beijing-720p-20261016",
+                "checkedAt": "2026-10-16",
+                "sourceUrl": "https://help.aliyun.com/zh/model-studio/model-pricing#ba6f7744d5e0o"
+              },
+              "shotModes": [
+                "i2v",
+                "flf2v"
+              ],
+              "imageInput": {
+                "mimeTypes": [
+                  "image/png",
+                  "image/jpeg",
+                  "image/webp"
+                ],
+                "minSide": 240,
+                "maxSide": 8000,
+                "maxBytes": 20971520,
+                "minAspect": 1,
+                "maxAspect": 8,
+                "allowsAlpha": false
+              }
+            },
+            {
+              "provider": "wan",
+              "model": "wan2.7-t2v-2026-06-12",
+              "capabilitiesVersion": "wan27-shot-beijing-v2",
+              "mode": "live",
+              "inputTypes": [
+                "text"
+              ],
+              "specs": [
+                {
+                  "mode": "t2v",
+                  "durationSeconds": 2,
+                  "resolution": "720P",
+                  "aspectRatio": "16:9"
+                },
+                {
+                  "mode": "t2v",
+                  "durationSeconds": 3,
+                  "resolution": "720P",
+                  "aspectRatio": "16:9"
+                },
+                {
+                  "mode": "t2v",
+                  "durationSeconds": 4,
+                  "resolution": "720P",
+                  "aspectRatio": "16:9"
+                },
+                {
+                  "mode": "t2v",
+                  "durationSeconds": 5,
+                  "resolution": "720P",
+                  "aspectRatio": "16:9"
+                },
+                {
+                  "mode": "t2v",
+                  "durationSeconds": 6,
+                  "resolution": "720P",
+                  "aspectRatio": "16:9"
+                },
+                {
+                  "mode": "t2v",
+                  "durationSeconds": 7,
+                  "resolution": "720P",
+                  "aspectRatio": "16:9"
+                },
+                {
+                  "mode": "t2v",
+                  "durationSeconds": 8,
+                  "resolution": "720P",
+                  "aspectRatio": "16:9"
+                },
+                {
+                  "mode": "t2v",
+                  "durationSeconds": 9,
+                  "resolution": "720P",
+                  "aspectRatio": "16:9"
+                },
+                {
+                  "mode": "t2v",
+                  "durationSeconds": 10,
+                  "resolution": "720P",
+                  "aspectRatio": "16:9"
+                },
+                {
+                  "mode": "t2v",
+                  "durationSeconds": 11,
+                  "resolution": "720P",
+                  "aspectRatio": "16:9"
+                },
+                {
+                  "mode": "t2v",
+                  "durationSeconds": 12,
+                  "resolution": "720P",
+                  "aspectRatio": "16:9"
+                },
+                {
+                  "mode": "t2v",
+                  "durationSeconds": 13,
+                  "resolution": "720P",
+                  "aspectRatio": "16:9"
+                },
+                {
+                  "mode": "t2v",
+                  "durationSeconds": 14,
+                  "resolution": "720P",
+                  "aspectRatio": "16:9"
+                },
+                {
+                  "mode": "t2v",
+                  "durationSeconds": 15,
+                  "resolution": "720P",
+                  "aspectRatio": "16:9"
+                }
+              ],
+              "supportsCancel": false,
+              "supportsIdempotentSubmit": false,
+              "region": "cn-beijing",
+              "maxPromptCharacters": 4991,
+              "shotMode": "single",
+              "audioMode": "auto",
+              "promptExtend": false,
+              "watermark": true,
+              "seed": 0,
+              "supportsResultUrlRefresh": false,
+              "price": {
+                "currency": "CNY",
+                "unit": "output_second",
+                "unitPrice": "0.60",
+                "quantity": "1",
+                "amount": "0.60",
+                "priceVersion": "wan27-beijing-720p-20261010",
+                "checkedAt": "2026-10-16",
+                "sourceUrl": "https://help.aliyun.com/zh/model-studio/model-pricing#ba6f7744d5e0o"
+              },
+              "shotModes": [
+                "t2v"
+              ],
+              "imageInput": null
+            }
+          ]
+        }
+      }
+    },
+    "shared-shots": {
+      "id": "shared-shots",
+      "sessionId": "coffee",
+      "requestId": "shared-shots",
+      "prompt": "offline video fixture",
+      "model": "m3-baseline-fixture",
+      "status": "waiting_external",
+      "messages": [],
+      "modelSteps": 0,
+      "toolCalls": 0,
+      "inputTokens": 0,
+      "outputTokens": 0,
+      "contextBytes": 0,
+      "droppedMessages": 0,
+      "answer": "",
+      "errorCode": null,
+      "createdAt": "2030-01-01T00:00:00+00:00",
+      "updatedAt": "2030-01-01T00:00:00+00:00",
+      "executionVersion": 3,
+      "contextSignature": "62640ad3dcd91ffd4434bdddc39d720934eec1778755ca47c33b90f63b91b69e",
+      "contextVersion": 2,
+      "policy": null,
+      "resumable": false,
+      "activeSeconds": 0,
+      "inFlightSeconds": 0,
+      "toolCallKeys": [],
+      "usageStartStep": null,
+      "modelCalls": [],
+      "readOnly": false,
+      "answerCache": {},
+      "events": [],
+      "videoMode": "live",
+      "toolFeatures": {
+        "video": {
+          "mode": "live",
+          "toolsVersion": 4,
+          "rulesVersion": 4,
+          "capabilities": [
+            {
+              "provider": "wan",
+              "model": "wan2.7-i2v-2026-04-25",
+              "capabilitiesVersion": "wan27-shot-beijing-v2",
+              "mode": "live",
+              "inputTypes": [
+                "text",
+                "image"
+              ],
+              "specs": [
+                {
+                  "mode": "i2v",
+                  "durationSeconds": 2,
+                  "resolution": "720P",
+                  "aspectRatio": null
+                },
+                {
+                  "mode": "i2v",
+                  "durationSeconds": 3,
+                  "resolution": "720P",
+                  "aspectRatio": null
+                },
+                {
+                  "mode": "i2v",
+                  "durationSeconds": 4,
+                  "resolution": "720P",
+                  "aspectRatio": null
+                },
+                {
+                  "mode": "i2v",
+                  "durationSeconds": 5,
+                  "resolution": "720P",
+                  "aspectRatio": null
+                },
+                {
+                  "mode": "i2v",
+                  "durationSeconds": 6,
+                  "resolution": "720P",
+                  "aspectRatio": null
+                },
+                {
+                  "mode": "i2v",
+                  "durationSeconds": 7,
+                  "resolution": "720P",
+                  "aspectRatio": null
+                },
+                {
+                  "mode": "i2v",
+                  "durationSeconds": 8,
+                  "resolution": "720P",
+                  "aspectRatio": null
+                },
+                {
+                  "mode": "i2v",
+                  "durationSeconds": 9,
+                  "resolution": "720P",
+                  "aspectRatio": null
+                },
+                {
+                  "mode": "i2v",
+                  "durationSeconds": 10,
+                  "resolution": "720P",
+                  "aspectRatio": null
+                },
+                {
+                  "mode": "i2v",
+                  "durationSeconds": 11,
+                  "resolution": "720P",
+                  "aspectRatio": null
+                },
+                {
+                  "mode": "i2v",
+                  "durationSeconds": 12,
+                  "resolution": "720P",
+                  "aspectRatio": null
+                },
+                {
+                  "mode": "i2v",
+                  "durationSeconds": 13,
+                  "resolution": "720P",
+                  "aspectRatio": null
+                },
+                {
+                  "mode": "i2v",
+                  "durationSeconds": 14,
+                  "resolution": "720P",
+                  "aspectRatio": null
+                },
+                {
+                  "mode": "i2v",
+                  "durationSeconds": 15,
+                  "resolution": "720P",
+                  "aspectRatio": null
+                },
+                {
+                  "mode": "flf2v",
+                  "durationSeconds": 2,
+                  "resolution": "720P",
+                  "aspectRatio": null
+                },
+                {
+                  "mode": "flf2v",
+                  "durationSeconds": 3,
+                  "resolution": "720P",
+                  "aspectRatio": null
+                },
+                {
+                  "mode": "flf2v",
+                  "durationSeconds": 4,
+                  "resolution": "720P",
+                  "aspectRatio": null
+                },
+                {
+                  "mode": "flf2v",
+                  "durationSeconds": 5,
+                  "resolution": "720P",
+                  "aspectRatio": null
+                },
+                {
+                  "mode": "flf2v",
+                  "durationSeconds": 6,
+                  "resolution": "720P",
+                  "aspectRatio": null
+                },
+                {
+                  "mode": "flf2v",
+                  "durationSeconds": 7,
+                  "resolution": "720P",
+                  "aspectRatio": null
+                },
+                {
+                  "mode": "flf2v",
+                  "durationSeconds": 8,
+                  "resolution": "720P",
+                  "aspectRatio": null
+                },
+                {
+                  "mode": "flf2v",
+                  "durationSeconds": 9,
+                  "resolution": "720P",
+                  "aspectRatio": null
+                },
+                {
+                  "mode": "flf2v",
+                  "durationSeconds": 10,
+                  "resolution": "720P",
+                  "aspectRatio": null
+                },
+                {
+                  "mode": "flf2v",
+                  "durationSeconds": 11,
+                  "resolution": "720P",
+                  "aspectRatio": null
+                },
+                {
+                  "mode": "flf2v",
+                  "durationSeconds": 12,
+                  "resolution": "720P",
+                  "aspectRatio": null
+                },
+                {
+                  "mode": "flf2v",
+                  "durationSeconds": 13,
+                  "resolution": "720P",
+                  "aspectRatio": null
+                },
+                {
+                  "mode": "flf2v",
+                  "durationSeconds": 14,
+                  "resolution": "720P",
+                  "aspectRatio": null
+                },
+                {
+                  "mode": "flf2v",
+                  "durationSeconds": 15,
+                  "resolution": "720P",
+                  "aspectRatio": null
+                }
+              ],
+              "supportsCancel": false,
+              "supportsIdempotentSubmit": false,
+              "region": "cn-beijing",
+              "maxPromptCharacters": 4991,
+              "shotMode": "single",
+              "audioMode": "auto",
+              "promptExtend": false,
+              "watermark": true,
+              "seed": 0,
+              "supportsResultUrlRefresh": false,
+              "price": {
+                "currency": "CNY",
+                "unit": "output_second",
+                "unitPrice": "0.60",
+                "quantity": "1",
+                "amount": "0.60",
+                "priceVersion": "wan27-i2v-beijing-720p-20261016",
+                "checkedAt": "2026-10-16",
+                "sourceUrl": "https://help.aliyun.com/zh/model-studio/model-pricing#ba6f7744d5e0o"
+              },
+              "shotModes": [
+                "i2v",
+                "flf2v"
+              ],
+              "imageInput": {
+                "mimeTypes": [
+                  "image/png",
+                  "image/jpeg",
+                  "image/webp"
+                ],
+                "minSide": 240,
+                "maxSide": 8000,
+                "maxBytes": 20971520,
+                "minAspect": 1,
+                "maxAspect": 8,
+                "allowsAlpha": false
+              }
+            },
+            {
+              "provider": "wan",
+              "model": "wan2.7-t2v-2026-06-12",
+              "capabilitiesVersion": "wan27-shot-beijing-v2",
+              "mode": "live",
+              "inputTypes": [
+                "text"
+              ],
+              "specs": [
+                {
+                  "mode": "t2v",
+                  "durationSeconds": 2,
+                  "resolution": "720P",
+                  "aspectRatio": "16:9"
+                },
+                {
+                  "mode": "t2v",
+                  "durationSeconds": 3,
+                  "resolution": "720P",
+                  "aspectRatio": "16:9"
+                },
+                {
+                  "mode": "t2v",
+                  "durationSeconds": 4,
+                  "resolution": "720P",
+                  "aspectRatio": "16:9"
+                },
+                {
+                  "mode": "t2v",
+                  "durationSeconds": 5,
+                  "resolution": "720P",
+                  "aspectRatio": "16:9"
+                },
+                {
+                  "mode": "t2v",
+                  "durationSeconds": 6,
+                  "resolution": "720P",
+                  "aspectRatio": "16:9"
+                },
+                {
+                  "mode": "t2v",
+                  "durationSeconds": 7,
+                  "resolution": "720P",
+                  "aspectRatio": "16:9"
+                },
+                {
+                  "mode": "t2v",
+                  "durationSeconds": 8,
+                  "resolution": "720P",
+                  "aspectRatio": "16:9"
+                },
+                {
+                  "mode": "t2v",
+                  "durationSeconds": 9,
+                  "resolution": "720P",
+                  "aspectRatio": "16:9"
+                },
+                {
+                  "mode": "t2v",
+                  "durationSeconds": 10,
+                  "resolution": "720P",
+                  "aspectRatio": "16:9"
+                },
+                {
+                  "mode": "t2v",
+                  "durationSeconds": 11,
+                  "resolution": "720P",
+                  "aspectRatio": "16:9"
+                },
+                {
+                  "mode": "t2v",
+                  "durationSeconds": 12,
+                  "resolution": "720P",
+                  "aspectRatio": "16:9"
+                },
+                {
+                  "mode": "t2v",
+                  "durationSeconds": 13,
+                  "resolution": "720P",
+                  "aspectRatio": "16:9"
+                },
+                {
+                  "mode": "t2v",
+                  "durationSeconds": 14,
+                  "resolution": "720P",
+                  "aspectRatio": "16:9"
+                },
+                {
+                  "mode": "t2v",
+                  "durationSeconds": 15,
+                  "resolution": "720P",
+                  "aspectRatio": "16:9"
+                }
+              ],
+              "supportsCancel": false,
+              "supportsIdempotentSubmit": false,
+              "region": "cn-beijing",
+              "maxPromptCharacters": 4991,
+              "shotMode": "single",
+              "audioMode": "auto",
+              "promptExtend": false,
+              "watermark": true,
+              "seed": 0,
+              "supportsResultUrlRefresh": false,
+              "price": {
+                "currency": "CNY",
+                "unit": "output_second",
+                "unitPrice": "0.60",
+                "quantity": "1",
+                "amount": "0.60",
+                "priceVersion": "wan27-beijing-720p-20261010",
+                "checkedAt": "2026-10-16",
+                "sourceUrl": "https://help.aliyun.com/zh/model-studio/model-pricing#ba6f7744d5e0o"
+              },
+              "shotModes": [
+                "t2v"
+              ],
+              "imageInput": null
+            }
+          ]
+        }
+      },
+      "activeWaitId": "21174ee2-6d8c-5543-9402-dbfc9df7a1b3",
+      "externalWaitStartedAt": "2030-01-01T00:00:00+00:00"
+    },
+    "shared-redo": {
+      "id": "shared-redo",
+      "sessionId": "coffee",
+      "requestId": "shared-redo",
+      "prompt": "offline video fixture",
+      "model": "m3-baseline-fixture",
+      "status": "completed",
+      "messages": [],
+      "modelSteps": 0,
+      "toolCalls": 0,
+      "inputTokens": 0,
+      "outputTokens": 0,
+      "contextBytes": 0,
+      "droppedMessages": 0,
+      "answer": "",
+      "errorCode": null,
+      "createdAt": "2030-01-01T00:00:00+00:00",
+      "updatedAt": "2030-01-01T00:00:00+00:00",
+      "executionVersion": 3,
+      "contextSignature": "62640ad3dcd91ffd4434bdddc39d720934eec1778755ca47c33b90f63b91b69e",
+      "contextVersion": 2,
+      "policy": null,
+      "resumable": false,
+      "activeSeconds": 0,
+      "inFlightSeconds": 0,
+      "toolCallKeys": [],
+      "usageStartStep": null,
+      "modelCalls": [],
+      "readOnly": false,
+      "answerCache": {},
+      "events": [],
+      "videoMode": "live",
+      "toolFeatures": {
+        "video": {
+          "mode": "live",
+          "toolsVersion": 4,
+          "rulesVersion": 4,
+          "capabilities": [
+            {
+              "provider": "wan",
+              "model": "wan2.7-i2v-2026-04-25",
+              "capabilitiesVersion": "wan27-shot-beijing-v2",
+              "mode": "live",
+              "inputTypes": [
+                "text",
+                "image"
+              ],
+              "specs": [
+                {
+                  "mode": "i2v",
+                  "durationSeconds": 2,
+                  "resolution": "720P",
+                  "aspectRatio": null
+                },
+                {
+                  "mode": "i2v",
+                  "durationSeconds": 3,
+                  "resolution": "720P",
+                  "aspectRatio": null
+                },
+                {
+                  "mode": "i2v",
+                  "durationSeconds": 4,
+                  "resolution": "720P",
+                  "aspectRatio": null
+                },
+                {
+                  "mode": "i2v",
+                  "durationSeconds": 5,
+                  "resolution": "720P",
+                  "aspectRatio": null
+                },
+                {
+                  "mode": "i2v",
+                  "durationSeconds": 6,
+                  "resolution": "720P",
+                  "aspectRatio": null
+                },
+                {
+                  "mode": "i2v",
+                  "durationSeconds": 7,
+                  "resolution": "720P",
+                  "aspectRatio": null
+                },
+                {
+                  "mode": "i2v",
+                  "durationSeconds": 8,
+                  "resolution": "720P",
+                  "aspectRatio": null
+                },
+                {
+                  "mode": "i2v",
+                  "durationSeconds": 9,
+                  "resolution": "720P",
+                  "aspectRatio": null
+                },
+                {
+                  "mode": "i2v",
+                  "durationSeconds": 10,
+                  "resolution": "720P",
+                  "aspectRatio": null
+                },
+                {
+                  "mode": "i2v",
+                  "durationSeconds": 11,
+                  "resolution": "720P",
+                  "aspectRatio": null
+                },
+                {
+                  "mode": "i2v",
+                  "durationSeconds": 12,
+                  "resolution": "720P",
+                  "aspectRatio": null
+                },
+                {
+                  "mode": "i2v",
+                  "durationSeconds": 13,
+                  "resolution": "720P",
+                  "aspectRatio": null
+                },
+                {
+                  "mode": "i2v",
+                  "durationSeconds": 14,
+                  "resolution": "720P",
+                  "aspectRatio": null
+                },
+                {
+                  "mode": "i2v",
+                  "durationSeconds": 15,
+                  "resolution": "720P",
+                  "aspectRatio": null
+                },
+                {
+                  "mode": "flf2v",
+                  "durationSeconds": 2,
+                  "resolution": "720P",
+                  "aspectRatio": null
+                },
+                {
+                  "mode": "flf2v",
+                  "durationSeconds": 3,
+                  "resolution": "720P",
+                  "aspectRatio": null
+                },
+                {
+                  "mode": "flf2v",
+                  "durationSeconds": 4,
+                  "resolution": "720P",
+                  "aspectRatio": null
+                },
+                {
+                  "mode": "flf2v",
+                  "durationSeconds": 5,
+                  "resolution": "720P",
+                  "aspectRatio": null
+                },
+                {
+                  "mode": "flf2v",
+                  "durationSeconds": 6,
+                  "resolution": "720P",
+                  "aspectRatio": null
+                },
+                {
+                  "mode": "flf2v",
+                  "durationSeconds": 7,
+                  "resolution": "720P",
+                  "aspectRatio": null
+                },
+                {
+                  "mode": "flf2v",
+                  "durationSeconds": 8,
+                  "resolution": "720P",
+                  "aspectRatio": null
+                },
+                {
+                  "mode": "flf2v",
+                  "durationSeconds": 9,
+                  "resolution": "720P",
+                  "aspectRatio": null
+                },
+                {
+                  "mode": "flf2v",
+                  "durationSeconds": 10,
+                  "resolution": "720P",
+                  "aspectRatio": null
+                },
+                {
+                  "mode": "flf2v",
+                  "durationSeconds": 11,
+                  "resolution": "720P",
+                  "aspectRatio": null
+                },
+                {
+                  "mode": "flf2v",
+                  "durationSeconds": 12,
+                  "resolution": "720P",
+                  "aspectRatio": null
+                },
+                {
+                  "mode": "flf2v",
+                  "durationSeconds": 13,
+                  "resolution": "720P",
+                  "aspectRatio": null
+                },
+                {
+                  "mode": "flf2v",
+                  "durationSeconds": 14,
+                  "resolution": "720P",
+                  "aspectRatio": null
+                },
+                {
+                  "mode": "flf2v",
+                  "durationSeconds": 15,
+                  "resolution": "720P",
+                  "aspectRatio": null
+                }
+              ],
+              "supportsCancel": false,
+              "supportsIdempotentSubmit": false,
+              "region": "cn-beijing",
+              "maxPromptCharacters": 4991,
+              "shotMode": "single",
+              "audioMode": "auto",
+              "promptExtend": false,
+              "watermark": true,
+              "seed": 0,
+              "supportsResultUrlRefresh": false,
+              "price": {
+                "currency": "CNY",
+                "unit": "output_second",
+                "unitPrice": "0.60",
+                "quantity": "1",
+                "amount": "0.60",
+                "priceVersion": "wan27-i2v-beijing-720p-20261016",
+                "checkedAt": "2026-10-16",
+                "sourceUrl": "https://help.aliyun.com/zh/model-studio/model-pricing#ba6f7744d5e0o"
+              },
+              "shotModes": [
+                "i2v",
+                "flf2v"
+              ],
+              "imageInput": {
+                "mimeTypes": [
+                  "image/png",
+                  "image/jpeg",
+                  "image/webp"
+                ],
+                "minSide": 240,
+                "maxSide": 8000,
+                "maxBytes": 20971520,
+                "minAspect": 1,
+                "maxAspect": 8,
+                "allowsAlpha": false
+              }
+            },
+            {
+              "provider": "wan",
+              "model": "wan2.7-t2v-2026-06-12",
+              "capabilitiesVersion": "wan27-shot-beijing-v2",
+              "mode": "live",
+              "inputTypes": [
+                "text"
+              ],
+              "specs": [
+                {
+                  "mode": "t2v",
+                  "durationSeconds": 2,
+                  "resolution": "720P",
+                  "aspectRatio": "16:9"
+                },
+                {
+                  "mode": "t2v",
+                  "durationSeconds": 3,
+                  "resolution": "720P",
+                  "aspectRatio": "16:9"
+                },
+                {
+                  "mode": "t2v",
+                  "durationSeconds": 4,
+                  "resolution": "720P",
+                  "aspectRatio": "16:9"
+                },
+                {
+                  "mode": "t2v",
+                  "durationSeconds": 5,
+                  "resolution": "720P",
+                  "aspectRatio": "16:9"
+                },
+                {
+                  "mode": "t2v",
+                  "durationSeconds": 6,
+                  "resolution": "720P",
+                  "aspectRatio": "16:9"
+                },
+                {
+                  "mode": "t2v",
+                  "durationSeconds": 7,
+                  "resolution": "720P",
+                  "aspectRatio": "16:9"
+                },
+                {
+                  "mode": "t2v",
+                  "durationSeconds": 8,
+                  "resolution": "720P",
+                  "aspectRatio": "16:9"
+                },
+                {
+                  "mode": "t2v",
+                  "durationSeconds": 9,
+                  "resolution": "720P",
+                  "aspectRatio": "16:9"
+                },
+                {
+                  "mode": "t2v",
+                  "durationSeconds": 10,
+                  "resolution": "720P",
+                  "aspectRatio": "16:9"
+                },
+                {
+                  "mode": "t2v",
+                  "durationSeconds": 11,
+                  "resolution": "720P",
+                  "aspectRatio": "16:9"
+                },
+                {
+                  "mode": "t2v",
+                  "durationSeconds": 12,
+                  "resolution": "720P",
+                  "aspectRatio": "16:9"
+                },
+                {
+                  "mode": "t2v",
+                  "durationSeconds": 13,
+                  "resolution": "720P",
+                  "aspectRatio": "16:9"
+                },
+                {
+                  "mode": "t2v",
+                  "durationSeconds": 14,
+                  "resolution": "720P",
+                  "aspectRatio": "16:9"
+                },
+                {
+                  "mode": "t2v",
+                  "durationSeconds": 15,
+                  "resolution": "720P",
+                  "aspectRatio": "16:9"
+                }
+              ],
+              "supportsCancel": false,
+              "supportsIdempotentSubmit": false,
+              "region": "cn-beijing",
+              "maxPromptCharacters": 4991,
+              "shotMode": "single",
+              "audioMode": "auto",
+              "promptExtend": false,
+              "watermark": true,
+              "seed": 0,
+              "supportsResultUrlRefresh": false,
+              "price": {
+                "currency": "CNY",
+                "unit": "output_second",
+                "unitPrice": "0.60",
+                "quantity": "1",
+                "amount": "0.60",
+                "priceVersion": "wan27-beijing-720p-20261010",
+                "checkedAt": "2026-10-16",
+                "sourceUrl": "https://help.aliyun.com/zh/model-studio/model-pricing#ba6f7744d5e0o"
+              },
+              "shotModes": [
+                "t2v"
+              ],
+              "imageInput": null
+            }
+          ]
+        }
+      }
+    },
+    "shared-single": {
+      "id": "shared-single",
+      "sessionId": "coffee",
+      "requestId": "shared-single",
+      "prompt": "offline video fixture",
+      "model": "m3-baseline-fixture",
+      "status": "completed",
+      "messages": [],
+      "modelSteps": 0,
+      "toolCalls": 0,
+      "inputTokens": 0,
+      "outputTokens": 0,
+      "contextBytes": 0,
+      "droppedMessages": 0,
+      "answer": "",
+      "errorCode": null,
+      "createdAt": "2030-01-01T00:00:00+00:00",
+      "updatedAt": "2030-01-01T00:00:00+00:00",
+      "executionVersion": 3,
+      "contextSignature": "62640ad3dcd91ffd4434bdddc39d720934eec1778755ca47c33b90f63b91b69e",
+      "contextVersion": 2,
+      "policy": null,
+      "resumable": false,
+      "activeSeconds": 0,
+      "inFlightSeconds": 0,
+      "toolCallKeys": [],
+      "usageStartStep": null,
+      "modelCalls": [],
+      "readOnly": false,
+      "answerCache": {},
+      "events": [],
+      "videoMode": "live",
+      "toolFeatures": {
+        "video": {
+          "mode": "live",
+          "toolsVersion": 4,
+          "rulesVersion": 4,
+          "capabilities": [
+            {
+              "provider": "wan",
+              "model": "wan2.7-i2v-2026-04-25",
+              "capabilitiesVersion": "wan27-shot-beijing-v2",
+              "mode": "live",
+              "inputTypes": [
+                "text",
+                "image"
+              ],
+              "specs": [
+                {
+                  "mode": "i2v",
+                  "durationSeconds": 2,
+                  "resolution": "720P",
+                  "aspectRatio": null
+                },
+                {
+                  "mode": "i2v",
+                  "durationSeconds": 3,
+                  "resolution": "720P",
+                  "aspectRatio": null
+                },
+                {
+                  "mode": "i2v",
+                  "durationSeconds": 4,
+                  "resolution": "720P",
+                  "aspectRatio": null
+                },
+                {
+                  "mode": "i2v",
+                  "durationSeconds": 5,
+                  "resolution": "720P",
+                  "aspectRatio": null
+                },
+                {
+                  "mode": "i2v",
+                  "durationSeconds": 6,
+                  "resolution": "720P",
+                  "aspectRatio": null
+                },
+                {
+                  "mode": "i2v",
+                  "durationSeconds": 7,
+                  "resolution": "720P",
+                  "aspectRatio": null
+                },
+                {
+                  "mode": "i2v",
+                  "durationSeconds": 8,
+                  "resolution": "720P",
+                  "aspectRatio": null
+                },
+                {
+                  "mode": "i2v",
+                  "durationSeconds": 9,
+                  "resolution": "720P",
+                  "aspectRatio": null
+                },
+                {
+                  "mode": "i2v",
+                  "durationSeconds": 10,
+                  "resolution": "720P",
+                  "aspectRatio": null
+                },
+                {
+                  "mode": "i2v",
+                  "durationSeconds": 11,
+                  "resolution": "720P",
+                  "aspectRatio": null
+                },
+                {
+                  "mode": "i2v",
+                  "durationSeconds": 12,
+                  "resolution": "720P",
+                  "aspectRatio": null
+                },
+                {
+                  "mode": "i2v",
+                  "durationSeconds": 13,
+                  "resolution": "720P",
+                  "aspectRatio": null
+                },
+                {
+                  "mode": "i2v",
+                  "durationSeconds": 14,
+                  "resolution": "720P",
+                  "aspectRatio": null
+                },
+                {
+                  "mode": "i2v",
+                  "durationSeconds": 15,
+                  "resolution": "720P",
+                  "aspectRatio": null
+                },
+                {
+                  "mode": "flf2v",
+                  "durationSeconds": 2,
+                  "resolution": "720P",
+                  "aspectRatio": null
+                },
+                {
+                  "mode": "flf2v",
+                  "durationSeconds": 3,
+                  "resolution": "720P",
+                  "aspectRatio": null
+                },
+                {
+                  "mode": "flf2v",
+                  "durationSeconds": 4,
+                  "resolution": "720P",
+                  "aspectRatio": null
+                },
+                {
+                  "mode": "flf2v",
+                  "durationSeconds": 5,
+                  "resolution": "720P",
+                  "aspectRatio": null
+                },
+                {
+                  "mode": "flf2v",
+                  "durationSeconds": 6,
+                  "resolution": "720P",
+                  "aspectRatio": null
+                },
+                {
+                  "mode": "flf2v",
+                  "durationSeconds": 7,
+                  "resolution": "720P",
+                  "aspectRatio": null
+                },
+                {
+                  "mode": "flf2v",
+                  "durationSeconds": 8,
+                  "resolution": "720P",
+                  "aspectRatio": null
+                },
+                {
+                  "mode": "flf2v",
+                  "durationSeconds": 9,
+                  "resolution": "720P",
+                  "aspectRatio": null
+                },
+                {
+                  "mode": "flf2v",
+                  "durationSeconds": 10,
+                  "resolution": "720P",
+                  "aspectRatio": null
+                },
+                {
+                  "mode": "flf2v",
+                  "durationSeconds": 11,
+                  "resolution": "720P",
+                  "aspectRatio": null
+                },
+                {
+                  "mode": "flf2v",
+                  "durationSeconds": 12,
+                  "resolution": "720P",
+                  "aspectRatio": null
+                },
+                {
+                  "mode": "flf2v",
+                  "durationSeconds": 13,
+                  "resolution": "720P",
+                  "aspectRatio": null
+                },
+                {
+                  "mode": "flf2v",
+                  "durationSeconds": 14,
+                  "resolution": "720P",
+                  "aspectRatio": null
+                },
+                {
+                  "mode": "flf2v",
+                  "durationSeconds": 15,
+                  "resolution": "720P",
+                  "aspectRatio": null
+                }
+              ],
+              "supportsCancel": false,
+              "supportsIdempotentSubmit": false,
+              "region": "cn-beijing",
+              "maxPromptCharacters": 4991,
+              "shotMode": "single",
+              "audioMode": "auto",
+              "promptExtend": false,
+              "watermark": true,
+              "seed": 0,
+              "supportsResultUrlRefresh": false,
+              "price": {
+                "currency": "CNY",
+                "unit": "output_second",
+                "unitPrice": "0.60",
+                "quantity": "1",
+                "amount": "0.60",
+                "priceVersion": "wan27-i2v-beijing-720p-20261016",
+                "checkedAt": "2026-10-16",
+                "sourceUrl": "https://help.aliyun.com/zh/model-studio/model-pricing#ba6f7744d5e0o"
+              },
+              "shotModes": [
+                "i2v",
+                "flf2v"
+              ],
+              "imageInput": {
+                "mimeTypes": [
+                  "image/png",
+                  "image/jpeg",
+                  "image/webp"
+                ],
+                "minSide": 240,
+                "maxSide": 8000,
+                "maxBytes": 20971520,
+                "minAspect": 1,
+                "maxAspect": 8,
+                "allowsAlpha": false
+              }
+            },
+            {
+              "provider": "wan",
+              "model": "wan2.7-t2v-2026-06-12",
+              "capabilitiesVersion": "wan27-shot-beijing-v2",
+              "mode": "live",
+              "inputTypes": [
+                "text"
+              ],
+              "specs": [
+                {
+                  "mode": "t2v",
+                  "durationSeconds": 2,
+                  "resolution": "720P",
+                  "aspectRatio": "16:9"
+                },
+                {
+                  "mode": "t2v",
+                  "durationSeconds": 3,
+                  "resolution": "720P",
+                  "aspectRatio": "16:9"
+                },
+                {
+                  "mode": "t2v",
+                  "durationSeconds": 4,
+                  "resolution": "720P",
+                  "aspectRatio": "16:9"
+                },
+                {
+                  "mode": "t2v",
+                  "durationSeconds": 5,
+                  "resolution": "720P",
+                  "aspectRatio": "16:9"
+                },
+                {
+                  "mode": "t2v",
+                  "durationSeconds": 6,
+                  "resolution": "720P",
+                  "aspectRatio": "16:9"
+                },
+                {
+                  "mode": "t2v",
+                  "durationSeconds": 7,
+                  "resolution": "720P",
+                  "aspectRatio": "16:9"
+                },
+                {
+                  "mode": "t2v",
+                  "durationSeconds": 8,
+                  "resolution": "720P",
+                  "aspectRatio": "16:9"
+                },
+                {
+                  "mode": "t2v",
+                  "durationSeconds": 9,
+                  "resolution": "720P",
+                  "aspectRatio": "16:9"
+                },
+                {
+                  "mode": "t2v",
+                  "durationSeconds": 10,
+                  "resolution": "720P",
+                  "aspectRatio": "16:9"
+                },
+                {
+                  "mode": "t2v",
+                  "durationSeconds": 11,
+                  "resolution": "720P",
+                  "aspectRatio": "16:9"
+                },
+                {
+                  "mode": "t2v",
+                  "durationSeconds": 12,
+                  "resolution": "720P",
+                  "aspectRatio": "16:9"
+                },
+                {
+                  "mode": "t2v",
+                  "durationSeconds": 13,
+                  "resolution": "720P",
+                  "aspectRatio": "16:9"
+                },
+                {
+                  "mode": "t2v",
+                  "durationSeconds": 14,
+                  "resolution": "720P",
+                  "aspectRatio": "16:9"
+                },
+                {
+                  "mode": "t2v",
+                  "durationSeconds": 15,
+                  "resolution": "720P",
+                  "aspectRatio": "16:9"
+                }
+              ],
+              "supportsCancel": false,
+              "supportsIdempotentSubmit": false,
+              "region": "cn-beijing",
+              "maxPromptCharacters": 4991,
+              "shotMode": "single",
+              "audioMode": "auto",
+              "promptExtend": false,
+              "watermark": true,
+              "seed": 0,
+              "supportsResultUrlRefresh": false,
+              "price": {
+                "currency": "CNY",
+                "unit": "output_second",
+                "unitPrice": "0.60",
+                "quantity": "1",
+                "amount": "0.60",
+                "priceVersion": "wan27-beijing-720p-20261010",
+                "checkedAt": "2026-10-16",
+                "sourceUrl": "https://help.aliyun.com/zh/model-studio/model-pricing#ba6f7744d5e0o"
+              },
+              "shotModes": [
+                "t2v"
+              ],
+              "imageInput": null
+            }
+          ]
+        }
+      }
+    }
+  },
+  "operations": {
+    "storyboard-save": {
+      "fingerprint": "9b1a9c899fd676de076a32561870f1723681e9bce6563d8e7a00f7213694449a",
+      "result": {
+        "ok": true,
+        "data": {
+          "storyboardId": "c80d8285-5c47-5468-bea6-6147eb8caf15",
+          "version": 1,
+          "shotIds": [
+            "d8f6f9ab-513d-57ba-8255-863afd07e7d0",
+            "8ec24f7e-4f3d-586a-adcb-abe3c75aa90e"
+          ]
+        }
+      }
+    },
+    "workspace-shots:1:batch": {
+      "fingerprint": "4b5149e3c41fdaab2c94e7fa6d5abf2860c485a36458044383a953fcba69ebc8",
+      "result": {
+        "ok": true,
+        "data": {
+          "storyboardId": "c80d8285-5c47-5468-bea6-6147eb8caf15",
+          "storyboardVersion": 1,
+          "simulated": false,
+          "mediaAvailable": false,
+          "shots": [
+            {
+              "shotId": "d8f6f9ab-513d-57ba-8255-863afd07e7d0",
+              "shotVersionId": "f72db7bd-7b94-5c59-bb8c-02bc7e72293b",
+              "jobId": "bdf43cc0-ac35-5934-86a4-a8284b20950d",
+              "status": "pending_submit",
+              "reused": false,
+              "estimate": {
+                "currency": "CNY",
+                "unit": "output_second",
+                "unitPrice": "0.60",
+                "quantity": "5",
+                "amount": "3.00",
+                "priceVersion": "wan27-beijing-720p-20261010",
+                "checkedAt": "2026-10-16",
+                "sourceUrl": "https://help.aliyun.com/zh/model-studio/model-pricing#ba6f7744d5e0o",
+                "maxJobCost": "3.00"
+              },
+              "mode": "t2v",
+              "durationSeconds": 5
+            },
+            {
+              "shotId": "8ec24f7e-4f3d-586a-adcb-abe3c75aa90e",
+              "shotVersionId": "c77e70fb-c009-5669-99ec-e6c15968d82a",
+              "jobId": "05012a65-2362-55f0-8fb7-a911c702b0af",
+              "status": "pending_submit",
+              "reused": false,
+              "estimate": {
+                "currency": "CNY",
+                "unit": "output_second",
+                "unitPrice": "0.60",
+                "quantity": "5",
+                "amount": "3.00",
+                "priceVersion": "wan27-i2v-beijing-720p-20261016",
+                "checkedAt": "2026-10-16",
+                "sourceUrl": "https://help.aliyun.com/zh/model-studio/model-pricing#ba6f7744d5e0o",
+                "maxJobCost": "3.00"
+              },
+              "mode": "i2v",
+              "durationSeconds": 5
+            }
+          ],
+          "totalEstimate": {
+            "currency": "CNY",
+            "amount": "6.00"
+          },
+          "limits": {
+            "maxJobCost": "3.00",
+            "maxNewJobsPerRun": 4,
+            "maxRunCost": "12.00",
+            "usedNewJobs": 2,
+            "usedAmount": "6.00",
+            "remainingAmount": "6.00"
+          }
+        }
+      }
+    },
+    "storyboard-revise": {
+      "fingerprint": "d8f43a5326a7df7bf329506474b76003c4d22298a6e66f6e8b1fbb6e0cc3a013",
+      "result": {
+        "ok": true,
+        "data": {
+          "storyboardId": "c80d8285-5c47-5468-bea6-6147eb8caf15",
+          "version": 2,
+          "shotIds": [
+            "d8f6f9ab-513d-57ba-8255-863afd07e7d0",
+            "8ec24f7e-4f3d-586a-adcb-abe3c75aa90e"
+          ]
+        }
+      }
+    },
+    "shared-shots:1:generate": {
+      "fingerprint": "07439f8c67d4ed142ccd928b79f3b9cfa755a4603bfd95b1140b9ccd369cb5bb",
+      "result": {
+        "ok": true,
+        "data": {
+          "storyboardId": "c80d8285-5c47-5468-bea6-6147eb8caf15",
+          "storyboardVersion": 2,
+          "simulated": false,
+          "mediaAvailable": false,
+          "shots": [
+            {
+              "shotId": "d8f6f9ab-513d-57ba-8255-863afd07e7d0",
+              "shotVersionId": "392098df-bedf-5193-b233-d425db54d5aa",
+              "jobId": "3a4d60af-1d1f-5094-94f5-979b2cecba35",
+              "status": "pending_submit",
+              "reused": false,
+              "estimate": {
+                "currency": "CNY",
+                "unit": "output_second",
+                "unitPrice": "0.60",
+                "quantity": "5",
+                "amount": "3.00",
+                "priceVersion": "wan27-beijing-720p-20261010",
+                "checkedAt": "2026-10-16",
+                "sourceUrl": "https://help.aliyun.com/zh/model-studio/model-pricing#ba6f7744d5e0o",
+                "maxJobCost": "3.00"
+              },
+              "mode": "t2v",
+              "durationSeconds": 5
+            },
+            {
+              "shotId": "8ec24f7e-4f3d-586a-adcb-abe3c75aa90e",
+              "shotVersionId": "102b9159-7319-55e9-8c4b-0860a7b3789b",
+              "jobId": "917e4743-e355-554b-a237-dd5054faabb2",
+              "status": "pending_submit",
+              "reused": false,
+              "estimate": {
+                "currency": "CNY",
+                "unit": "output_second",
+                "unitPrice": "0.60",
+                "quantity": "5",
+                "amount": "3.00",
+                "priceVersion": "wan27-i2v-beijing-720p-20261016",
+                "checkedAt": "2026-10-16",
+                "sourceUrl": "https://help.aliyun.com/zh/model-studio/model-pricing#ba6f7744d5e0o",
+                "maxJobCost": "3.00"
+              },
+              "mode": "i2v",
+              "durationSeconds": 5
+            }
+          ],
+          "totalEstimate": {
+            "currency": "CNY",
+            "amount": "6.00"
+          },
+          "limits": {
+            "maxJobCost": "3.00",
+            "maxNewJobsPerRun": 4,
+            "maxRunCost": "12.00",
+            "usedNewJobs": 2,
+            "usedAmount": "6.00",
+            "remainingAmount": "6.00"
+          }
+        }
+      }
+    },
+    "shared-redo:1:generate": {
+      "fingerprint": "e8f668c95a9e1300a596f43624789229ae05c69f14a5b944f0d264a6dc30cfb0",
+      "result": {
+        "ok": true,
+        "data": {
+          "storyboardId": "c80d8285-5c47-5468-bea6-6147eb8caf15",
+          "storyboardVersion": 2,
+          "simulated": false,
+          "mediaAvailable": false,
+          "shots": [
+            {
+              "shotId": "d8f6f9ab-513d-57ba-8255-863afd07e7d0",
+              "shotVersionId": "b546b3b2-ce46-5b61-b7dd-d75028f3b98e",
+              "jobId": "8271694d-600e-5447-ade4-3c0f939ee909",
+              "status": "pending_submit",
+              "reused": false,
+              "estimate": {
+                "currency": "CNY",
+                "unit": "output_second",
+                "unitPrice": "0.60",
+                "quantity": "5",
+                "amount": "3.00",
+                "priceVersion": "wan27-beijing-720p-20261010",
+                "checkedAt": "2026-10-16",
+                "sourceUrl": "https://help.aliyun.com/zh/model-studio/model-pricing#ba6f7744d5e0o",
+                "maxJobCost": "3.00"
+              },
+              "mode": "t2v",
+              "durationSeconds": 5
+            }
+          ],
+          "totalEstimate": {
+            "currency": "CNY",
+            "amount": "3.00"
+          },
+          "limits": {
+            "maxJobCost": "3.00",
+            "maxNewJobsPerRun": 4,
+            "maxRunCost": "12.00",
+            "usedNewJobs": 1,
+            "usedAmount": "3.00",
+            "remainingAmount": "9.00"
+          }
+        }
+      }
+    },
+    "shared-single:1:generate": {
+      "fingerprint": "34e1e602da9c88d37f47601839c8763802daf3110ed3f5f3d5b3bf9b5a913fb4",
+      "result": {
+        "ok": true,
+        "data": {
+          "jobId": "ba21e9d9-c9e0-5b2c-bdbf-a8425f9083f2",
+          "status": "pending_submit",
+          "mode": "live",
+          "simulated": false,
+          "mediaAvailable": false
+        }
+      }
+    }
+  },
+  "jobs": {
+    "bdf43cc0-ac35-5934-86a4-a8284b20950d": {
+      "contractVersion": 3,
+      "id": "bdf43cc0-ac35-5934-86a4-a8284b20950d",
+      "context": {
+        "projectId": "coffee",
+        "sessionId": "coffee",
+        "runId": "workspace-shots",
+        "modelStep": 1,
+        "toolCallId": "batch"
+      },
+      "operationKey": "workspace-shots:1:batch",
+      "revision": 0,
+      "mode": "live",
+      "request": {
+        "provider": "wan",
+        "model": "wan2.7-t2v-2026-06-12",
+        "capabilitiesVersion": "wan27-shot-beijing-v2",
+        "prompt": "镜头一：雨夜咖啡店窗外",
+        "spec": {
+          "mode": "t2v",
+          "durationSeconds": 5,
+          "resolution": "720P",
+          "aspectRatio": "16:9"
+        },
+        "sourceRefs": [],
+        "region": "cn-beijing",
+        "workspaceId": "test-workspace",
+        "endpointProfile": "beijing-workspace-v1",
+        "adapterVersion": "wan-http-v2",
+        "providerPrompt": "生成单镜头视频。\n镜头一：雨夜咖啡店窗外",
+        "parameters": {
+          "resolution": "720P",
+          "ratio": "16:9",
+          "duration": 5,
+          "prompt_extend": false,
+          "watermark": true,
+          "seed": 0
+        },
+        "media": []
+      },
+      "requestFingerprint": "44abc3ca07d87aaf81ee43d5857b8ad992e2eac9f3f65d1b9773b71611c9ad87",
+      "capabilities": {
+        "provider": "wan",
+        "model": "wan2.7-t2v-2026-06-12",
+        "capabilitiesVersion": "wan27-shot-beijing-v2",
+        "mode": "live",
+        "inputTypes": [
+          "text"
+        ],
+        "specs": [
+          {
+            "mode": "t2v",
+            "durationSeconds": 2,
+            "resolution": "720P",
+            "aspectRatio": "16:9"
+          },
+          {
+            "mode": "t2v",
+            "durationSeconds": 3,
+            "resolution": "720P",
+            "aspectRatio": "16:9"
+          },
+          {
+            "mode": "t2v",
+            "durationSeconds": 4,
+            "resolution": "720P",
+            "aspectRatio": "16:9"
+          },
+          {
+            "mode": "t2v",
+            "durationSeconds": 5,
+            "resolution": "720P",
+            "aspectRatio": "16:9"
+          },
+          {
+            "mode": "t2v",
+            "durationSeconds": 6,
+            "resolution": "720P",
+            "aspectRatio": "16:9"
+          },
+          {
+            "mode": "t2v",
+            "durationSeconds": 7,
+            "resolution": "720P",
+            "aspectRatio": "16:9"
+          },
+          {
+            "mode": "t2v",
+            "durationSeconds": 8,
+            "resolution": "720P",
+            "aspectRatio": "16:9"
+          },
+          {
+            "mode": "t2v",
+            "durationSeconds": 9,
+            "resolution": "720P",
+            "aspectRatio": "16:9"
+          },
+          {
+            "mode": "t2v",
+            "durationSeconds": 10,
+            "resolution": "720P",
+            "aspectRatio": "16:9"
+          },
+          {
+            "mode": "t2v",
+            "durationSeconds": 11,
+            "resolution": "720P",
+            "aspectRatio": "16:9"
+          },
+          {
+            "mode": "t2v",
+            "durationSeconds": 12,
+            "resolution": "720P",
+            "aspectRatio": "16:9"
+          },
+          {
+            "mode": "t2v",
+            "durationSeconds": 13,
+            "resolution": "720P",
+            "aspectRatio": "16:9"
+          },
+          {
+            "mode": "t2v",
+            "durationSeconds": 14,
+            "resolution": "720P",
+            "aspectRatio": "16:9"
+          },
+          {
+            "mode": "t2v",
+            "durationSeconds": 15,
+            "resolution": "720P",
+            "aspectRatio": "16:9"
+          }
+        ],
+        "supportsCancel": false,
+        "supportsIdempotentSubmit": false,
+        "region": "cn-beijing",
+        "maxPromptCharacters": 4991,
+        "shotMode": "single",
+        "audioMode": "auto",
+        "promptExtend": false,
+        "watermark": true,
+        "seed": 0,
+        "supportsResultUrlRefresh": false,
+        "price": {
+          "currency": "CNY",
+          "unit": "output_second",
+          "unitPrice": "0.60",
+          "quantity": "1",
+          "amount": "0.60",
+          "priceVersion": "wan27-beijing-720p-20261010",
+          "checkedAt": "2026-10-16",
+          "sourceUrl": "https://help.aliyun.com/zh/model-studio/model-pricing#ba6f7744d5e0o"
+        },
+        "shotModes": [
+          "t2v"
+        ],
+        "imageInput": null
+      },
+      "status": "pending_submit",
+      "providerTaskId": null,
+      "submitAttempts": 0,
+      "queryAttempts": 0,
+      "consecutiveQueryErrors": 0,
+      "queryState": "idle",
+      "queryStartedAt": null,
+      "policy": {
+        "intervalSeconds": 15.0,
+        "submitTimeoutSeconds": 30.0,
+        "queryTimeoutSeconds": 30.0,
+        "retryDelaysSeconds": [
+          15.0,
+          30.0,
+          60.0
+        ]
+      },
+      "nextPollAt": null,
+      "createdAt": "2030-01-01T00:00:00+00:00",
+      "updatedAt": "2030-01-01T00:00:00+00:00",
+      "error": null,
+      "result": null,
+      "intentFingerprint": "7adaa65ef4b42352859bf9cd04e985087179db366e112cee32e68a12d1ebaac2",
+      "submissionStartedAt": null,
+      "queryDeadlineAt": null,
+      "providerSubmissionRequestId": null,
+      "lastQueryRequestId": null,
+      "lastProviderStatus": null,
+      "queryPauseReason": null,
+      "runtimeBlock": null,
+      "cost": {
+        "estimate": {
+          "currency": "CNY",
+          "unit": "output_second",
+          "unitPrice": "0.60",
+          "quantity": "5",
+          "amount": "3.00",
+          "priceVersion": "wan27-beijing-720p-20261010",
+          "checkedAt": "2026-10-16",
+          "sourceUrl": "https://help.aliyun.com/zh/model-studio/model-pricing#ba6f7744d5e0o",
+          "maxJobCost": "3.00"
+        },
+        "providerUsage": null,
+        "actual": {
+          "status": "unknown",
+          "currency": "CNY",
+          "amount": null,
+          "source": null
+        },
+        "limits": {
+          "maxJobCost": "3.00",
+          "maxNewJobsPerRun": 4,
+          "maxRunCost": "12.00",
+          "usedNewJobs": 2,
+          "usedAmount": "6.00",
+          "remainingAmount": "6.00"
+        }
+      },
+      "providerOutput": null,
+      "downloadPolicy": {
+        "maxBytes": 268435456,
+        "connectTimeoutSeconds": 10.0,
+        "readTimeoutSeconds": 30.0,
+        "totalTimeoutSeconds": 180.0,
+        "retryDelaysSeconds": [
+          5.0,
+          30.0
+        ],
+        "maxAttemptsPerWindow": 3,
+        "maxRedirects": 3,
+        "concurrency": 1
+      },
+      "download": null,
+      "mediaAvailability": {
+        "status": "unavailable",
+        "reason": "not_delivered",
+        "checkedAt": null
+      },
+      "shotRef": {
+        "storyboardId": "c80d8285-5c47-5468-bea6-6147eb8caf15",
+        "storyboardVersion": 1,
+        "shotId": "d8f6f9ab-513d-57ba-8255-863afd07e7d0",
+        "shotVersionId": "f72db7bd-7b94-5c59-bb8c-02bc7e72293b"
+      }
+    },
+    "05012a65-2362-55f0-8fb7-a911c702b0af": {
+      "contractVersion": 3,
+      "id": "05012a65-2362-55f0-8fb7-a911c702b0af",
+      "context": {
+        "projectId": "coffee",
+        "sessionId": "coffee",
+        "runId": "workspace-shots",
+        "modelStep": 1,
+        "toolCallId": "batch"
+      },
+      "operationKey": "workspace-shots:1:batch",
+      "revision": 0,
+      "mode": "live",
+      "request": {
+        "provider": "wan",
+        "model": "wan2.7-i2v-2026-04-25",
+        "capabilitiesVersion": "wan27-shot-beijing-v2",
+        "prompt": "镜头二：推近窗边的咖啡杯",
+        "spec": {
+          "mode": "i2v",
+          "durationSeconds": 5,
+          "resolution": "720P",
+          "aspectRatio": null
+        },
+        "sourceRefs": [],
+        "region": "cn-beijing",
+        "workspaceId": "test-workspace",
+        "endpointProfile": "beijing-workspace-v1",
+        "adapterVersion": "wan-http-v2",
+        "providerPrompt": "生成单镜头视频。\n镜头二：推近窗边的咖啡杯",
+        "parameters": {
+          "resolution": "720P",
+          "ratio": null,
+          "duration": 5,
+          "prompt_extend": false,
+          "watermark": true,
+          "seed": 0
+        },
+        "media": [
+          {
+            "frame": "first_frame",
+            "assetId": "9cba9c02-05b1-5404-9c75-55d89a7de300",
+            "mimeType": "image/png",
+            "sha256": "d1b665edf83994190553475a544b01de2f2b26c272f3a051cadb6a1ece0962e8",
+            "sizeBytes": 45,
+            "size": {
+              "width": 1280,
+              "height": 720
+            }
+          }
+        ]
+      },
+      "requestFingerprint": "604c28814bd2e865019cd6ffbfa4ef3bcd4cf8f2749dae9ac276baaf9151986f",
+      "capabilities": {
+        "provider": "wan",
+        "model": "wan2.7-i2v-2026-04-25",
+        "capabilitiesVersion": "wan27-shot-beijing-v2",
+        "mode": "live",
+        "inputTypes": [
+          "text",
+          "image"
+        ],
+        "specs": [
+          {
+            "mode": "i2v",
+            "durationSeconds": 2,
+            "resolution": "720P",
+            "aspectRatio": null
+          },
+          {
+            "mode": "i2v",
+            "durationSeconds": 3,
+            "resolution": "720P",
+            "aspectRatio": null
+          },
+          {
+            "mode": "i2v",
+            "durationSeconds": 4,
+            "resolution": "720P",
+            "aspectRatio": null
+          },
+          {
+            "mode": "i2v",
+            "durationSeconds": 5,
+            "resolution": "720P",
+            "aspectRatio": null
+          },
+          {
+            "mode": "i2v",
+            "durationSeconds": 6,
+            "resolution": "720P",
+            "aspectRatio": null
+          },
+          {
+            "mode": "i2v",
+            "durationSeconds": 7,
+            "resolution": "720P",
+            "aspectRatio": null
+          },
+          {
+            "mode": "i2v",
+            "durationSeconds": 8,
+            "resolution": "720P",
+            "aspectRatio": null
+          },
+          {
+            "mode": "i2v",
+            "durationSeconds": 9,
+            "resolution": "720P",
+            "aspectRatio": null
+          },
+          {
+            "mode": "i2v",
+            "durationSeconds": 10,
+            "resolution": "720P",
+            "aspectRatio": null
+          },
+          {
+            "mode": "i2v",
+            "durationSeconds": 11,
+            "resolution": "720P",
+            "aspectRatio": null
+          },
+          {
+            "mode": "i2v",
+            "durationSeconds": 12,
+            "resolution": "720P",
+            "aspectRatio": null
+          },
+          {
+            "mode": "i2v",
+            "durationSeconds": 13,
+            "resolution": "720P",
+            "aspectRatio": null
+          },
+          {
+            "mode": "i2v",
+            "durationSeconds": 14,
+            "resolution": "720P",
+            "aspectRatio": null
+          },
+          {
+            "mode": "i2v",
+            "durationSeconds": 15,
+            "resolution": "720P",
+            "aspectRatio": null
+          },
+          {
+            "mode": "flf2v",
+            "durationSeconds": 2,
+            "resolution": "720P",
+            "aspectRatio": null
+          },
+          {
+            "mode": "flf2v",
+            "durationSeconds": 3,
+            "resolution": "720P",
+            "aspectRatio": null
+          },
+          {
+            "mode": "flf2v",
+            "durationSeconds": 4,
+            "resolution": "720P",
+            "aspectRatio": null
+          },
+          {
+            "mode": "flf2v",
+            "durationSeconds": 5,
+            "resolution": "720P",
+            "aspectRatio": null
+          },
+          {
+            "mode": "flf2v",
+            "durationSeconds": 6,
+            "resolution": "720P",
+            "aspectRatio": null
+          },
+          {
+            "mode": "flf2v",
+            "durationSeconds": 7,
+            "resolution": "720P",
+            "aspectRatio": null
+          },
+          {
+            "mode": "flf2v",
+            "durationSeconds": 8,
+            "resolution": "720P",
+            "aspectRatio": null
+          },
+          {
+            "mode": "flf2v",
+            "durationSeconds": 9,
+            "resolution": "720P",
+            "aspectRatio": null
+          },
+          {
+            "mode": "flf2v",
+            "durationSeconds": 10,
+            "resolution": "720P",
+            "aspectRatio": null
+          },
+          {
+            "mode": "flf2v",
+            "durationSeconds": 11,
+            "resolution": "720P",
+            "aspectRatio": null
+          },
+          {
+            "mode": "flf2v",
+            "durationSeconds": 12,
+            "resolution": "720P",
+            "aspectRatio": null
+          },
+          {
+            "mode": "flf2v",
+            "durationSeconds": 13,
+            "resolution": "720P",
+            "aspectRatio": null
+          },
+          {
+            "mode": "flf2v",
+            "durationSeconds": 14,
+            "resolution": "720P",
+            "aspectRatio": null
+          },
+          {
+            "mode": "flf2v",
+            "durationSeconds": 15,
+            "resolution": "720P",
+            "aspectRatio": null
+          }
+        ],
+        "supportsCancel": false,
+        "supportsIdempotentSubmit": false,
+        "region": "cn-beijing",
+        "maxPromptCharacters": 4991,
+        "shotMode": "single",
+        "audioMode": "auto",
+        "promptExtend": false,
+        "watermark": true,
+        "seed": 0,
+        "supportsResultUrlRefresh": false,
+        "price": {
+          "currency": "CNY",
+          "unit": "output_second",
+          "unitPrice": "0.60",
+          "quantity": "1",
+          "amount": "0.60",
+          "priceVersion": "wan27-i2v-beijing-720p-20261016",
+          "checkedAt": "2026-10-16",
+          "sourceUrl": "https://help.aliyun.com/zh/model-studio/model-pricing#ba6f7744d5e0o"
+        },
+        "shotModes": [
+          "i2v",
+          "flf2v"
+        ],
+        "imageInput": {
+          "mimeTypes": [
+            "image/png",
+            "image/jpeg",
+            "image/webp"
+          ],
+          "minSide": 240,
+          "maxSide": 8000,
+          "maxBytes": 20971520,
+          "minAspect": 1,
+          "maxAspect": 8,
+          "allowsAlpha": false
+        }
+      },
+      "status": "pending_submit",
+      "providerTaskId": null,
+      "submitAttempts": 0,
+      "queryAttempts": 0,
+      "consecutiveQueryErrors": 0,
+      "queryState": "idle",
+      "queryStartedAt": null,
+      "policy": {
+        "intervalSeconds": 15.0,
+        "submitTimeoutSeconds": 30.0,
+        "queryTimeoutSeconds": 30.0,
+        "retryDelaysSeconds": [
+          15.0,
+          30.0,
+          60.0
+        ]
+      },
+      "nextPollAt": null,
+      "createdAt": "2030-01-01T00:00:00+00:00",
+      "updatedAt": "2030-01-01T00:00:00+00:00",
+      "error": null,
+      "result": null,
+      "intentFingerprint": "2919f9637a8ff130eec09ae37c1371fb53fd77abaf4e5d05a652cc17a1d8475e",
+      "submissionStartedAt": null,
+      "queryDeadlineAt": null,
+      "providerSubmissionRequestId": null,
+      "lastQueryRequestId": null,
+      "lastProviderStatus": null,
+      "queryPauseReason": null,
+      "runtimeBlock": null,
+      "cost": {
+        "estimate": {
+          "currency": "CNY",
+          "unit": "output_second",
+          "unitPrice": "0.60",
+          "quantity": "5",
+          "amount": "3.00",
+          "priceVersion": "wan27-i2v-beijing-720p-20261016",
+          "checkedAt": "2026-10-16",
+          "sourceUrl": "https://help.aliyun.com/zh/model-studio/model-pricing#ba6f7744d5e0o",
+          "maxJobCost": "3.00"
+        },
+        "providerUsage": null,
+        "actual": {
+          "status": "unknown",
+          "currency": "CNY",
+          "amount": null,
+          "source": null
+        },
+        "limits": {
+          "maxJobCost": "3.00",
+          "maxNewJobsPerRun": 4,
+          "maxRunCost": "12.00",
+          "usedNewJobs": 2,
+          "usedAmount": "6.00",
+          "remainingAmount": "6.00"
+        }
+      },
+      "providerOutput": null,
+      "downloadPolicy": {
+        "maxBytes": 268435456,
+        "connectTimeoutSeconds": 10.0,
+        "readTimeoutSeconds": 30.0,
+        "totalTimeoutSeconds": 180.0,
+        "retryDelaysSeconds": [
+          5.0,
+          30.0
+        ],
+        "maxAttemptsPerWindow": 3,
+        "maxRedirects": 3,
+        "concurrency": 1
+      },
+      "download": null,
+      "mediaAvailability": {
+        "status": "unavailable",
+        "reason": "not_delivered",
+        "checkedAt": null
+      },
+      "shotRef": {
+        "storyboardId": "c80d8285-5c47-5468-bea6-6147eb8caf15",
+        "storyboardVersion": 1,
+        "shotId": "8ec24f7e-4f3d-586a-adcb-abe3c75aa90e",
+        "shotVersionId": "c77e70fb-c009-5669-99ec-e6c15968d82a"
+      }
+    },
+    "3a4d60af-1d1f-5094-94f5-979b2cecba35": {
+      "contractVersion": 5,
+      "id": "3a4d60af-1d1f-5094-94f5-979b2cecba35",
+      "context": {
+        "projectId": "coffee",
+        "sessionId": "coffee",
+        "runId": "shared-shots",
+        "modelStep": 1,
+        "toolCallId": "generate"
+      },
+      "operationKey": "shared-shots:1:generate",
+      "revision": 0,
+      "mode": "live",
+      "request": {
+        "provider": "wan",
+        "model": "wan2.7-t2v-2026-06-12",
+        "capabilitiesVersion": "wan27-shot-beijing-v2",
+        "prompt": "镜头一：雨夜咖啡店窗外，镜头缓慢推近",
+        "spec": {
+          "mode": "t2v",
+          "durationSeconds": 5,
+          "resolution": "720P",
+          "aspectRatio": "16:9"
+        },
+        "sourceRefs": [],
+        "region": "cn-beijing",
+        "endpointProfile": "beijing-shared-v1",
+        "adapterVersion": "wan-http-v2",
+        "providerPrompt": "生成单镜头视频。\n镜头一：雨夜咖啡店窗外，镜头缓慢推近",
+        "parameters": {
+          "resolution": "720P",
+          "ratio": "16:9",
+          "duration": 5,
+          "prompt_extend": false,
+          "watermark": true,
+          "seed": 0
+        },
+        "media": []
+      },
+      "requestFingerprint": "8aaf6dd887c18b39830035f6bcc250d68227e1218d8a52053f9811685841c9c8",
+      "capabilities": {
+        "provider": "wan",
+        "model": "wan2.7-t2v-2026-06-12",
+        "capabilitiesVersion": "wan27-shot-beijing-v2",
+        "mode": "live",
+        "inputTypes": [
+          "text"
+        ],
+        "specs": [
+          {
+            "mode": "t2v",
+            "durationSeconds": 2,
+            "resolution": "720P",
+            "aspectRatio": "16:9"
+          },
+          {
+            "mode": "t2v",
+            "durationSeconds": 3,
+            "resolution": "720P",
+            "aspectRatio": "16:9"
+          },
+          {
+            "mode": "t2v",
+            "durationSeconds": 4,
+            "resolution": "720P",
+            "aspectRatio": "16:9"
+          },
+          {
+            "mode": "t2v",
+            "durationSeconds": 5,
+            "resolution": "720P",
+            "aspectRatio": "16:9"
+          },
+          {
+            "mode": "t2v",
+            "durationSeconds": 6,
+            "resolution": "720P",
+            "aspectRatio": "16:9"
+          },
+          {
+            "mode": "t2v",
+            "durationSeconds": 7,
+            "resolution": "720P",
+            "aspectRatio": "16:9"
+          },
+          {
+            "mode": "t2v",
+            "durationSeconds": 8,
+            "resolution": "720P",
+            "aspectRatio": "16:9"
+          },
+          {
+            "mode": "t2v",
+            "durationSeconds": 9,
+            "resolution": "720P",
+            "aspectRatio": "16:9"
+          },
+          {
+            "mode": "t2v",
+            "durationSeconds": 10,
+            "resolution": "720P",
+            "aspectRatio": "16:9"
+          },
+          {
+            "mode": "t2v",
+            "durationSeconds": 11,
+            "resolution": "720P",
+            "aspectRatio": "16:9"
+          },
+          {
+            "mode": "t2v",
+            "durationSeconds": 12,
+            "resolution": "720P",
+            "aspectRatio": "16:9"
+          },
+          {
+            "mode": "t2v",
+            "durationSeconds": 13,
+            "resolution": "720P",
+            "aspectRatio": "16:9"
+          },
+          {
+            "mode": "t2v",
+            "durationSeconds": 14,
+            "resolution": "720P",
+            "aspectRatio": "16:9"
+          },
+          {
+            "mode": "t2v",
+            "durationSeconds": 15,
+            "resolution": "720P",
+            "aspectRatio": "16:9"
+          }
+        ],
+        "supportsCancel": false,
+        "supportsIdempotentSubmit": false,
+        "region": "cn-beijing",
+        "maxPromptCharacters": 4991,
+        "shotMode": "single",
+        "audioMode": "auto",
+        "promptExtend": false,
+        "watermark": true,
+        "seed": 0,
+        "supportsResultUrlRefresh": false,
+        "price": {
+          "currency": "CNY",
+          "unit": "output_second",
+          "unitPrice": "0.60",
+          "quantity": "1",
+          "amount": "0.60",
+          "priceVersion": "wan27-beijing-720p-20261010",
+          "checkedAt": "2026-10-16",
+          "sourceUrl": "https://help.aliyun.com/zh/model-studio/model-pricing#ba6f7744d5e0o"
+        },
+        "shotModes": [
+          "t2v"
+        ],
+        "imageInput": null
+      },
+      "status": "pending_submit",
+      "providerTaskId": null,
+      "submitAttempts": 0,
+      "queryAttempts": 0,
+      "consecutiveQueryErrors": 0,
+      "queryState": "idle",
+      "queryStartedAt": null,
+      "policy": {
+        "intervalSeconds": 15.0,
+        "submitTimeoutSeconds": 30.0,
+        "queryTimeoutSeconds": 30.0,
+        "retryDelaysSeconds": [
+          15.0,
+          30.0,
+          60.0
+        ]
+      },
+      "nextPollAt": null,
+      "createdAt": "2030-01-01T00:00:00+00:00",
+      "updatedAt": "2030-01-01T00:00:00+00:00",
+      "error": null,
+      "result": null,
+      "intentFingerprint": "14e988571befdd4e1c254b341ef6af72869312b6c23148b67d94f2bd3792c780",
+      "submissionStartedAt": null,
+      "queryDeadlineAt": null,
+      "providerSubmissionRequestId": null,
+      "lastQueryRequestId": null,
+      "lastProviderStatus": null,
+      "queryPauseReason": null,
+      "runtimeBlock": null,
+      "cost": {
+        "estimate": {
+          "currency": "CNY",
+          "unit": "output_second",
+          "unitPrice": "0.60",
+          "quantity": "5",
+          "amount": "3.00",
+          "priceVersion": "wan27-beijing-720p-20261010",
+          "checkedAt": "2026-10-16",
+          "sourceUrl": "https://help.aliyun.com/zh/model-studio/model-pricing#ba6f7744d5e0o",
+          "maxJobCost": "3.00"
+        },
+        "providerUsage": null,
+        "actual": {
+          "status": "unknown",
+          "currency": "CNY",
+          "amount": null,
+          "source": null
+        },
+        "limits": {
+          "maxJobCost": "3.00",
+          "maxNewJobsPerRun": 4,
+          "maxRunCost": "12.00",
+          "usedNewJobs": 2,
+          "usedAmount": "6.00",
+          "remainingAmount": "6.00"
+        }
+      },
+      "providerOutput": null,
+      "downloadPolicy": {
+        "maxBytes": 268435456,
+        "connectTimeoutSeconds": 10.0,
+        "readTimeoutSeconds": 30.0,
+        "totalTimeoutSeconds": 180.0,
+        "retryDelaysSeconds": [
+          5.0,
+          30.0
+        ],
+        "maxAttemptsPerWindow": 3,
+        "maxRedirects": 3,
+        "concurrency": 1
+      },
+      "download": null,
+      "mediaAvailability": {
+        "status": "unavailable",
+        "reason": "not_delivered",
+        "checkedAt": null
+      },
+      "shotRef": {
+        "storyboardId": "c80d8285-5c47-5468-bea6-6147eb8caf15",
+        "storyboardVersion": 2,
+        "shotId": "d8f6f9ab-513d-57ba-8255-863afd07e7d0",
+        "shotVersionId": "392098df-bedf-5193-b233-d425db54d5aa"
+      }
+    },
+    "917e4743-e355-554b-a237-dd5054faabb2": {
+      "contractVersion": 5,
+      "id": "917e4743-e355-554b-a237-dd5054faabb2",
+      "context": {
+        "projectId": "coffee",
+        "sessionId": "coffee",
+        "runId": "shared-shots",
+        "modelStep": 1,
+        "toolCallId": "generate"
+      },
+      "operationKey": "shared-shots:1:generate",
+      "revision": 0,
+      "mode": "live",
+      "request": {
+        "provider": "wan",
+        "model": "wan2.7-i2v-2026-04-25",
+        "capabilitiesVersion": "wan27-shot-beijing-v2",
+        "prompt": "镜头二：推近窗边的咖啡杯",
+        "spec": {
+          "mode": "i2v",
+          "durationSeconds": 5,
+          "resolution": "720P",
+          "aspectRatio": null
+        },
+        "sourceRefs": [],
+        "region": "cn-beijing",
+        "endpointProfile": "beijing-shared-v1",
+        "adapterVersion": "wan-http-v2",
+        "providerPrompt": "生成单镜头视频。\n镜头二：推近窗边的咖啡杯",
+        "parameters": {
+          "resolution": "720P",
+          "ratio": null,
+          "duration": 5,
+          "prompt_extend": false,
+          "watermark": true,
+          "seed": 0
+        },
+        "media": [
+          {
+            "frame": "first_frame",
+            "assetId": "9cba9c02-05b1-5404-9c75-55d89a7de300",
+            "mimeType": "image/png",
+            "sha256": "d1b665edf83994190553475a544b01de2f2b26c272f3a051cadb6a1ece0962e8",
+            "sizeBytes": 45,
+            "size": {
+              "width": 1280,
+              "height": 720
+            }
+          }
+        ]
+      },
+      "requestFingerprint": "c56d34cf68a377acf69caf2eb74d8c2ab8b85dbf52be51129f073f27989ef7a5",
+      "capabilities": {
+        "provider": "wan",
+        "model": "wan2.7-i2v-2026-04-25",
+        "capabilitiesVersion": "wan27-shot-beijing-v2",
+        "mode": "live",
+        "inputTypes": [
+          "text",
+          "image"
+        ],
+        "specs": [
+          {
+            "mode": "i2v",
+            "durationSeconds": 2,
+            "resolution": "720P",
+            "aspectRatio": null
+          },
+          {
+            "mode": "i2v",
+            "durationSeconds": 3,
+            "resolution": "720P",
+            "aspectRatio": null
+          },
+          {
+            "mode": "i2v",
+            "durationSeconds": 4,
+            "resolution": "720P",
+            "aspectRatio": null
+          },
+          {
+            "mode": "i2v",
+            "durationSeconds": 5,
+            "resolution": "720P",
+            "aspectRatio": null
+          },
+          {
+            "mode": "i2v",
+            "durationSeconds": 6,
+            "resolution": "720P",
+            "aspectRatio": null
+          },
+          {
+            "mode": "i2v",
+            "durationSeconds": 7,
+            "resolution": "720P",
+            "aspectRatio": null
+          },
+          {
+            "mode": "i2v",
+            "durationSeconds": 8,
+            "resolution": "720P",
+            "aspectRatio": null
+          },
+          {
+            "mode": "i2v",
+            "durationSeconds": 9,
+            "resolution": "720P",
+            "aspectRatio": null
+          },
+          {
+            "mode": "i2v",
+            "durationSeconds": 10,
+            "resolution": "720P",
+            "aspectRatio": null
+          },
+          {
+            "mode": "i2v",
+            "durationSeconds": 11,
+            "resolution": "720P",
+            "aspectRatio": null
+          },
+          {
+            "mode": "i2v",
+            "durationSeconds": 12,
+            "resolution": "720P",
+            "aspectRatio": null
+          },
+          {
+            "mode": "i2v",
+            "durationSeconds": 13,
+            "resolution": "720P",
+            "aspectRatio": null
+          },
+          {
+            "mode": "i2v",
+            "durationSeconds": 14,
+            "resolution": "720P",
+            "aspectRatio": null
+          },
+          {
+            "mode": "i2v",
+            "durationSeconds": 15,
+            "resolution": "720P",
+            "aspectRatio": null
+          },
+          {
+            "mode": "flf2v",
+            "durationSeconds": 2,
+            "resolution": "720P",
+            "aspectRatio": null
+          },
+          {
+            "mode": "flf2v",
+            "durationSeconds": 3,
+            "resolution": "720P",
+            "aspectRatio": null
+          },
+          {
+            "mode": "flf2v",
+            "durationSeconds": 4,
+            "resolution": "720P",
+            "aspectRatio": null
+          },
+          {
+            "mode": "flf2v",
+            "durationSeconds": 5,
+            "resolution": "720P",
+            "aspectRatio": null
+          },
+          {
+            "mode": "flf2v",
+            "durationSeconds": 6,
+            "resolution": "720P",
+            "aspectRatio": null
+          },
+          {
+            "mode": "flf2v",
+            "durationSeconds": 7,
+            "resolution": "720P",
+            "aspectRatio": null
+          },
+          {
+            "mode": "flf2v",
+            "durationSeconds": 8,
+            "resolution": "720P",
+            "aspectRatio": null
+          },
+          {
+            "mode": "flf2v",
+            "durationSeconds": 9,
+            "resolution": "720P",
+            "aspectRatio": null
+          },
+          {
+            "mode": "flf2v",
+            "durationSeconds": 10,
+            "resolution": "720P",
+            "aspectRatio": null
+          },
+          {
+            "mode": "flf2v",
+            "durationSeconds": 11,
+            "resolution": "720P",
+            "aspectRatio": null
+          },
+          {
+            "mode": "flf2v",
+            "durationSeconds": 12,
+            "resolution": "720P",
+            "aspectRatio": null
+          },
+          {
+            "mode": "flf2v",
+            "durationSeconds": 13,
+            "resolution": "720P",
+            "aspectRatio": null
+          },
+          {
+            "mode": "flf2v",
+            "durationSeconds": 14,
+            "resolution": "720P",
+            "aspectRatio": null
+          },
+          {
+            "mode": "flf2v",
+            "durationSeconds": 15,
+            "resolution": "720P",
+            "aspectRatio": null
+          }
+        ],
+        "supportsCancel": false,
+        "supportsIdempotentSubmit": false,
+        "region": "cn-beijing",
+        "maxPromptCharacters": 4991,
+        "shotMode": "single",
+        "audioMode": "auto",
+        "promptExtend": false,
+        "watermark": true,
+        "seed": 0,
+        "supportsResultUrlRefresh": false,
+        "price": {
+          "currency": "CNY",
+          "unit": "output_second",
+          "unitPrice": "0.60",
+          "quantity": "1",
+          "amount": "0.60",
+          "priceVersion": "wan27-i2v-beijing-720p-20261016",
+          "checkedAt": "2026-10-16",
+          "sourceUrl": "https://help.aliyun.com/zh/model-studio/model-pricing#ba6f7744d5e0o"
+        },
+        "shotModes": [
+          "i2v",
+          "flf2v"
+        ],
+        "imageInput": {
+          "mimeTypes": [
+            "image/png",
+            "image/jpeg",
+            "image/webp"
+          ],
+          "minSide": 240,
+          "maxSide": 8000,
+          "maxBytes": 20971520,
+          "minAspect": 1,
+          "maxAspect": 8,
+          "allowsAlpha": false
+        }
+      },
+      "status": "pending_submit",
+      "providerTaskId": null,
+      "submitAttempts": 0,
+      "queryAttempts": 0,
+      "consecutiveQueryErrors": 0,
+      "queryState": "idle",
+      "queryStartedAt": null,
+      "policy": {
+        "intervalSeconds": 15.0,
+        "submitTimeoutSeconds": 30.0,
+        "queryTimeoutSeconds": 30.0,
+        "retryDelaysSeconds": [
+          15.0,
+          30.0,
+          60.0
+        ]
+      },
+      "nextPollAt": null,
+      "createdAt": "2030-01-01T00:00:00+00:00",
+      "updatedAt": "2030-01-01T00:00:00+00:00",
+      "error": null,
+      "result": null,
+      "intentFingerprint": "2919f9637a8ff130eec09ae37c1371fb53fd77abaf4e5d05a652cc17a1d8475e",
+      "submissionStartedAt": null,
+      "queryDeadlineAt": null,
+      "providerSubmissionRequestId": null,
+      "lastQueryRequestId": null,
+      "lastProviderStatus": null,
+      "queryPauseReason": null,
+      "runtimeBlock": null,
+      "cost": {
+        "estimate": {
+          "currency": "CNY",
+          "unit": "output_second",
+          "unitPrice": "0.60",
+          "quantity": "5",
+          "amount": "3.00",
+          "priceVersion": "wan27-i2v-beijing-720p-20261016",
+          "checkedAt": "2026-10-16",
+          "sourceUrl": "https://help.aliyun.com/zh/model-studio/model-pricing#ba6f7744d5e0o",
+          "maxJobCost": "3.00"
+        },
+        "providerUsage": null,
+        "actual": {
+          "status": "unknown",
+          "currency": "CNY",
+          "amount": null,
+          "source": null
+        },
+        "limits": {
+          "maxJobCost": "3.00",
+          "maxNewJobsPerRun": 4,
+          "maxRunCost": "12.00",
+          "usedNewJobs": 2,
+          "usedAmount": "6.00",
+          "remainingAmount": "6.00"
+        }
+      },
+      "providerOutput": null,
+      "downloadPolicy": {
+        "maxBytes": 268435456,
+        "connectTimeoutSeconds": 10.0,
+        "readTimeoutSeconds": 30.0,
+        "totalTimeoutSeconds": 180.0,
+        "retryDelaysSeconds": [
+          5.0,
+          30.0
+        ],
+        "maxAttemptsPerWindow": 3,
+        "maxRedirects": 3,
+        "concurrency": 1
+      },
+      "download": null,
+      "mediaAvailability": {
+        "status": "unavailable",
+        "reason": "not_delivered",
+        "checkedAt": null
+      },
+      "shotRef": {
+        "storyboardId": "c80d8285-5c47-5468-bea6-6147eb8caf15",
+        "storyboardVersion": 2,
+        "shotId": "8ec24f7e-4f3d-586a-adcb-abe3c75aa90e",
+        "shotVersionId": "102b9159-7319-55e9-8c4b-0860a7b3789b"
+      }
+    },
+    "8271694d-600e-5447-ade4-3c0f939ee909": {
+      "contractVersion": 5,
+      "id": "8271694d-600e-5447-ade4-3c0f939ee909",
+      "context": {
+        "projectId": "coffee",
+        "sessionId": "coffee",
+        "runId": "shared-redo",
+        "modelStep": 1,
+        "toolCallId": "generate"
+      },
+      "operationKey": "shared-redo:1:generate",
+      "revision": 0,
+      "mode": "live",
+      "request": {
+        "provider": "wan",
+        "model": "wan2.7-t2v-2026-06-12",
+        "capabilitiesVersion": "wan27-shot-beijing-v2",
+        "prompt": "镜头一：雨夜咖啡店窗外，镜头缓慢推近",
+        "spec": {
+          "mode": "t2v",
+          "durationSeconds": 5,
+          "resolution": "720P",
+          "aspectRatio": "16:9"
+        },
+        "sourceRefs": [],
+        "region": "cn-beijing",
+        "endpointProfile": "beijing-shared-v1",
+        "adapterVersion": "wan-http-v2",
+        "providerPrompt": "生成单镜头视频。\n镜头一：雨夜咖啡店窗外，镜头缓慢推近",
+        "parameters": {
+          "resolution": "720P",
+          "ratio": "16:9",
+          "duration": 5,
+          "prompt_extend": false,
+          "watermark": true,
+          "seed": 0
+        },
+        "media": []
+      },
+      "requestFingerprint": "8aaf6dd887c18b39830035f6bcc250d68227e1218d8a52053f9811685841c9c8",
+      "capabilities": {
+        "provider": "wan",
+        "model": "wan2.7-t2v-2026-06-12",
+        "capabilitiesVersion": "wan27-shot-beijing-v2",
+        "mode": "live",
+        "inputTypes": [
+          "text"
+        ],
+        "specs": [
+          {
+            "mode": "t2v",
+            "durationSeconds": 2,
+            "resolution": "720P",
+            "aspectRatio": "16:9"
+          },
+          {
+            "mode": "t2v",
+            "durationSeconds": 3,
+            "resolution": "720P",
+            "aspectRatio": "16:9"
+          },
+          {
+            "mode": "t2v",
+            "durationSeconds": 4,
+            "resolution": "720P",
+            "aspectRatio": "16:9"
+          },
+          {
+            "mode": "t2v",
+            "durationSeconds": 5,
+            "resolution": "720P",
+            "aspectRatio": "16:9"
+          },
+          {
+            "mode": "t2v",
+            "durationSeconds": 6,
+            "resolution": "720P",
+            "aspectRatio": "16:9"
+          },
+          {
+            "mode": "t2v",
+            "durationSeconds": 7,
+            "resolution": "720P",
+            "aspectRatio": "16:9"
+          },
+          {
+            "mode": "t2v",
+            "durationSeconds": 8,
+            "resolution": "720P",
+            "aspectRatio": "16:9"
+          },
+          {
+            "mode": "t2v",
+            "durationSeconds": 9,
+            "resolution": "720P",
+            "aspectRatio": "16:9"
+          },
+          {
+            "mode": "t2v",
+            "durationSeconds": 10,
+            "resolution": "720P",
+            "aspectRatio": "16:9"
+          },
+          {
+            "mode": "t2v",
+            "durationSeconds": 11,
+            "resolution": "720P",
+            "aspectRatio": "16:9"
+          },
+          {
+            "mode": "t2v",
+            "durationSeconds": 12,
+            "resolution": "720P",
+            "aspectRatio": "16:9"
+          },
+          {
+            "mode": "t2v",
+            "durationSeconds": 13,
+            "resolution": "720P",
+            "aspectRatio": "16:9"
+          },
+          {
+            "mode": "t2v",
+            "durationSeconds": 14,
+            "resolution": "720P",
+            "aspectRatio": "16:9"
+          },
+          {
+            "mode": "t2v",
+            "durationSeconds": 15,
+            "resolution": "720P",
+            "aspectRatio": "16:9"
+          }
+        ],
+        "supportsCancel": false,
+        "supportsIdempotentSubmit": false,
+        "region": "cn-beijing",
+        "maxPromptCharacters": 4991,
+        "shotMode": "single",
+        "audioMode": "auto",
+        "promptExtend": false,
+        "watermark": true,
+        "seed": 0,
+        "supportsResultUrlRefresh": false,
+        "price": {
+          "currency": "CNY",
+          "unit": "output_second",
+          "unitPrice": "0.60",
+          "quantity": "1",
+          "amount": "0.60",
+          "priceVersion": "wan27-beijing-720p-20261010",
+          "checkedAt": "2026-10-16",
+          "sourceUrl": "https://help.aliyun.com/zh/model-studio/model-pricing#ba6f7744d5e0o"
+        },
+        "shotModes": [
+          "t2v"
+        ],
+        "imageInput": null
+      },
+      "status": "pending_submit",
+      "providerTaskId": null,
+      "submitAttempts": 0,
+      "queryAttempts": 0,
+      "consecutiveQueryErrors": 0,
+      "queryState": "idle",
+      "queryStartedAt": null,
+      "policy": {
+        "intervalSeconds": 15.0,
+        "submitTimeoutSeconds": 30.0,
+        "queryTimeoutSeconds": 30.0,
+        "retryDelaysSeconds": [
+          15.0,
+          30.0,
+          60.0
+        ]
+      },
+      "nextPollAt": null,
+      "createdAt": "2030-01-01T00:00:00+00:00",
+      "updatedAt": "2030-01-01T00:00:00+00:00",
+      "error": null,
+      "result": null,
+      "intentFingerprint": "14e988571befdd4e1c254b341ef6af72869312b6c23148b67d94f2bd3792c780",
+      "submissionStartedAt": null,
+      "queryDeadlineAt": null,
+      "providerSubmissionRequestId": null,
+      "lastQueryRequestId": null,
+      "lastProviderStatus": null,
+      "queryPauseReason": null,
+      "runtimeBlock": null,
+      "cost": {
+        "estimate": {
+          "currency": "CNY",
+          "unit": "output_second",
+          "unitPrice": "0.60",
+          "quantity": "5",
+          "amount": "3.00",
+          "priceVersion": "wan27-beijing-720p-20261010",
+          "checkedAt": "2026-10-16",
+          "sourceUrl": "https://help.aliyun.com/zh/model-studio/model-pricing#ba6f7744d5e0o",
+          "maxJobCost": "3.00"
+        },
+        "providerUsage": null,
+        "actual": {
+          "status": "unknown",
+          "currency": "CNY",
+          "amount": null,
+          "source": null
+        },
+        "limits": {
+          "maxJobCost": "3.00",
+          "maxNewJobsPerRun": 4,
+          "maxRunCost": "12.00",
+          "usedNewJobs": 1,
+          "usedAmount": "3.00",
+          "remainingAmount": "9.00"
+        }
+      },
+      "providerOutput": null,
+      "downloadPolicy": {
+        "maxBytes": 268435456,
+        "connectTimeoutSeconds": 10.0,
+        "readTimeoutSeconds": 30.0,
+        "totalTimeoutSeconds": 180.0,
+        "retryDelaysSeconds": [
+          5.0,
+          30.0
+        ],
+        "maxAttemptsPerWindow": 3,
+        "maxRedirects": 3,
+        "concurrency": 1
+      },
+      "download": null,
+      "mediaAvailability": {
+        "status": "unavailable",
+        "reason": "not_delivered",
+        "checkedAt": null
+      },
+      "shotRef": {
+        "storyboardId": "c80d8285-5c47-5468-bea6-6147eb8caf15",
+        "storyboardVersion": 2,
+        "shotId": "d8f6f9ab-513d-57ba-8255-863afd07e7d0",
+        "shotVersionId": "b546b3b2-ce46-5b61-b7dd-d75028f3b98e"
+      }
+    },
+    "ba21e9d9-c9e0-5b2c-bdbf-a8425f9083f2": {
+      "contractVersion": 4,
+      "id": "ba21e9d9-c9e0-5b2c-bdbf-a8425f9083f2",
+      "context": {
+        "projectId": "coffee",
+        "sessionId": "coffee",
+        "runId": "shared-single",
+        "modelStep": 1,
+        "toolCallId": "generate"
+      },
+      "operationKey": "shared-single:1:generate",
+      "revision": 0,
+      "mode": "live",
+      "request": {
+        "provider": "wan",
+        "model": "wan2.7-t2v-2026-06-12",
+        "capabilitiesVersion": "wan27-t2v-beijing-v1",
+        "prompt": "雨夜咖啡店，镜头缓慢推近。",
+        "spec": {
+          "durationSeconds": 5,
+          "resolution": "720p",
+          "aspectRatio": "16:9"
+        },
+        "sourceRefs": [],
+        "region": "cn-beijing",
+        "endpointProfile": "beijing-shared-v1",
+        "adapterVersion": "wan-http-v1",
+        "providerPrompt": "生成单镜头视频。\n雨夜咖啡店，镜头缓慢推近。",
+        "parameters": {
+          "resolution": "720P",
+          "ratio": "16:9",
+          "duration": 5,
+          "prompt_extend": false,
+          "watermark": true,
+          "seed": 0
+        }
+      },
+      "requestFingerprint": "da6f17aa76b3c3fbf38e82fddb94339bd981f2f1bbf07f7359f060705d9d19f5",
+      "capabilities": {
+        "provider": "wan",
+        "model": "wan2.7-t2v-2026-06-12",
+        "capabilitiesVersion": "wan27-t2v-beijing-v1",
+        "mode": "live",
+        "inputTypes": [
+          "text"
+        ],
+        "specs": [
+          {
+            "durationSeconds": 5,
+            "resolution": "720p",
+            "aspectRatio": "16:9"
+          }
+        ],
+        "supportsCancel": false,
+        "supportsIdempotentSubmit": false,
+        "region": "cn-beijing",
+        "maxPromptCharacters": 4991,
+        "shotMode": "single",
+        "audioMode": "auto",
+        "promptExtend": false,
+        "watermark": true,
+        "seed": 0,
+        "supportsResultUrlRefresh": false,
+        "price": {
+          "currency": "CNY",
+          "unit": "output_second",
+          "unitPrice": "0.60",
+          "quantity": "5",
+          "amount": "3.00",
+          "priceVersion": "wan27-beijing-720p-20261010",
+          "checkedAt": "2026-10-10",
+          "sourceUrl": "https://help.aliyun.com/zh/model-studio/model-pricing#ba6f7744d5e0o"
+        }
+      },
+      "status": "pending_submit",
+      "providerTaskId": null,
+      "submitAttempts": 0,
+      "queryAttempts": 0,
+      "consecutiveQueryErrors": 0,
+      "queryState": "idle",
+      "queryStartedAt": null,
+      "policy": {
+        "intervalSeconds": 15.0,
+        "submitTimeoutSeconds": 30.0,
+        "queryTimeoutSeconds": 30.0,
+        "retryDelaysSeconds": [
+          15.0,
+          30.0,
+          60.0
+        ]
+      },
+      "nextPollAt": null,
+      "createdAt": "2030-01-01T00:00:00+00:00",
+      "updatedAt": "2030-01-01T00:00:00+00:00",
+      "error": null,
+      "result": null,
+      "intentFingerprint": "30d42674a6a65d51093b774fa2fc3198cbe5695cc904a9315f2e38d278e3bb6a",
+      "submissionStartedAt": null,
+      "queryDeadlineAt": null,
+      "providerSubmissionRequestId": null,
+      "lastQueryRequestId": null,
+      "lastProviderStatus": null,
+      "queryPauseReason": null,
+      "runtimeBlock": null,
+      "cost": {
+        "estimate": {
+          "currency": "CNY",
+          "unit": "output_second",
+          "unitPrice": "0.60",
+          "quantity": "5",
+          "amount": "3.00",
+          "priceVersion": "wan27-beijing-720p-20261010",
+          "checkedAt": "2026-10-10",
+          "sourceUrl": "https://help.aliyun.com/zh/model-studio/model-pricing#ba6f7744d5e0o",
+          "maxJobCost": "3.00"
+        },
+        "providerUsage": null,
+        "actual": {
+          "status": "unknown",
+          "currency": "CNY",
+          "amount": null,
+          "source": null
+        }
+      },
+      "providerOutput": null,
+      "downloadPolicy": {
+        "maxBytes": 268435456,
+        "connectTimeoutSeconds": 10.0,
+        "readTimeoutSeconds": 30.0,
+        "totalTimeoutSeconds": 180.0,
+        "retryDelaysSeconds": [
+          5.0,
+          30.0
+        ],
+        "maxAttemptsPerWindow": 3,
+        "maxRedirects": 3,
+        "concurrency": 1
+      },
+      "download": null,
+      "mediaAvailability": {
+        "status": "unavailable",
+        "reason": "not_delivered",
+        "checkedAt": null
+      }
+    }
+  },
+  "waits": {
+    "21174ee2-6d8c-5543-9402-dbfc9df7a1b3": {
+      "id": "21174ee2-6d8c-5543-9402-dbfc9df7a1b3",
+      "context": {
+        "projectId": "coffee",
+        "sessionId": "coffee",
+        "runId": "shared-shots",
+        "modelStep": 2,
+        "toolCallId": "await-set"
+      },
+      "resource": {
+        "kind": "jobset",
+        "id": "2539f046-93f3-5462-9374-6bd1fdc66690"
+      },
+      "operationFingerprint": "377af9563428f7dc33860f8ab05206d3c823192a84ec92d61cf9d245ea0ed279",
+      "batchIndex": null,
+      "revision": 0,
+      "generation": 1,
+      "status": "preparing",
+      "startedAt": "2030-01-01T00:00:00+00:00",
+      "deadlineAt": "2030-01-01T00:10:00+00:00",
+      "timeoutError": {
+        "code": "JOB_WAIT_TIMEOUT",
+        "message": "这 2 个镜头任务的本次等待已到期；Job 将继续独立跟踪。"
+      },
+      "autoResume": true,
+      "checkpointId": null,
+      "interruptId": null,
+      "result": null,
+      "claimedModelSteps": null,
+      "deliveredCheckpointId": null,
+      "jobIds": [
+        "3a4d60af-1d1f-5094-94f5-979b2cecba35",
+        "917e4743-e355-554b-a237-dd5054faabb2"
+      ]
+    }
+  },
+  "media": {},
+  "storyboards": {
+    "c80d8285-5c47-5468-bea6-6147eb8caf15": {
+      "id": "c80d8285-5c47-5468-bea6-6147eb8caf15",
+      "projectId": "coffee",
+      "title": "分镜",
+      "sourceRefs": [],
+      "currentVersion": 2,
+      "versions": [
+        {
+          "version": 1,
+          "shots": [
+            {
+              "id": "d8f6f9ab-513d-57ba-8255-863afd07e7d0",
+              "order": 1,
+              "description": "镜头一：雨夜咖啡店窗外",
+              "framing": "wide",
+              "cameraMovement": null,
+              "durationSeconds": 5,
+              "mode": "t2v",
+              "referenceAssetIds": [],
+              "extendSource": null
+            },
+            {
+              "id": "8ec24f7e-4f3d-586a-adcb-abe3c75aa90e",
+              "order": 2,
+              "description": "镜头二：推近窗边的咖啡杯",
+              "framing": "wide",
+              "cameraMovement": null,
+              "durationSeconds": 5,
+              "mode": "i2v",
+              "referenceAssetIds": [
+                "9cba9c02-05b1-5404-9c75-55d89a7de300"
+              ],
+              "extendSource": null
+            }
+          ],
+          "createdAt": "2030-01-01T00:00:00+00:00"
+        },
+        {
+          "version": 2,
+          "shots": [
+            {
+              "id": "d8f6f9ab-513d-57ba-8255-863afd07e7d0",
+              "order": 1,
+              "description": "镜头一：雨夜咖啡店窗外，镜头缓慢推近",
+              "framing": "wide",
+              "cameraMovement": null,
+              "durationSeconds": 5,
+              "mode": "t2v",
+              "referenceAssetIds": [],
+              "extendSource": null
+            },
+            {
+              "id": "8ec24f7e-4f3d-586a-adcb-abe3c75aa90e",
+              "order": 2,
+              "description": "镜头二：推近窗边的咖啡杯",
+              "framing": "wide",
+              "cameraMovement": null,
+              "durationSeconds": 5,
+              "mode": "i2v",
+              "referenceAssetIds": [
+                "9cba9c02-05b1-5404-9c75-55d89a7de300"
+              ],
+              "extendSource": null
+            }
+          ],
+          "createdAt": "2030-01-01T00:00:00+00:00"
+        }
+      ],
+      "shotVersions": [
+        {
+          "id": "f72db7bd-7b94-5c59-bb8c-02bc7e72293b",
+          "shotId": "d8f6f9ab-513d-57ba-8255-863afd07e7d0",
+          "storyboardVersion": 1,
+          "jobId": "bdf43cc0-ac35-5934-86a4-a8284b20950d",
+          "request": {
+            "provider": "wan",
+            "model": "wan2.7-t2v-2026-06-12",
+            "capabilitiesVersion": "wan27-shot-beijing-v2",
+            "prompt": "镜头一：雨夜咖啡店窗外",
+            "spec": {
+              "mode": "t2v",
+              "durationSeconds": 5,
+              "resolution": "720P",
+              "aspectRatio": "16:9"
+            },
+            "sourceRefs": [],
+            "region": "cn-beijing",
+            "workspaceId": "test-workspace",
+            "endpointProfile": "beijing-workspace-v1",
+            "adapterVersion": "wan-http-v2",
+            "providerPrompt": "生成单镜头视频。\n镜头一：雨夜咖啡店窗外",
+            "parameters": {
+              "resolution": "720P",
+              "ratio": "16:9",
+              "duration": 5,
+              "prompt_extend": false,
+              "watermark": true,
+              "seed": 0
+            },
+            "media": []
+          },
+          "estimate": {
+            "currency": "CNY",
+            "unit": "output_second",
+            "unitPrice": "0.60",
+            "quantity": "5",
+            "amount": "3.00",
+            "priceVersion": "wan27-beijing-720p-20261010",
+            "checkedAt": "2026-10-16",
+            "sourceUrl": "https://help.aliyun.com/zh/model-studio/model-pricing#ba6f7744d5e0o",
+            "maxJobCost": "3.00"
+          },
+          "mediaId": null,
+          "createdAt": "2030-01-01T00:00:00+00:00"
+        },
+        {
+          "id": "c77e70fb-c009-5669-99ec-e6c15968d82a",
+          "shotId": "8ec24f7e-4f3d-586a-adcb-abe3c75aa90e",
+          "storyboardVersion": 1,
+          "jobId": "05012a65-2362-55f0-8fb7-a911c702b0af",
+          "request": {
+            "provider": "wan",
+            "model": "wan2.7-i2v-2026-04-25",
+            "capabilitiesVersion": "wan27-shot-beijing-v2",
+            "prompt": "镜头二：推近窗边的咖啡杯",
+            "spec": {
+              "mode": "i2v",
+              "durationSeconds": 5,
+              "resolution": "720P",
+              "aspectRatio": null
+            },
+            "sourceRefs": [],
+            "region": "cn-beijing",
+            "workspaceId": "test-workspace",
+            "endpointProfile": "beijing-workspace-v1",
+            "adapterVersion": "wan-http-v2",
+            "providerPrompt": "生成单镜头视频。\n镜头二：推近窗边的咖啡杯",
+            "parameters": {
+              "resolution": "720P",
+              "ratio": null,
+              "duration": 5,
+              "prompt_extend": false,
+              "watermark": true,
+              "seed": 0
+            },
+            "media": [
+              {
+                "frame": "first_frame",
+                "assetId": "9cba9c02-05b1-5404-9c75-55d89a7de300",
+                "mimeType": "image/png",
+                "sha256": "d1b665edf83994190553475a544b01de2f2b26c272f3a051cadb6a1ece0962e8",
+                "sizeBytes": 45,
+                "size": {
+                  "width": 1280,
+                  "height": 720
+                }
+              }
+            ]
+          },
+          "estimate": {
+            "currency": "CNY",
+            "unit": "output_second",
+            "unitPrice": "0.60",
+            "quantity": "5",
+            "amount": "3.00",
+            "priceVersion": "wan27-i2v-beijing-720p-20261016",
+            "checkedAt": "2026-10-16",
+            "sourceUrl": "https://help.aliyun.com/zh/model-studio/model-pricing#ba6f7744d5e0o",
+            "maxJobCost": "3.00"
+          },
+          "mediaId": null,
+          "createdAt": "2030-01-01T00:00:00+00:00"
+        },
+        {
+          "id": "392098df-bedf-5193-b233-d425db54d5aa",
+          "shotId": "d8f6f9ab-513d-57ba-8255-863afd07e7d0",
+          "storyboardVersion": 2,
+          "jobId": "3a4d60af-1d1f-5094-94f5-979b2cecba35",
+          "request": {
+            "provider": "wan",
+            "model": "wan2.7-t2v-2026-06-12",
+            "capabilitiesVersion": "wan27-shot-beijing-v2",
+            "prompt": "镜头一：雨夜咖啡店窗外，镜头缓慢推近",
+            "spec": {
+              "mode": "t2v",
+              "durationSeconds": 5,
+              "resolution": "720P",
+              "aspectRatio": "16:9"
+            },
+            "sourceRefs": [],
+            "region": "cn-beijing",
+            "endpointProfile": "beijing-shared-v1",
+            "adapterVersion": "wan-http-v2",
+            "providerPrompt": "生成单镜头视频。\n镜头一：雨夜咖啡店窗外，镜头缓慢推近",
+            "parameters": {
+              "resolution": "720P",
+              "ratio": "16:9",
+              "duration": 5,
+              "prompt_extend": false,
+              "watermark": true,
+              "seed": 0
+            },
+            "media": []
+          },
+          "estimate": {
+            "currency": "CNY",
+            "unit": "output_second",
+            "unitPrice": "0.60",
+            "quantity": "5",
+            "amount": "3.00",
+            "priceVersion": "wan27-beijing-720p-20261010",
+            "checkedAt": "2026-10-16",
+            "sourceUrl": "https://help.aliyun.com/zh/model-studio/model-pricing#ba6f7744d5e0o",
+            "maxJobCost": "3.00"
+          },
+          "mediaId": null,
+          "createdAt": "2030-01-01T00:00:00+00:00"
+        },
+        {
+          "id": "102b9159-7319-55e9-8c4b-0860a7b3789b",
+          "shotId": "8ec24f7e-4f3d-586a-adcb-abe3c75aa90e",
+          "storyboardVersion": 2,
+          "jobId": "917e4743-e355-554b-a237-dd5054faabb2",
+          "request": {
+            "provider": "wan",
+            "model": "wan2.7-i2v-2026-04-25",
+            "capabilitiesVersion": "wan27-shot-beijing-v2",
+            "prompt": "镜头二：推近窗边的咖啡杯",
+            "spec": {
+              "mode": "i2v",
+              "durationSeconds": 5,
+              "resolution": "720P",
+              "aspectRatio": null
+            },
+            "sourceRefs": [],
+            "region": "cn-beijing",
+            "endpointProfile": "beijing-shared-v1",
+            "adapterVersion": "wan-http-v2",
+            "providerPrompt": "生成单镜头视频。\n镜头二：推近窗边的咖啡杯",
+            "parameters": {
+              "resolution": "720P",
+              "ratio": null,
+              "duration": 5,
+              "prompt_extend": false,
+              "watermark": true,
+              "seed": 0
+            },
+            "media": [
+              {
+                "frame": "first_frame",
+                "assetId": "9cba9c02-05b1-5404-9c75-55d89a7de300",
+                "mimeType": "image/png",
+                "sha256": "d1b665edf83994190553475a544b01de2f2b26c272f3a051cadb6a1ece0962e8",
+                "sizeBytes": 45,
+                "size": {
+                  "width": 1280,
+                  "height": 720
+                }
+              }
+            ]
+          },
+          "estimate": {
+            "currency": "CNY",
+            "unit": "output_second",
+            "unitPrice": "0.60",
+            "quantity": "5",
+            "amount": "3.00",
+            "priceVersion": "wan27-i2v-beijing-720p-20261016",
+            "checkedAt": "2026-10-16",
+            "sourceUrl": "https://help.aliyun.com/zh/model-studio/model-pricing#ba6f7744d5e0o",
+            "maxJobCost": "3.00"
+          },
+          "mediaId": null,
+          "createdAt": "2030-01-01T00:00:00+00:00"
+        },
+        {
+          "id": "b546b3b2-ce46-5b61-b7dd-d75028f3b98e",
+          "shotId": "d8f6f9ab-513d-57ba-8255-863afd07e7d0",
+          "storyboardVersion": 2,
+          "jobId": "8271694d-600e-5447-ade4-3c0f939ee909",
+          "request": {
+            "provider": "wan",
+            "model": "wan2.7-t2v-2026-06-12",
+            "capabilitiesVersion": "wan27-shot-beijing-v2",
+            "prompt": "镜头一：雨夜咖啡店窗外，镜头缓慢推近",
+            "spec": {
+              "mode": "t2v",
+              "durationSeconds": 5,
+              "resolution": "720P",
+              "aspectRatio": "16:9"
+            },
+            "sourceRefs": [],
+            "region": "cn-beijing",
+            "endpointProfile": "beijing-shared-v1",
+            "adapterVersion": "wan-http-v2",
+            "providerPrompt": "生成单镜头视频。\n镜头一：雨夜咖啡店窗外，镜头缓慢推近",
+            "parameters": {
+              "resolution": "720P",
+              "ratio": "16:9",
+              "duration": 5,
+              "prompt_extend": false,
+              "watermark": true,
+              "seed": 0
+            },
+            "media": []
+          },
+          "estimate": {
+            "currency": "CNY",
+            "unit": "output_second",
+            "unitPrice": "0.60",
+            "quantity": "5",
+            "amount": "3.00",
+            "priceVersion": "wan27-beijing-720p-20261010",
+            "checkedAt": "2026-10-16",
+            "sourceUrl": "https://help.aliyun.com/zh/model-studio/model-pricing#ba6f7744d5e0o",
+            "maxJobCost": "3.00"
+          },
+          "mediaId": null,
+          "createdAt": "2030-01-01T00:00:00+00:00"
+        }
+      ],
+      "revision": 4,
+      "createdAt": "2030-01-01T00:00:00+00:00"
+    }
+  },
+  "assets": {
+    "9cba9c02-05b1-5404-9c75-55d89a7de300": {
+      "id": "9cba9c02-05b1-5404-9c75-55d89a7de300",
+      "projectId": "coffee",
+      "kind": "image",
+      "relativePath": "assets/coffee/9cba9c02-05b1-5404-9c75-55d89a7de300.png",
+      "mimeType": "image/png",
+      "sizeBytes": 45,
+      "sha256": "d1b665edf83994190553475a544b01de2f2b26c272f3a051cadb6a1ece0962e8",
+      "dimensions": {
+        "width": 1280,
+        "height": 720
+      },
+      "createdAt": "2030-01-01T00:00:00+00:00",
+      "source": "user_import",
+      "assetFormatVersion": "asset-image-v1"
+    }
+  },
+  "films": {}
+}

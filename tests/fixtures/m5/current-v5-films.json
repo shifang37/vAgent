@@ -1,0 +1,1772 @@
+{
+  "schemaVersion": 5,
+  "projects": {
+    "coffee": {
+      "id": "coffee",
+      "revision": 0,
+      "goal": "",
+      "audience": "",
+      "style": "",
+      "constraints": [],
+      "plan": []
+    }
+  },
+  "sessions": {
+    "coffee": {
+      "id": "coffee",
+      "messages": [],
+      "latestRunId": "mock-run6"
+    }
+  },
+  "artifacts": {},
+  "runs": {
+    "video-run": {
+      "id": "video-run",
+      "sessionId": "coffee",
+      "requestId": "video-run",
+      "prompt": "offline video fixture",
+      "model": "no-model",
+      "status": "completed",
+      "messages": [],
+      "modelSteps": 0,
+      "toolCalls": 0,
+      "inputTokens": 0,
+      "outputTokens": 0,
+      "contextBytes": 0,
+      "droppedMessages": 0,
+      "answer": "",
+      "errorCode": null,
+      "createdAt": "2030-01-01T00:00:00+00:00",
+      "updatedAt": "2030-01-01T00:00:00+00:00",
+      "executionVersion": null,
+      "contextSignature": null,
+      "contextVersion": 1,
+      "policy": null,
+      "resumable": false,
+      "activeSeconds": 0,
+      "inFlightSeconds": 0,
+      "toolCallKeys": [],
+      "usageStartStep": null,
+      "modelCalls": [],
+      "readOnly": false,
+      "answerCache": {},
+      "events": [],
+      "headless": null
+    },
+    "film-run-1": {
+      "id": "film-run-1",
+      "sessionId": "coffee",
+      "requestId": "film-run-1",
+      "prompt": "offline video fixture",
+      "model": "m5-baseline-fixture",
+      "status": "completed",
+      "messages": [],
+      "modelSteps": 0,
+      "toolCalls": 0,
+      "inputTokens": 0,
+      "outputTokens": 0,
+      "contextBytes": 0,
+      "droppedMessages": 0,
+      "answer": "",
+      "errorCode": null,
+      "createdAt": "2030-01-01T00:00:00+00:00",
+      "updatedAt": "2030-01-01T00:00:00+00:00",
+      "executionVersion": 3,
+      "contextSignature": "8560da2b285c9b846e7bca8b8b1584d83803ad8433546b23221396b77887e9fc",
+      "contextVersion": 2,
+      "policy": null,
+      "resumable": false,
+      "activeSeconds": 0,
+      "inFlightSeconds": 0,
+      "toolCallKeys": [],
+      "usageStartStep": null,
+      "modelCalls": [],
+      "readOnly": false,
+      "answerCache": {},
+      "events": [],
+      "headless": null,
+      "videoMode": "live",
+      "toolFeatures": {
+        "video": {
+          "mode": "live",
+          "toolsVersion": 6,
+          "rulesVersion": 6,
+          "capabilities": [
+            {
+              "provider": "wan",
+              "model": "wan2.7-i2v-2026-04-25",
+              "capabilitiesVersion": "wan27-shot-beijing-v2",
+              "mode": "live",
+              "inputTypes": [
+                "text",
+                "image"
+              ],
+              "specs": [
+                {
+                  "mode": "i2v",
+                  "durationSeconds": 2,
+                  "resolution": "720P",
+                  "aspectRatio": null
+                },
+                {
+                  "mode": "i2v",
+                  "durationSeconds": 3,
+                  "resolution": "720P",
+                  "aspectRatio": null
+                },
+                {
+                  "mode": "i2v",
+                  "durationSeconds": 4,
+                  "resolution": "720P",
+                  "aspectRatio": null
+                },
+                {
+                  "mode": "i2v",
+                  "durationSeconds": 5,
+                  "resolution": "720P",
+                  "aspectRatio": null
+                },
+                {
+                  "mode": "i2v",
+                  "durationSeconds": 6,
+                  "resolution": "720P",
+                  "aspectRatio": null
+                },
+                {
+                  "mode": "i2v",
+                  "durationSeconds": 7,
+                  "resolution": "720P",
+                  "aspectRatio": null
+                },
+                {
+                  "mode": "i2v",
+                  "durationSeconds": 8,
+                  "resolution": "720P",
+                  "aspectRatio": null
+                },
+                {
+                  "mode": "i2v",
+                  "durationSeconds": 9,
+                  "resolution": "720P",
+                  "aspectRatio": null
+                },
+                {
+                  "mode": "i2v",
+                  "durationSeconds": 10,
+                  "resolution": "720P",
+                  "aspectRatio": null
+                },
+                {
+                  "mode": "i2v",
+                  "durationSeconds": 11,
+                  "resolution": "720P",
+                  "aspectRatio": null
+                },
+                {
+                  "mode": "i2v",
+                  "durationSeconds": 12,
+                  "resolution": "720P",
+                  "aspectRatio": null
+                },
+                {
+                  "mode": "i2v",
+                  "durationSeconds": 13,
+                  "resolution": "720P",
+                  "aspectRatio": null
+                },
+                {
+                  "mode": "i2v",
+                  "durationSeconds": 14,
+                  "resolution": "720P",
+                  "aspectRatio": null
+                },
+                {
+                  "mode": "i2v",
+                  "durationSeconds": 15,
+                  "resolution": "720P",
+                  "aspectRatio": null
+                },
+                {
+                  "mode": "flf2v",
+                  "durationSeconds": 2,
+                  "resolution": "720P",
+                  "aspectRatio": null
+                },
+                {
+                  "mode": "flf2v",
+                  "durationSeconds": 3,
+                  "resolution": "720P",
+                  "aspectRatio": null
+                },
+                {
+                  "mode": "flf2v",
+                  "durationSeconds": 4,
+                  "resolution": "720P",
+                  "aspectRatio": null
+                },
+                {
+                  "mode": "flf2v",
+                  "durationSeconds": 5,
+                  "resolution": "720P",
+                  "aspectRatio": null
+                },
+                {
+                  "mode": "flf2v",
+                  "durationSeconds": 6,
+                  "resolution": "720P",
+                  "aspectRatio": null
+                },
+                {
+                  "mode": "flf2v",
+                  "durationSeconds": 7,
+                  "resolution": "720P",
+                  "aspectRatio": null
+                },
+                {
+                  "mode": "flf2v",
+                  "durationSeconds": 8,
+                  "resolution": "720P",
+                  "aspectRatio": null
+                },
+                {
+                  "mode": "flf2v",
+                  "durationSeconds": 9,
+                  "resolution": "720P",
+                  "aspectRatio": null
+                },
+                {
+                  "mode": "flf2v",
+                  "durationSeconds": 10,
+                  "resolution": "720P",
+                  "aspectRatio": null
+                },
+                {
+                  "mode": "flf2v",
+                  "durationSeconds": 11,
+                  "resolution": "720P",
+                  "aspectRatio": null
+                },
+                {
+                  "mode": "flf2v",
+                  "durationSeconds": 12,
+                  "resolution": "720P",
+                  "aspectRatio": null
+                },
+                {
+                  "mode": "flf2v",
+                  "durationSeconds": 13,
+                  "resolution": "720P",
+                  "aspectRatio": null
+                },
+                {
+                  "mode": "flf2v",
+                  "durationSeconds": 14,
+                  "resolution": "720P",
+                  "aspectRatio": null
+                },
+                {
+                  "mode": "flf2v",
+                  "durationSeconds": 15,
+                  "resolution": "720P",
+                  "aspectRatio": null
+                }
+              ],
+              "supportsCancel": false,
+              "supportsIdempotentSubmit": false,
+              "region": "cn-beijing",
+              "maxPromptCharacters": 4991,
+              "shotMode": "single",
+              "audioMode": "auto",
+              "promptExtend": false,
+              "watermark": true,
+              "seed": 0,
+              "supportsResultUrlRefresh": false,
+              "price": {
+                "currency": "CNY",
+                "unit": "output_second",
+                "unitPrice": "0.60",
+                "quantity": "1",
+                "amount": "0.60",
+                "priceVersion": "wan27-i2v-beijing-720p-20261016",
+                "checkedAt": "2026-10-16",
+                "sourceUrl": "https://help.aliyun.com/zh/model-studio/model-pricing#ba6f7744d5e0o"
+              },
+              "shotModes": [
+                "i2v",
+                "flf2v"
+              ],
+              "imageInput": {
+                "mimeTypes": [
+                  "image/png",
+                  "image/jpeg",
+                  "image/webp"
+                ],
+                "minSide": 240,
+                "maxSide": 8000,
+                "maxBytes": 20971520,
+                "minAspect": 1,
+                "maxAspect": 8,
+                "allowsAlpha": false
+              }
+            },
+            {
+              "provider": "wan",
+              "model": "wan2.7-t2v-2026-06-12",
+              "capabilitiesVersion": "wan27-shot-beijing-v2",
+              "mode": "live",
+              "inputTypes": [
+                "text"
+              ],
+              "specs": [
+                {
+                  "mode": "t2v",
+                  "durationSeconds": 2,
+                  "resolution": "720P",
+                  "aspectRatio": "16:9"
+                },
+                {
+                  "mode": "t2v",
+                  "durationSeconds": 3,
+                  "resolution": "720P",
+                  "aspectRatio": "16:9"
+                },
+                {
+                  "mode": "t2v",
+                  "durationSeconds": 4,
+                  "resolution": "720P",
+                  "aspectRatio": "16:9"
+                },
+                {
+                  "mode": "t2v",
+                  "durationSeconds": 5,
+                  "resolution": "720P",
+                  "aspectRatio": "16:9"
+                },
+                {
+                  "mode": "t2v",
+                  "durationSeconds": 6,
+                  "resolution": "720P",
+                  "aspectRatio": "16:9"
+                },
+                {
+                  "mode": "t2v",
+                  "durationSeconds": 7,
+                  "resolution": "720P",
+                  "aspectRatio": "16:9"
+                },
+                {
+                  "mode": "t2v",
+                  "durationSeconds": 8,
+                  "resolution": "720P",
+                  "aspectRatio": "16:9"
+                },
+                {
+                  "mode": "t2v",
+                  "durationSeconds": 9,
+                  "resolution": "720P",
+                  "aspectRatio": "16:9"
+                },
+                {
+                  "mode": "t2v",
+                  "durationSeconds": 10,
+                  "resolution": "720P",
+                  "aspectRatio": "16:9"
+                },
+                {
+                  "mode": "t2v",
+                  "durationSeconds": 11,
+                  "resolution": "720P",
+                  "aspectRatio": "16:9"
+                },
+                {
+                  "mode": "t2v",
+                  "durationSeconds": 12,
+                  "resolution": "720P",
+                  "aspectRatio": "16:9"
+                },
+                {
+                  "mode": "t2v",
+                  "durationSeconds": 13,
+                  "resolution": "720P",
+                  "aspectRatio": "16:9"
+                },
+                {
+                  "mode": "t2v",
+                  "durationSeconds": 14,
+                  "resolution": "720P",
+                  "aspectRatio": "16:9"
+                },
+                {
+                  "mode": "t2v",
+                  "durationSeconds": 15,
+                  "resolution": "720P",
+                  "aspectRatio": "16:9"
+                }
+              ],
+              "supportsCancel": false,
+              "supportsIdempotentSubmit": false,
+              "region": "cn-beijing",
+              "maxPromptCharacters": 4991,
+              "shotMode": "single",
+              "audioMode": "auto",
+              "promptExtend": false,
+              "watermark": true,
+              "seed": 0,
+              "supportsResultUrlRefresh": false,
+              "price": {
+                "currency": "CNY",
+                "unit": "output_second",
+                "unitPrice": "0.60",
+                "quantity": "1",
+                "amount": "0.60",
+                "priceVersion": "wan27-beijing-720p-20261010",
+                "checkedAt": "2026-10-16",
+                "sourceUrl": "https://help.aliyun.com/zh/model-studio/model-pricing#ba6f7744d5e0o"
+              },
+              "shotModes": [
+                "t2v"
+              ],
+              "imageInput": null
+            }
+          ]
+        }
+      }
+    },
+    "film-run-2": {
+      "id": "film-run-2",
+      "sessionId": "coffee",
+      "requestId": "film-run-2",
+      "prompt": "offline video fixture",
+      "model": "m5-baseline-fixture",
+      "status": "completed",
+      "messages": [],
+      "modelSteps": 0,
+      "toolCalls": 0,
+      "inputTokens": 0,
+      "outputTokens": 0,
+      "contextBytes": 0,
+      "droppedMessages": 0,
+      "answer": "",
+      "errorCode": null,
+      "createdAt": "2030-01-01T00:00:00+00:00",
+      "updatedAt": "2030-01-01T00:00:00+00:00",
+      "executionVersion": 3,
+      "contextSignature": "8560da2b285c9b846e7bca8b8b1584d83803ad8433546b23221396b77887e9fc",
+      "contextVersion": 2,
+      "policy": null,
+      "resumable": false,
+      "activeSeconds": 0,
+      "inFlightSeconds": 0,
+      "toolCallKeys": [],
+      "usageStartStep": null,
+      "modelCalls": [],
+      "readOnly": false,
+      "answerCache": {},
+      "events": [],
+      "headless": null,
+      "videoMode": "live",
+      "toolFeatures": {
+        "video": {
+          "mode": "live",
+          "toolsVersion": 6,
+          "rulesVersion": 6,
+          "capabilities": [
+            {
+              "provider": "wan",
+              "model": "wan2.7-i2v-2026-04-25",
+              "capabilitiesVersion": "wan27-shot-beijing-v2",
+              "mode": "live",
+              "inputTypes": [
+                "text",
+                "image"
+              ],
+              "specs": [
+                {
+                  "mode": "i2v",
+                  "durationSeconds": 2,
+                  "resolution": "720P",
+                  "aspectRatio": null
+                },
+                {
+                  "mode": "i2v",
+                  "durationSeconds": 3,
+                  "resolution": "720P",
+                  "aspectRatio": null
+                },
+                {
+                  "mode": "i2v",
+                  "durationSeconds": 4,
+                  "resolution": "720P",
+                  "aspectRatio": null
+                },
+                {
+                  "mode": "i2v",
+                  "durationSeconds": 5,
+                  "resolution": "720P",
+                  "aspectRatio": null
+                },
+                {
+                  "mode": "i2v",
+                  "durationSeconds": 6,
+                  "resolution": "720P",
+                  "aspectRatio": null
+                },
+                {
+                  "mode": "i2v",
+                  "durationSeconds": 7,
+                  "resolution": "720P",
+                  "aspectRatio": null
+                },
+                {
+                  "mode": "i2v",
+                  "durationSeconds": 8,
+                  "resolution": "720P",
+                  "aspectRatio": null
+                },
+                {
+                  "mode": "i2v",
+                  "durationSeconds": 9,
+                  "resolution": "720P",
+                  "aspectRatio": null
+                },
+                {
+                  "mode": "i2v",
+                  "durationSeconds": 10,
+                  "resolution": "720P",
+                  "aspectRatio": null
+                },
+                {
+                  "mode": "i2v",
+                  "durationSeconds": 11,
+                  "resolution": "720P",
+                  "aspectRatio": null
+                },
+                {
+                  "mode": "i2v",
+                  "durationSeconds": 12,
+                  "resolution": "720P",
+                  "aspectRatio": null
+                },
+                {
+                  "mode": "i2v",
+                  "durationSeconds": 13,
+                  "resolution": "720P",
+                  "aspectRatio": null
+                },
+                {
+                  "mode": "i2v",
+                  "durationSeconds": 14,
+                  "resolution": "720P",
+                  "aspectRatio": null
+                },
+                {
+                  "mode": "i2v",
+                  "durationSeconds": 15,
+                  "resolution": "720P",
+                  "aspectRatio": null
+                },
+                {
+                  "mode": "flf2v",
+                  "durationSeconds": 2,
+                  "resolution": "720P",
+                  "aspectRatio": null
+                },
+                {
+                  "mode": "flf2v",
+                  "durationSeconds": 3,
+                  "resolution": "720P",
+                  "aspectRatio": null
+                },
+                {
+                  "mode": "flf2v",
+                  "durationSeconds": 4,
+                  "resolution": "720P",
+                  "aspectRatio": null
+                },
+                {
+                  "mode": "flf2v",
+                  "durationSeconds": 5,
+                  "resolution": "720P",
+                  "aspectRatio": null
+                },
+                {
+                  "mode": "flf2v",
+                  "durationSeconds": 6,
+                  "resolution": "720P",
+                  "aspectRatio": null
+                },
+                {
+                  "mode": "flf2v",
+                  "durationSeconds": 7,
+                  "resolution": "720P",
+                  "aspectRatio": null
+                },
+                {
+                  "mode": "flf2v",
+                  "durationSeconds": 8,
+                  "resolution": "720P",
+                  "aspectRatio": null
+                },
+                {
+                  "mode": "flf2v",
+                  "durationSeconds": 9,
+                  "resolution": "720P",
+                  "aspectRatio": null
+                },
+                {
+                  "mode": "flf2v",
+                  "durationSeconds": 10,
+                  "resolution": "720P",
+                  "aspectRatio": null
+                },
+                {
+                  "mode": "flf2v",
+                  "durationSeconds": 11,
+                  "resolution": "720P",
+                  "aspectRatio": null
+                },
+                {
+                  "mode": "flf2v",
+                  "durationSeconds": 12,
+                  "resolution": "720P",
+                  "aspectRatio": null
+                },
+                {
+                  "mode": "flf2v",
+                  "durationSeconds": 13,
+                  "resolution": "720P",
+                  "aspectRatio": null
+                },
+                {
+                  "mode": "flf2v",
+                  "durationSeconds": 14,
+                  "resolution": "720P",
+                  "aspectRatio": null
+                },
+                {
+                  "mode": "flf2v",
+                  "durationSeconds": 15,
+                  "resolution": "720P",
+                  "aspectRatio": null
+                }
+              ],
+              "supportsCancel": false,
+              "supportsIdempotentSubmit": false,
+              "region": "cn-beijing",
+              "maxPromptCharacters": 4991,
+              "shotMode": "single",
+              "audioMode": "auto",
+              "promptExtend": false,
+              "watermark": true,
+              "seed": 0,
+              "supportsResultUrlRefresh": false,
+              "price": {
+                "currency": "CNY",
+                "unit": "output_second",
+                "unitPrice": "0.60",
+                "quantity": "1",
+                "amount": "0.60",
+                "priceVersion": "wan27-i2v-beijing-720p-20261016",
+                "checkedAt": "2026-10-16",
+                "sourceUrl": "https://help.aliyun.com/zh/model-studio/model-pricing#ba6f7744d5e0o"
+              },
+              "shotModes": [
+                "i2v",
+                "flf2v"
+              ],
+              "imageInput": {
+                "mimeTypes": [
+                  "image/png",
+                  "image/jpeg",
+                  "image/webp"
+                ],
+                "minSide": 240,
+                "maxSide": 8000,
+                "maxBytes": 20971520,
+                "minAspect": 1,
+                "maxAspect": 8,
+                "allowsAlpha": false
+              }
+            },
+            {
+              "provider": "wan",
+              "model": "wan2.7-t2v-2026-06-12",
+              "capabilitiesVersion": "wan27-shot-beijing-v2",
+              "mode": "live",
+              "inputTypes": [
+                "text"
+              ],
+              "specs": [
+                {
+                  "mode": "t2v",
+                  "durationSeconds": 2,
+                  "resolution": "720P",
+                  "aspectRatio": "16:9"
+                },
+                {
+                  "mode": "t2v",
+                  "durationSeconds": 3,
+                  "resolution": "720P",
+                  "aspectRatio": "16:9"
+                },
+                {
+                  "mode": "t2v",
+                  "durationSeconds": 4,
+                  "resolution": "720P",
+                  "aspectRatio": "16:9"
+                },
+                {
+                  "mode": "t2v",
+                  "durationSeconds": 5,
+                  "resolution": "720P",
+                  "aspectRatio": "16:9"
+                },
+                {
+                  "mode": "t2v",
+                  "durationSeconds": 6,
+                  "resolution": "720P",
+                  "aspectRatio": "16:9"
+                },
+                {
+                  "mode": "t2v",
+                  "durationSeconds": 7,
+                  "resolution": "720P",
+                  "aspectRatio": "16:9"
+                },
+                {
+                  "mode": "t2v",
+                  "durationSeconds": 8,
+                  "resolution": "720P",
+                  "aspectRatio": "16:9"
+                },
+                {
+                  "mode": "t2v",
+                  "durationSeconds": 9,
+                  "resolution": "720P",
+                  "aspectRatio": "16:9"
+                },
+                {
+                  "mode": "t2v",
+                  "durationSeconds": 10,
+                  "resolution": "720P",
+                  "aspectRatio": "16:9"
+                },
+                {
+                  "mode": "t2v",
+                  "durationSeconds": 11,
+                  "resolution": "720P",
+                  "aspectRatio": "16:9"
+                },
+                {
+                  "mode": "t2v",
+                  "durationSeconds": 12,
+                  "resolution": "720P",
+                  "aspectRatio": "16:9"
+                },
+                {
+                  "mode": "t2v",
+                  "durationSeconds": 13,
+                  "resolution": "720P",
+                  "aspectRatio": "16:9"
+                },
+                {
+                  "mode": "t2v",
+                  "durationSeconds": 14,
+                  "resolution": "720P",
+                  "aspectRatio": "16:9"
+                },
+                {
+                  "mode": "t2v",
+                  "durationSeconds": 15,
+                  "resolution": "720P",
+                  "aspectRatio": "16:9"
+                }
+              ],
+              "supportsCancel": false,
+              "supportsIdempotentSubmit": false,
+              "region": "cn-beijing",
+              "maxPromptCharacters": 4991,
+              "shotMode": "single",
+              "audioMode": "auto",
+              "promptExtend": false,
+              "watermark": true,
+              "seed": 0,
+              "supportsResultUrlRefresh": false,
+              "price": {
+                "currency": "CNY",
+                "unit": "output_second",
+                "unitPrice": "0.60",
+                "quantity": "1",
+                "amount": "0.60",
+                "priceVersion": "wan27-beijing-720p-20261010",
+                "checkedAt": "2026-10-16",
+                "sourceUrl": "https://help.aliyun.com/zh/model-studio/model-pricing#ba6f7744d5e0o"
+              },
+              "shotModes": [
+                "t2v"
+              ],
+              "imageInput": null
+            }
+          ]
+        }
+      }
+    },
+    "mock-run6": {
+      "id": "mock-run6",
+      "sessionId": "coffee",
+      "requestId": "mock-run6",
+      "prompt": "offline video fixture",
+      "model": "m5-baseline-fixture",
+      "status": "completed",
+      "messages": [],
+      "modelSteps": 0,
+      "toolCalls": 0,
+      "inputTokens": 0,
+      "outputTokens": 0,
+      "contextBytes": 0,
+      "droppedMessages": 0,
+      "answer": "",
+      "errorCode": null,
+      "createdAt": "2030-01-01T00:00:00+00:00",
+      "updatedAt": "2030-01-01T00:00:00+00:00",
+      "executionVersion": 3,
+      "contextSignature": "ef4cba1e1d9b5a0e465fc23918c1efe6fb39252f86cb045b33268e483b0ff5e0",
+      "contextVersion": 2,
+      "policy": null,
+      "resumable": false,
+      "activeSeconds": 0,
+      "inFlightSeconds": 0,
+      "toolCallKeys": [],
+      "usageStartStep": null,
+      "modelCalls": [],
+      "readOnly": false,
+      "answerCache": {},
+      "events": [],
+      "headless": null,
+      "toolFeatures": {
+        "video": {
+          "mode": "mock",
+          "toolsVersion": 6,
+          "rulesVersion": 6,
+          "capabilities": [
+            {
+              "provider": "mock",
+              "model": "mock-t2v",
+              "capabilitiesVersion": "v1",
+              "mode": "mock",
+              "inputTypes": [
+                "text"
+              ],
+              "specs": [
+                {
+                  "durationSeconds": 5.0,
+                  "resolution": "720p",
+                  "aspectRatio": "16:9"
+                },
+                {
+                  "durationSeconds": 10.0,
+                  "resolution": "1080p",
+                  "aspectRatio": "9:16"
+                }
+              ],
+              "supportsCancel": false,
+              "supportsIdempotentSubmit": false
+            }
+          ]
+        }
+      },
+      "videoMode": "mock"
+    }
+  },
+  "operations": {
+    "film-run-1:1:generate": {
+      "fingerprint": "be6f5fa8f2ab6bd21f024463bf976e4c615e85e36d40b5116785aa9c1662571b",
+      "result": {
+        "ok": true,
+        "data": {
+          "jobId": "1d566d5d-f438-52d8-a2a1-fe9a7cb4fa44",
+          "status": "pending_submit",
+          "mode": "live",
+          "simulated": false,
+          "mediaAvailable": false
+        }
+      }
+    },
+    "film-run-2:1:generate": {
+      "fingerprint": "810209791a5db7d6f4149a01f5ec8f19936a62cdb27712d9a779260353d274e8",
+      "result": {
+        "ok": true,
+        "data": {
+          "jobId": "64a45c59-efcf-55cd-9ba5-496145170427",
+          "status": "pending_submit",
+          "mode": "live",
+          "simulated": false,
+          "mediaAvailable": false
+        }
+      }
+    },
+    "film-storyboard": {
+      "fingerprint": "d00d3a0dec72adfd66014cfa8a6e703ddc2f6334cdb1a3ba041d52a0ec18b4cf",
+      "result": {
+        "ok": true,
+        "data": {
+          "storyboardId": "c5343965-640f-5b5f-b495-b5cd127b749e",
+          "version": 1,
+          "shotIds": [
+            "c3cdeb29-970d-557b-a087-489abe17830f",
+            "aa92891a-df09-5a84-a949-d70a1e2c479b"
+          ]
+        }
+      }
+    },
+    "film-normalize": {
+      "fingerprint": "fd0969c1b67a9e68593c674a9256dbe81ed0308e4fa0d9d419fd7f040d1c344a",
+      "result": {
+        "ok": true,
+        "data": {
+          "filmId": "eb882fca-6fad-5a82-adb8-4e263bd15855",
+          "projectId": "coffee",
+          "storyboardId": "c5343965-640f-5b5f-b495-b5cd127b749e",
+          "revision": 1,
+          "currentVersion": 1,
+          "versionCount": 1,
+          "createdAt": "2026-10-22T05:43:36.501791+00:00",
+          "latest": {
+            "version": 1,
+            "storyboardVersion": 1,
+            "storyboardRevision": 1,
+            "outputMediaId": "d8a585a1-1f57-5076-b8a2-aa0e1a6e11e8",
+            "sizeBytes": 1261138,
+            "sha256": "319cbb6a39f56fb0a81ae528d85af36a253776cbe89f8db1487af13a6d63de30",
+            "durationSeconds": 9.866666666666667,
+            "width": 1280,
+            "height": 720,
+            "hasAudio": true,
+            "createdAt": "2026-10-22T05:43:36.501791+00:00",
+            "mediaAvailable": true,
+            "mediaUrl": "/api/media/d8a585a1-1f57-5076-b8a2-aa0e1a6e11e8/content",
+            "inputs": [
+              {
+                "shotId": "c3cdeb29-970d-557b-a087-489abe17830f",
+                "shotVersionId": "64dd6fad-e6f1-5953-bc74-3006273540d1",
+                "mediaId": "8bee3ce1-7910-5745-ac2e-8c14fbc1bc0f",
+                "sha256": "b179cca0ebb91e2b49a1e212df743037a8e292a3b754ee040c2124b31a3b6a54",
+                "sizeBytes": 209909
+              },
+              {
+                "shotId": "aa92891a-df09-5a84-a949-d70a1e2c479b",
+                "shotVersionId": "b4354490-0be0-5581-9ffc-04662131636f",
+                "mediaId": "d911abb6-d1e2-56ed-b9d3-edf88591d60d",
+                "sha256": "b179cca0ebb91e2b49a1e212df743037a8e292a3b754ee040c2124b31a3b6a54",
+                "sizeBytes": 209909
+              }
+            ],
+            "timeline": [
+              {
+                "shotId": "c3cdeb29-970d-557b-a087-489abe17830f",
+                "startSeconds": 0.0,
+                "durationSeconds": 4.933333
+              },
+              {
+                "shotId": "aa92891a-df09-5a84-a949-d70a1e2c479b",
+                "startSeconds": 4.933333,
+                "durationSeconds": 4.933333
+              }
+            ],
+            "engine": {
+              "packageVersion": "0.6.0",
+              "ffmpegVersion": "ffmpeg version 7.1-essentials_build-www.gyan.dev Copyright (c) 2000-2024 the FFmpeg developers",
+              "binarySha256": "2ce797a0f88d7f067180338fb227f7b1928ea727bd9a4d7a1d022f7c52af71a3"
+            },
+            "assemblyVersion": "ffmpeg-concat-normalize-v4",
+            "normalization": {
+              "version": "ffmpeg-concat-normalize-v4",
+              "profile": "h264-1280x720-30fps-aac-48k-stereo-v1",
+              "width": 1280,
+              "height": 720,
+              "frameRate": 30,
+              "videoCodec": "h264",
+              "audioCodec": "aac",
+              "audioSampleRate": 48000,
+              "audioChannels": 2
+            },
+            "fingerprint": "ae9a5b954c5d6f90e6a9ff7efb5890abc3235bf1c64da0d2fe35bdd80106c6e7"
+          },
+          "versions": [
+            {
+              "version": 1,
+              "storyboardVersion": 1,
+              "storyboardRevision": 1,
+              "outputMediaId": "d8a585a1-1f57-5076-b8a2-aa0e1a6e11e8",
+              "sizeBytes": 1261138,
+              "sha256": "319cbb6a39f56fb0a81ae528d85af36a253776cbe89f8db1487af13a6d63de30",
+              "durationSeconds": 9.866666666666667,
+              "width": 1280,
+              "height": 720,
+              "hasAudio": true,
+              "createdAt": "2026-10-22T05:43:36.501791+00:00",
+              "mediaAvailable": true,
+              "mediaUrl": "/api/media/d8a585a1-1f57-5076-b8a2-aa0e1a6e11e8/content",
+              "inputs": [
+                {
+                  "shotId": "c3cdeb29-970d-557b-a087-489abe17830f",
+                  "shotVersionId": "64dd6fad-e6f1-5953-bc74-3006273540d1",
+                  "mediaId": "8bee3ce1-7910-5745-ac2e-8c14fbc1bc0f",
+                  "sha256": "b179cca0ebb91e2b49a1e212df743037a8e292a3b754ee040c2124b31a3b6a54",
+                  "sizeBytes": 209909
+                },
+                {
+                  "shotId": "aa92891a-df09-5a84-a949-d70a1e2c479b",
+                  "shotVersionId": "b4354490-0be0-5581-9ffc-04662131636f",
+                  "mediaId": "d911abb6-d1e2-56ed-b9d3-edf88591d60d",
+                  "sha256": "b179cca0ebb91e2b49a1e212df743037a8e292a3b754ee040c2124b31a3b6a54",
+                  "sizeBytes": 209909
+                }
+              ],
+              "timeline": [
+                {
+                  "shotId": "c3cdeb29-970d-557b-a087-489abe17830f",
+                  "startSeconds": 0.0,
+                  "durationSeconds": 4.933333
+                },
+                {
+                  "shotId": "aa92891a-df09-5a84-a949-d70a1e2c479b",
+                  "startSeconds": 4.933333,
+                  "durationSeconds": 4.933333
+                }
+              ],
+              "engine": {
+                "packageVersion": "0.6.0",
+                "ffmpegVersion": "ffmpeg version 7.1-essentials_build-www.gyan.dev Copyright (c) 2000-2024 the FFmpeg developers",
+                "binarySha256": "2ce797a0f88d7f067180338fb227f7b1928ea727bd9a4d7a1d022f7c52af71a3"
+              },
+              "assemblyVersion": "ffmpeg-concat-normalize-v4",
+              "normalization": {
+                "version": "ffmpeg-concat-normalize-v4",
+                "profile": "h264-1280x720-30fps-aac-48k-stereo-v1",
+                "width": 1280,
+                "height": 720,
+                "frameRate": 30,
+                "videoCodec": "h264",
+                "audioCodec": "aac",
+                "audioSampleRate": 48000,
+                "audioChannels": 2
+              },
+              "fingerprint": "ae9a5b954c5d6f90e6a9ff7efb5890abc3235bf1c64da0d2fe35bdd80106c6e7"
+            }
+          ]
+        }
+      }
+    }
+  },
+  "jobs": {
+    "1d566d5d-f438-52d8-a2a1-fe9a7cb4fa44": {
+      "contractVersion": 2,
+      "id": "1d566d5d-f438-52d8-a2a1-fe9a7cb4fa44",
+      "context": {
+        "projectId": "coffee",
+        "sessionId": "coffee",
+        "runId": "film-run-1",
+        "modelStep": 1,
+        "toolCallId": "generate"
+      },
+      "operationKey": "film-run-1:1:generate",
+      "revision": 6,
+      "mode": "live",
+      "request": {
+        "provider": "wan",
+        "model": "wan2.7-t2v-2026-06-12",
+        "capabilitiesVersion": "wan27-t2v-beijing-v1",
+        "prompt": "雨夜街道",
+        "spec": {
+          "durationSeconds": 5,
+          "resolution": "720p",
+          "aspectRatio": "16:9"
+        },
+        "sourceRefs": [],
+        "region": "cn-beijing",
+        "workspaceId": "test-workspace",
+        "endpointProfile": "beijing-workspace-v1",
+        "adapterVersion": "wan-http-v1",
+        "providerPrompt": "生成单镜头视频。\n雨夜街道",
+        "parameters": {
+          "resolution": "720P",
+          "ratio": "16:9",
+          "duration": 5,
+          "prompt_extend": false,
+          "watermark": true,
+          "seed": 0
+        }
+      },
+      "requestFingerprint": "ed2a8a920057d6fa15a6a03c51b001a8c10a590e5fbbdf1240a923d67c9e75fe",
+      "capabilities": {
+        "provider": "wan",
+        "model": "wan2.7-t2v-2026-06-12",
+        "capabilitiesVersion": "wan27-t2v-beijing-v1",
+        "mode": "live",
+        "inputTypes": [
+          "text"
+        ],
+        "specs": [
+          {
+            "durationSeconds": 5,
+            "resolution": "720p",
+            "aspectRatio": "16:9"
+          }
+        ],
+        "supportsCancel": false,
+        "supportsIdempotentSubmit": false,
+        "region": "cn-beijing",
+        "maxPromptCharacters": 4991,
+        "shotMode": "single",
+        "audioMode": "auto",
+        "promptExtend": false,
+        "watermark": true,
+        "seed": 0,
+        "supportsResultUrlRefresh": false,
+        "price": {
+          "currency": "CNY",
+          "unit": "output_second",
+          "unitPrice": "0.60",
+          "quantity": "5",
+          "amount": "3.00",
+          "priceVersion": "wan27-beijing-720p-20261010",
+          "checkedAt": "2026-10-10",
+          "sourceUrl": "https://help.aliyun.com/zh/model-studio/model-pricing#ba6f7744d5e0o"
+        }
+      },
+      "status": "succeeded",
+      "providerTaskId": "wan-original",
+      "submitAttempts": 1,
+      "queryAttempts": 0,
+      "consecutiveQueryErrors": 0,
+      "queryState": "idle",
+      "queryStartedAt": null,
+      "policy": {
+        "intervalSeconds": 15.0,
+        "submitTimeoutSeconds": 30.0,
+        "queryTimeoutSeconds": 30.0,
+        "retryDelaysSeconds": [
+          15.0,
+          30.0,
+          60.0
+        ]
+      },
+      "nextPollAt": null,
+      "createdAt": "2030-01-01T00:00:05+00:00",
+      "updatedAt": "2030-01-01T00:00:05+00:00",
+      "error": null,
+      "result": {
+        "simulated": false,
+        "mediaAvailable": true,
+        "requestFingerprint": "ed2a8a920057d6fa15a6a03c51b001a8c10a590e5fbbdf1240a923d67c9e75fe",
+        "spec": {
+          "durationSeconds": 5,
+          "resolution": "720p",
+          "aspectRatio": "16:9"
+        },
+        "sourceRefs": [],
+        "artifactRefs": [],
+        "summary": "单镜头视频已完整保存到本地，可播放和下载。",
+        "mediaRefs": [
+          {
+            "mediaId": "8bee3ce1-7910-5745-ac2e-8c14fbc1bc0f"
+          }
+        ]
+      },
+      "intentFingerprint": "ff9f61d7ac84c3579249f47bc6a5ceee821793615d98e38303d737b65948672e",
+      "submissionStartedAt": "2030-01-01T00:00:05+00:00",
+      "queryDeadlineAt": "2030-01-02T00:00:05+00:00",
+      "providerSubmissionRequestId": "trace-original",
+      "lastQueryRequestId": null,
+      "lastProviderStatus": "SUCCEEDED",
+      "queryPauseReason": null,
+      "runtimeBlock": null,
+      "cost": {
+        "estimate": {
+          "currency": "CNY",
+          "unit": "output_second",
+          "unitPrice": "0.60",
+          "quantity": "5",
+          "amount": "3.00",
+          "priceVersion": "wan27-beijing-720p-20261010",
+          "checkedAt": "2026-10-10",
+          "sourceUrl": "https://help.aliyun.com/zh/model-studio/model-pricing#ba6f7744d5e0o",
+          "maxJobCost": "3.00"
+        },
+        "providerUsage": null,
+        "actual": {
+          "status": "unknown",
+          "currency": "CNY",
+          "amount": null,
+          "source": null
+        }
+      },
+      "providerOutput": {
+        "taskId": "wan-original",
+        "receivedAt": "2030-01-01T00:00:05+00:00",
+        "videoUrl": "https://dashscope-result-sh.oss-accelerate.aliyuncs.com/test.mp4?Signature=private-signature",
+        "urlExpiresAt": null,
+        "expirySource": "unknown",
+        "providerTimes": {
+          "submitTime": null,
+          "scheduledTime": null,
+          "endTime": null
+        },
+        "usage": null
+      },
+      "downloadPolicy": {
+        "maxBytes": 268435456,
+        "connectTimeoutSeconds": 10.0,
+        "readTimeoutSeconds": 30.0,
+        "totalTimeoutSeconds": 180.0,
+        "retryDelaysSeconds": [
+          5.0,
+          30.0
+        ],
+        "maxAttemptsPerWindow": 3,
+        "maxRedirects": 3,
+        "concurrency": 1
+      },
+      "download": {
+        "mediaId": "8bee3ce1-7910-5745-ac2e-8c14fbc1bc0f",
+        "relativePath": "media/coffee/8bee3ce1-7910-5745-ac2e-8c14fbc1bc0f.mp4",
+        "phase": "committed",
+        "generation": 1,
+        "attempts": 1,
+        "windowAttempts": 1,
+        "nextAttemptAt": null,
+        "startedAt": null,
+        "deadlineAt": null,
+        "prepared": {
+          "sizeBytes": 209909,
+          "sha256": "b179cca0ebb91e2b49a1e212df743037a8e292a3b754ee040c2124b31a3b6a54",
+          "metadata": {
+            "width": 1280,
+            "height": 720,
+            "durationSeconds": 5.0,
+            "videoCodec": "h264",
+            "hasAudio": true,
+            "audioCodec": "aac",
+            "frameRate": {
+              "numerator": 10,
+              "denominator": 1
+            }
+          },
+          "validatedAt": "2030-01-01T00:00:05+00:00"
+        },
+        "error": null,
+        "repair": false,
+        "sourcePolicyVersion": "wan-result-hosts-v2"
+      },
+      "mediaAvailability": {
+        "status": "available",
+        "reason": null,
+        "checkedAt": "2030-01-01T00:00:05+00:00"
+      }
+    },
+    "64a45c59-efcf-55cd-9ba5-496145170427": {
+      "contractVersion": 2,
+      "id": "64a45c59-efcf-55cd-9ba5-496145170427",
+      "context": {
+        "projectId": "coffee",
+        "sessionId": "coffee",
+        "runId": "film-run-2",
+        "modelStep": 1,
+        "toolCallId": "generate"
+      },
+      "operationKey": "film-run-2:1:generate",
+      "revision": 6,
+      "mode": "live",
+      "request": {
+        "provider": "wan",
+        "model": "wan2.7-t2v-2026-06-12",
+        "capabilitiesVersion": "wan27-t2v-beijing-v1",
+        "prompt": "推门入店",
+        "spec": {
+          "durationSeconds": 5,
+          "resolution": "720p",
+          "aspectRatio": "16:9"
+        },
+        "sourceRefs": [],
+        "region": "cn-beijing",
+        "workspaceId": "test-workspace",
+        "endpointProfile": "beijing-workspace-v1",
+        "adapterVersion": "wan-http-v1",
+        "providerPrompt": "生成单镜头视频。\n推门入店",
+        "parameters": {
+          "resolution": "720P",
+          "ratio": "16:9",
+          "duration": 5,
+          "prompt_extend": false,
+          "watermark": true,
+          "seed": 0
+        }
+      },
+      "requestFingerprint": "4368a0e0a933c010a37b4bcca989c8ed6e871aa3298ecda9c681d14fb2a9043b",
+      "capabilities": {
+        "provider": "wan",
+        "model": "wan2.7-t2v-2026-06-12",
+        "capabilitiesVersion": "wan27-t2v-beijing-v1",
+        "mode": "live",
+        "inputTypes": [
+          "text"
+        ],
+        "specs": [
+          {
+            "durationSeconds": 5,
+            "resolution": "720p",
+            "aspectRatio": "16:9"
+          }
+        ],
+        "supportsCancel": false,
+        "supportsIdempotentSubmit": false,
+        "region": "cn-beijing",
+        "maxPromptCharacters": 4991,
+        "shotMode": "single",
+        "audioMode": "auto",
+        "promptExtend": false,
+        "watermark": true,
+        "seed": 0,
+        "supportsResultUrlRefresh": false,
+        "price": {
+          "currency": "CNY",
+          "unit": "output_second",
+          "unitPrice": "0.60",
+          "quantity": "5",
+          "amount": "3.00",
+          "priceVersion": "wan27-beijing-720p-20261010",
+          "checkedAt": "2026-10-10",
+          "sourceUrl": "https://help.aliyun.com/zh/model-studio/model-pricing#ba6f7744d5e0o"
+        }
+      },
+      "status": "succeeded",
+      "providerTaskId": "wan-original",
+      "submitAttempts": 1,
+      "queryAttempts": 0,
+      "consecutiveQueryErrors": 0,
+      "queryState": "idle",
+      "queryStartedAt": null,
+      "policy": {
+        "intervalSeconds": 15.0,
+        "submitTimeoutSeconds": 30.0,
+        "queryTimeoutSeconds": 30.0,
+        "retryDelaysSeconds": [
+          15.0,
+          30.0,
+          60.0
+        ]
+      },
+      "nextPollAt": null,
+      "createdAt": "2030-01-01T00:00:10+00:00",
+      "updatedAt": "2030-01-01T00:00:10+00:00",
+      "error": null,
+      "result": {
+        "simulated": false,
+        "mediaAvailable": true,
+        "requestFingerprint": "4368a0e0a933c010a37b4bcca989c8ed6e871aa3298ecda9c681d14fb2a9043b",
+        "spec": {
+          "durationSeconds": 5,
+          "resolution": "720p",
+          "aspectRatio": "16:9"
+        },
+        "sourceRefs": [],
+        "artifactRefs": [],
+        "summary": "单镜头视频已完整保存到本地，可播放和下载。",
+        "mediaRefs": [
+          {
+            "mediaId": "d911abb6-d1e2-56ed-b9d3-edf88591d60d"
+          }
+        ]
+      },
+      "intentFingerprint": "c4869a8abb838e3c8935c827816d6c2ef56b5215ebbe1dc94dc4bc65ae59b9c9",
+      "submissionStartedAt": "2030-01-01T00:00:10+00:00",
+      "queryDeadlineAt": "2030-01-02T00:00:10+00:00",
+      "providerSubmissionRequestId": "trace-original",
+      "lastQueryRequestId": null,
+      "lastProviderStatus": "SUCCEEDED",
+      "queryPauseReason": null,
+      "runtimeBlock": null,
+      "cost": {
+        "estimate": {
+          "currency": "CNY",
+          "unit": "output_second",
+          "unitPrice": "0.60",
+          "quantity": "5",
+          "amount": "3.00",
+          "priceVersion": "wan27-beijing-720p-20261010",
+          "checkedAt": "2026-10-10",
+          "sourceUrl": "https://help.aliyun.com/zh/model-studio/model-pricing#ba6f7744d5e0o",
+          "maxJobCost": "3.00"
+        },
+        "providerUsage": null,
+        "actual": {
+          "status": "unknown",
+          "currency": "CNY",
+          "amount": null,
+          "source": null
+        }
+      },
+      "providerOutput": {
+        "taskId": "wan-original",
+        "receivedAt": "2030-01-01T00:00:10+00:00",
+        "videoUrl": "https://dashscope-result-sh.oss-accelerate.aliyuncs.com/test.mp4?Signature=private-signature",
+        "urlExpiresAt": null,
+        "expirySource": "unknown",
+        "providerTimes": {
+          "submitTime": null,
+          "scheduledTime": null,
+          "endTime": null
+        },
+        "usage": null
+      },
+      "downloadPolicy": {
+        "maxBytes": 268435456,
+        "connectTimeoutSeconds": 10.0,
+        "readTimeoutSeconds": 30.0,
+        "totalTimeoutSeconds": 180.0,
+        "retryDelaysSeconds": [
+          5.0,
+          30.0
+        ],
+        "maxAttemptsPerWindow": 3,
+        "maxRedirects": 3,
+        "concurrency": 1
+      },
+      "download": {
+        "mediaId": "d911abb6-d1e2-56ed-b9d3-edf88591d60d",
+        "relativePath": "media/coffee/d911abb6-d1e2-56ed-b9d3-edf88591d60d.mp4",
+        "phase": "committed",
+        "generation": 1,
+        "attempts": 1,
+        "windowAttempts": 1,
+        "nextAttemptAt": null,
+        "startedAt": null,
+        "deadlineAt": null,
+        "prepared": {
+          "sizeBytes": 209909,
+          "sha256": "b179cca0ebb91e2b49a1e212df743037a8e292a3b754ee040c2124b31a3b6a54",
+          "metadata": {
+            "width": 1280,
+            "height": 720,
+            "durationSeconds": 5.0,
+            "videoCodec": "h264",
+            "hasAudio": true,
+            "audioCodec": "aac",
+            "frameRate": {
+              "numerator": 10,
+              "denominator": 1
+            }
+          },
+          "validatedAt": "2030-01-01T00:00:10+00:00"
+        },
+        "error": null,
+        "repair": false,
+        "sourcePolicyVersion": "wan-result-hosts-v2"
+      },
+      "mediaAvailability": {
+        "status": "available",
+        "reason": null,
+        "checkedAt": "2030-01-01T00:00:10+00:00"
+      }
+    }
+  },
+  "waits": {},
+  "media": {
+    "8bee3ce1-7910-5745-ac2e-8c14fbc1bc0f": {
+      "id": "8bee3ce1-7910-5745-ac2e-8c14fbc1bc0f",
+      "projectId": "coffee",
+      "jobId": "1d566d5d-f438-52d8-a2a1-fe9a7cb4fa44",
+      "sourceRefs": [],
+      "relativePath": "media/coffee/8bee3ce1-7910-5745-ac2e-8c14fbc1bc0f.mp4",
+      "mimeType": "video/mp4",
+      "sizeBytes": 209909,
+      "sha256": "b179cca0ebb91e2b49a1e212df743037a8e292a3b754ee040c2124b31a3b6a54",
+      "createdAt": "2030-01-01T00:00:05+00:00",
+      "metadata": {
+        "width": 1280,
+        "height": 720,
+        "durationSeconds": 5.0,
+        "videoCodec": "h264",
+        "hasAudio": true,
+        "audioCodec": "aac",
+        "frameRate": {
+          "numerator": 10,
+          "denominator": 1
+        }
+      },
+      "validationVersion": "mp4-avc-v1"
+    },
+    "d911abb6-d1e2-56ed-b9d3-edf88591d60d": {
+      "id": "d911abb6-d1e2-56ed-b9d3-edf88591d60d",
+      "projectId": "coffee",
+      "jobId": "64a45c59-efcf-55cd-9ba5-496145170427",
+      "sourceRefs": [],
+      "relativePath": "media/coffee/d911abb6-d1e2-56ed-b9d3-edf88591d60d.mp4",
+      "mimeType": "video/mp4",
+      "sizeBytes": 209909,
+      "sha256": "b179cca0ebb91e2b49a1e212df743037a8e292a3b754ee040c2124b31a3b6a54",
+      "createdAt": "2030-01-01T00:00:10+00:00",
+      "metadata": {
+        "width": 1280,
+        "height": 720,
+        "durationSeconds": 5.0,
+        "videoCodec": "h264",
+        "hasAudio": true,
+        "audioCodec": "aac",
+        "frameRate": {
+          "numerator": 10,
+          "denominator": 1
+        }
+      },
+      "validationVersion": "mp4-avc-v1"
+    },
+    "d8a585a1-1f57-5076-b8a2-aa0e1a6e11e8": {
+      "contractVersion": 2,
+      "kind": "film",
+      "id": "d8a585a1-1f57-5076-b8a2-aa0e1a6e11e8",
+      "projectId": "coffee",
+      "filmId": "eb882fca-6fad-5a82-adb8-4e263bd15855",
+      "filmVersion": 1,
+      "relativePath": "media/coffee/d8a585a1-1f57-5076-b8a2-aa0e1a6e11e8.mp4",
+      "mimeType": "video/mp4",
+      "sizeBytes": 1261138,
+      "sha256": "319cbb6a39f56fb0a81ae528d85af36a253776cbe89f8db1487af13a6d63de30",
+      "metadata": {
+        "width": 1280,
+        "height": 720,
+        "durationSeconds": 9.866666666666667,
+        "videoCodec": "h264",
+        "hasAudio": true,
+        "audioCodec": "aac",
+        "frameRate": {
+          "numerator": 30,
+          "denominator": 1
+        }
+      },
+      "validationVersion": "mp4-avc-v1",
+      "createdAt": "2026-10-22T05:43:36.501791+00:00"
+    }
+  },
+  "storyboards": {
+    "c5343965-640f-5b5f-b495-b5cd127b749e": {
+      "id": "c5343965-640f-5b5f-b495-b5cd127b749e",
+      "projectId": "coffee",
+      "title": "分镜",
+      "sourceRefs": [],
+      "currentVersion": 1,
+      "versions": [
+        {
+          "version": 1,
+          "shots": [
+            {
+              "id": "c3cdeb29-970d-557b-a087-489abe17830f",
+              "order": 1,
+              "description": "雨夜街道",
+              "framing": "wide",
+              "cameraMovement": null,
+              "durationSeconds": 5,
+              "mode": "t2v",
+              "referenceAssetIds": [],
+              "extendSource": null
+            },
+            {
+              "id": "aa92891a-df09-5a84-a949-d70a1e2c479b",
+              "order": 2,
+              "description": "推门入店",
+              "framing": "wide",
+              "cameraMovement": null,
+              "durationSeconds": 5,
+              "mode": "t2v",
+              "referenceAssetIds": [],
+              "extendSource": null
+            }
+          ],
+          "createdAt": "2030-01-01T00:00:00+00:00"
+        }
+      ],
+      "shotVersions": [
+        {
+          "id": "64dd6fad-e6f1-5953-bc74-3006273540d1",
+          "shotId": "c3cdeb29-970d-557b-a087-489abe17830f",
+          "storyboardVersion": 1,
+          "jobId": "1d566d5d-f438-52d8-a2a1-fe9a7cb4fa44",
+          "request": {
+            "provider": "wan",
+            "model": "wan2.7-t2v-2026-06-12",
+            "capabilitiesVersion": "wan27-t2v-beijing-v1",
+            "prompt": "雨夜街道",
+            "spec": {
+              "durationSeconds": 5,
+              "resolution": "720p",
+              "aspectRatio": "16:9"
+            },
+            "sourceRefs": [],
+            "region": "cn-beijing",
+            "workspaceId": "test-workspace",
+            "endpointProfile": "beijing-workspace-v1",
+            "adapterVersion": "wan-http-v1",
+            "providerPrompt": "生成单镜头视频。\n雨夜街道",
+            "parameters": {
+              "resolution": "720P",
+              "ratio": "16:9",
+              "duration": 5,
+              "prompt_extend": false,
+              "watermark": true,
+              "seed": 0
+            }
+          },
+          "estimate": null,
+          "mediaId": "8bee3ce1-7910-5745-ac2e-8c14fbc1bc0f",
+          "createdAt": "2030-01-01T00:00:00+00:00"
+        },
+        {
+          "id": "b4354490-0be0-5581-9ffc-04662131636f",
+          "shotId": "aa92891a-df09-5a84-a949-d70a1e2c479b",
+          "storyboardVersion": 1,
+          "jobId": "64a45c59-efcf-55cd-9ba5-496145170427",
+          "request": {
+            "provider": "wan",
+            "model": "wan2.7-t2v-2026-06-12",
+            "capabilitiesVersion": "wan27-t2v-beijing-v1",
+            "prompt": "推门入店",
+            "spec": {
+              "durationSeconds": 5,
+              "resolution": "720p",
+              "aspectRatio": "16:9"
+            },
+            "sourceRefs": [],
+            "region": "cn-beijing",
+            "workspaceId": "test-workspace",
+            "endpointProfile": "beijing-workspace-v1",
+            "adapterVersion": "wan-http-v1",
+            "providerPrompt": "生成单镜头视频。\n推门入店",
+            "parameters": {
+              "resolution": "720P",
+              "ratio": "16:9",
+              "duration": 5,
+              "prompt_extend": false,
+              "watermark": true,
+              "seed": 0
+            }
+          },
+          "estimate": null,
+          "mediaId": "d911abb6-d1e2-56ed-b9d3-edf88591d60d",
+          "createdAt": "2030-01-01T00:00:00+00:00"
+        }
+      ],
+      "revision": 1,
+      "createdAt": "2030-01-01T00:00:00+00:00"
+    }
+  },
+  "assets": {},
+  "films": {
+    "eb882fca-6fad-5a82-adb8-4e263bd15855": {
+      "id": "eb882fca-6fad-5a82-adb8-4e263bd15855",
+      "projectId": "coffee",
+      "storyboardId": "c5343965-640f-5b5f-b495-b5cd127b749e",
+      "currentVersion": 1,
+      "versions": [
+        {
+          "version": 1,
+          "storyboardVersion": 1,
+          "storyboardRevision": 1,
+          "inputs": [
+            {
+              "shotId": "c3cdeb29-970d-557b-a087-489abe17830f",
+              "shotVersionId": "64dd6fad-e6f1-5953-bc74-3006273540d1",
+              "jobId": "1d566d5d-f438-52d8-a2a1-fe9a7cb4fa44",
+              "mediaId": "8bee3ce1-7910-5745-ac2e-8c14fbc1bc0f",
+              "sha256": "b179cca0ebb91e2b49a1e212df743037a8e292a3b754ee040c2124b31a3b6a54",
+              "sizeBytes": 209909
+            },
+            {
+              "shotId": "aa92891a-df09-5a84-a949-d70a1e2c479b",
+              "shotVersionId": "b4354490-0be0-5581-9ffc-04662131636f",
+              "jobId": "64a45c59-efcf-55cd-9ba5-496145170427",
+              "mediaId": "d911abb6-d1e2-56ed-b9d3-edf88591d60d",
+              "sha256": "b179cca0ebb91e2b49a1e212df743037a8e292a3b754ee040c2124b31a3b6a54",
+              "sizeBytes": 209909
+            }
+          ],
+          "outputMediaId": "d8a585a1-1f57-5076-b8a2-aa0e1a6e11e8",
+          "assembly": {
+            "assemblyVersion": "ffmpeg-concat-normalize-v4",
+            "compatibilityVersion": "mp4-copy-signature-v1",
+            "engine": {
+              "packageVersion": "0.6.0",
+              "ffmpegVersion": "ffmpeg version 7.1-essentials_build-www.gyan.dev Copyright (c) 2000-2024 the FFmpeg developers",
+              "binarySha256": "2ce797a0f88d7f067180338fb227f7b1928ea727bd9a4d7a1d022f7c52af71a3"
+            },
+            "compatibilitySha256": "0278bc36f1090204c6e218c835b3476663f4e1db4902dc70895f31467a4aaacc",
+            "timeline": [
+              {
+                "shotId": "c3cdeb29-970d-557b-a087-489abe17830f",
+                "shotVersionId": "64dd6fad-e6f1-5953-bc74-3006273540d1",
+                "start": {
+                  "numerator": 0,
+                  "denominator": 1
+                },
+                "duration": {
+                  "numerator": 74,
+                  "denominator": 15
+                },
+                "signatureSha256": "154317203c57f8a66b61231394263c56142dba80a93dc430011f4eb7589f5a96",
+                "priming": {
+                  "numerator": 1,
+                  "denominator": 5
+                }
+              },
+              {
+                "shotId": "aa92891a-df09-5a84-a949-d70a1e2c479b",
+                "shotVersionId": "b4354490-0be0-5581-9ffc-04662131636f",
+                "start": {
+                  "numerator": 74,
+                  "denominator": 15
+                },
+                "duration": {
+                  "numerator": 74,
+                  "denominator": 15
+                },
+                "signatureSha256": "154317203c57f8a66b61231394263c56142dba80a93dc430011f4eb7589f5a96",
+                "priming": {
+                  "numerator": 1,
+                  "denominator": 5
+                }
+              }
+            ],
+            "fingerprint": "ae9a5b954c5d6f90e6a9ff7efb5890abc3235bf1c64da0d2fe35bdd80106c6e7",
+            "normalization": {
+              "version": "ffmpeg-concat-normalize-v4",
+              "profile": "h264-1280x720-30fps-aac-48k-stereo-v1",
+              "width": 1280,
+              "height": 720,
+              "frameRate": 30,
+              "videoCodec": "h264",
+              "audioCodec": "aac",
+              "audioSampleRate": 48000,
+              "audioChannels": 2
+            }
+          },
+          "sizeBytes": 1261138,
+          "sha256": "319cbb6a39f56fb0a81ae528d85af36a253776cbe89f8db1487af13a6d63de30",
+          "metadata": {
+            "width": 1280,
+            "height": 720,
+            "durationSeconds": 9.866666666666667,
+            "videoCodec": "h264",
+            "hasAudio": true,
+            "audioCodec": "aac",
+            "frameRate": {
+              "numerator": 30,
+              "denominator": 1
+            }
+          },
+          "createdAt": "2026-10-22T05:43:36.501791+00:00"
+        }
+      ],
+      "revision": 1,
+      "createdAt": "2026-10-22T05:43:36.501791+00:00"
+    }
+  }
+}

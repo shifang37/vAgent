@@ -7,7 +7,7 @@ from pathlib import Path
 import pytest
 
 from vagent.errors import AppError
-from vagent.storage import Database, DatabaseV4, FileStore
+from vagent.storage import Database, DatabaseV4, DatabaseV5, FileStore
 from vagent.video.contracts import canonical_fingerprint, parse_job
 from vagent.waiting import parse_wait
 
@@ -86,10 +86,20 @@ def test_v4_baseline_migrates_to_the_frozen_v5_envelope(tmp_path, entry):
         (tmp_path / name).write_bytes(content)
     with FileStore.open(tmp_path) as store:
         migrated = store.snapshot()
-    expected = {**original, "schemaVersion": 5, "films": {}}
+    # M5 E0 froze this v5 envelope first; the v4 fixture still reaches it exactly.
+    v5_envelope = {**original, "schemaVersion": 5, "films": {}}
+    assert canonical_fingerprint(v5_envelope) == entry["expectedV5CanonicalSha256"]
+    DatabaseV5.model_validate(v5_envelope)
+    # The current migration continues mechanically into the v6 episode collections.
+    expected = {
+        **v5_envelope,
+        "schemaVersion": 6,
+        "episodes": {},
+        "scenes": {},
+        "characters": {},
+        "styles": {},
+    }
     assert migrated == expected
-    # E0 froze this hash before any migration existed; the real migration reproduces it.
-    assert canonical_fingerprint(migrated) == entry["expectedV5CanonicalSha256"]
     Database.model_validate(migrated)
     backups = list(tmp_path.glob("state-v4-*.json"))
     assert len(backups) == 1 and backups[0].read_bytes() == raw

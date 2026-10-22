@@ -15,7 +15,7 @@ MANIFEST = json.loads((FIXTURES / "manifest.json").read_text(encoding="utf-8"))[
 
 
 @pytest.mark.parametrize("entry", MANIFEST, ids=lambda entry: entry["file"])
-def test_frozen_m2_v3_fixtures_migrate_to_v5_with_exact_backup(tmp_path, entry):
+def test_frozen_m2_v3_fixtures_migrate_to_v6_with_exact_backup(tmp_path, entry):
     raw = (FIXTURES / entry["file"]).read_bytes()
     assert hashlib.sha256(raw).hexdigest() == entry["rawSha256"]
     original = json.loads(raw)
@@ -30,10 +30,13 @@ def test_frozen_m2_v3_fixtures_migrate_to_v5_with_exact_backup(tmp_path, entry):
         (tmp_path / name).write_bytes(content)
     with FileStore.open(tmp_path) as store:
         state = store.snapshot()
-        assert state["schemaVersion"] == 5
+        assert state["schemaVersion"] == 6
         assert state["storyboards"] == {} and state["assets"] == {} and state["films"] == {}
+        # M5 E0 adds four empty collections; no other value may appear.
+        assert state["episodes"] == state["scenes"] == state["characters"] == state["styles"] == {}
         # The E0-frozen v4 envelope is still reproduced exactly by the migration.
-        v4_projection = {key: value for key, value in state.items() if key != "films"}
+        added = {"films", "episodes", "scenes", "characters", "styles"}
+        v4_projection = {key: value for key, value in state.items() if key not in added}
         v4_projection["schemaVersion"] = 4
         assert canonical_fingerprint(v4_projection) == entry["expectedV4CanonicalSha256"]
         Database.model_validate(state)
@@ -81,14 +84,14 @@ def test_v3_migration_failure_preserves_original_and_releases_lock(tmp_path, mon
         assert backups[0].read_bytes() == raw
     monkeypatch.undo()
     with FileStore.open(tmp_path) as store:
-        assert store.snapshot()["schemaVersion"] == 5
+        assert store.snapshot()["schemaVersion"] == 6
 
 
-def test_v5_store_reopens_without_creating_backups(tmp_path):
+def test_current_store_reopens_without_creating_backups(tmp_path):
     with FileStore.open(tmp_path) as store:
-        assert store.snapshot()["schemaVersion"] == 5
+        assert store.snapshot()["schemaVersion"] == 6
     with FileStore.open(tmp_path) as reopened:
-        assert reopened.snapshot()["schemaVersion"] == 5
+        assert reopened.snapshot()["schemaVersion"] == 6
     assert not list(tmp_path.glob("state-v*.json"))
 
 
@@ -97,7 +100,7 @@ def test_invalid_envelopes_are_rejected_without_backup(tmp_path, corrupt):
     if corrupt == "empty":
         raw = json.dumps({"schemaVersion": 4, "projects": {}}).encode()
     else:
-        raw = json.dumps({"schemaVersion": 6, "projects": {}}).encode()
+        raw = json.dumps({"schemaVersion": 7, "projects": {}}).encode()
     (tmp_path / "state.json").write_bytes(raw)
     with pytest.raises(AppError) as error:
         FileStore.open(tmp_path)

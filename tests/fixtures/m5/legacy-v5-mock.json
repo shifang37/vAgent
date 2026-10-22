@@ -1,0 +1,684 @@
+{
+  "schemaVersion": 5,
+  "projects": {
+    "waiting-project": {
+      "id": "waiting-project",
+      "revision": 0,
+      "goal": "",
+      "audience": "",
+      "style": "",
+      "constraints": [],
+      "plan": []
+    },
+    "complete-project": {
+      "id": "complete-project",
+      "revision": 0,
+      "goal": "",
+      "audience": "",
+      "style": "",
+      "constraints": [],
+      "plan": []
+    }
+  },
+  "sessions": {
+    "waiting-project": {
+      "id": "waiting-project",
+      "messages": [],
+      "latestRunId": "m2-waiting-mock"
+    },
+    "complete-project": {
+      "id": "complete-project",
+      "messages": [],
+      "latestRunId": "m2-completed-mock"
+    }
+  },
+  "artifacts": {
+    "6a3eee7f-91ae-4a85-9f61-8bb32b46dc5b": {
+      "id": "6a3eee7f-91ae-4a85-9f61-8bb32b46dc5b",
+      "projectId": "waiting-project",
+      "kind": "brief",
+      "versions": [
+        {
+          "version": 1,
+          "title": "Migration fixture",
+          "content": "Original version.",
+          "createdAt": "2026-10-16T10:46:31.810599+00:00",
+          "contentCheck": {
+            "characters": 16,
+            "maxCharacters": null,
+            "method": "unicode_non_whitespace_v1"
+          }
+        },
+        {
+          "version": 2,
+          "title": "Migration fixture",
+          "content": "Revised version; the Job still cites version 1.",
+          "createdAt": "2026-10-16T10:46:31.825702+00:00",
+          "contentCheck": {
+            "characters": 40,
+            "maxCharacters": null,
+            "method": "unicode_non_whitespace_v1"
+          }
+        }
+      ]
+    },
+    "a25f6af5-7d45-4b87-9445-d8feb67e3516": {
+      "id": "a25f6af5-7d45-4b87-9445-d8feb67e3516",
+      "projectId": "complete-project",
+      "kind": "brief",
+      "versions": [
+        {
+          "version": 1,
+          "title": "Migration fixture",
+          "content": "Original version.",
+          "createdAt": "2026-10-16T10:46:31.842092+00:00",
+          "contentCheck": {
+            "characters": 16,
+            "maxCharacters": null,
+            "method": "unicode_non_whitespace_v1"
+          }
+        },
+        {
+          "version": 2,
+          "title": "Migration fixture",
+          "content": "Revised version; the Job still cites version 1.",
+          "createdAt": "2026-10-16T10:46:31.858758+00:00",
+          "contentCheck": {
+            "characters": 40,
+            "maxCharacters": null,
+            "method": "unicode_non_whitespace_v1"
+          }
+        }
+      ]
+    }
+  },
+  "runs": {
+    "m2-waiting-mock": {
+      "id": "m2-waiting-mock",
+      "sessionId": "waiting-project",
+      "requestId": "m2-waiting-mock",
+      "prompt": "offline video fixture",
+      "model": "no-model",
+      "status": "waiting_external",
+      "messages": [],
+      "modelSteps": 2,
+      "toolCalls": 2,
+      "inputTokens": 0,
+      "outputTokens": 0,
+      "contextBytes": 0,
+      "droppedMessages": 0,
+      "answer": "",
+      "errorCode": null,
+      "createdAt": "2030-01-01T00:00:00+00:00",
+      "updatedAt": "2030-01-01T00:00:00+00:00",
+      "executionVersion": 2,
+      "contextSignature": "domain-fixture-signature-not-a-checkpoint",
+      "contextVersion": 2,
+      "policy": null,
+      "resumable": false,
+      "activeSeconds": 0,
+      "inFlightSeconds": 0,
+      "toolCallKeys": [
+        "m2-waiting-mock:1:generate",
+        "m2-waiting-mock:2:await-original"
+      ],
+      "usageStartStep": null,
+      "modelCalls": [],
+      "readOnly": false,
+      "answerCache": {},
+      "events": [],
+      "videoMode": "mock",
+      "toolFeatures": {
+        "video": {
+          "mode": "mock",
+          "toolsVersion": 2,
+          "rulesVersion": 2,
+          "capabilities": [
+            {
+              "provider": "mock",
+              "model": "mock-t2v",
+              "capabilitiesVersion": "v1",
+              "mode": "mock",
+              "inputTypes": [
+                "text"
+              ],
+              "specs": [
+                {
+                  "durationSeconds": 5.0,
+                  "resolution": "720p",
+                  "aspectRatio": "16:9"
+                },
+                {
+                  "durationSeconds": 10.0,
+                  "resolution": "1080p",
+                  "aspectRatio": "9:16"
+                }
+              ],
+              "supportsCancel": false,
+              "supportsIdempotentSubmit": false
+            }
+          ]
+        }
+      },
+      "activeWaitId": "fd77f5bc-d2dc-48c9-9966-ca214335b052",
+      "externalWaitSeconds": 7.5,
+      "externalWaitStartedAt": "2030-01-01T00:00:00+00:00"
+    },
+    "m2-completed-mock": {
+      "id": "m2-completed-mock",
+      "sessionId": "complete-project",
+      "requestId": "m2-completed-mock",
+      "prompt": "offline video fixture",
+      "model": "no-model",
+      "status": "completed",
+      "messages": [],
+      "modelSteps": 2,
+      "toolCalls": 2,
+      "inputTokens": 0,
+      "outputTokens": 0,
+      "contextBytes": 0,
+      "droppedMessages": 0,
+      "answer": "",
+      "errorCode": null,
+      "createdAt": "2030-01-01T00:00:00+00:00",
+      "updatedAt": "2030-01-01T00:00:00+00:00",
+      "executionVersion": 2,
+      "contextSignature": "domain-fixture-signature-not-a-checkpoint",
+      "contextVersion": 2,
+      "policy": null,
+      "resumable": false,
+      "activeSeconds": 0,
+      "inFlightSeconds": 0,
+      "toolCallKeys": [
+        "m2-completed-mock:1:generate",
+        "m2-completed-mock:2:await-original"
+      ],
+      "usageStartStep": null,
+      "modelCalls": [],
+      "readOnly": false,
+      "answerCache": {},
+      "events": [],
+      "videoMode": "mock",
+      "toolFeatures": {
+        "video": {
+          "mode": "mock",
+          "toolsVersion": 2,
+          "rulesVersion": 2,
+          "capabilities": [
+            {
+              "provider": "mock",
+              "model": "mock-t2v",
+              "capabilitiesVersion": "v1",
+              "mode": "mock",
+              "inputTypes": [
+                "text"
+              ],
+              "specs": [
+                {
+                  "durationSeconds": 5.0,
+                  "resolution": "720p",
+                  "aspectRatio": "16:9"
+                },
+                {
+                  "durationSeconds": 10.0,
+                  "resolution": "1080p",
+                  "aspectRatio": "9:16"
+                }
+              ],
+              "supportsCancel": false,
+              "supportsIdempotentSubmit": false
+            }
+          ]
+        }
+      },
+      "activeWaitId": null,
+      "externalWaitSeconds": 7.5,
+      "externalWaitStartedAt": null
+    }
+  },
+  "operations": {
+    "m2-waiting-mock:source": {
+      "fingerprint": "af61ed967c818bb26ce2e33115bed87a4345ce8d341131276e0c9709711f30d4",
+      "result": {
+        "ok": true,
+        "data": {
+          "artifactId": "6a3eee7f-91ae-4a85-9f61-8bb32b46dc5b",
+          "version": 1,
+          "title": "Migration fixture",
+          "persisted": true,
+          "contentCheck": {
+            "characters": 16,
+            "maxCharacters": null,
+            "method": "unicode_non_whitespace_v1"
+          }
+        }
+      }
+    },
+    "m2-waiting-mock:1:generate": {
+      "fingerprint": "5c2cfa7582b78df5b8d8c0f8c538fdd5932babeff7079f5c2d24bafa8b646d50",
+      "result": {
+        "ok": true,
+        "data": {
+          "jobId": "fdb86a5a-e4a3-45e0-a31a-e96119b8fb41",
+          "status": "pending_submit",
+          "mode": "mock",
+          "simulated": true,
+          "mediaAvailable": false
+        }
+      }
+    },
+    "m2-waiting-mock:revision": {
+      "fingerprint": "44cba73ad98c6871499a6c1932219a31658f944e4bf0c2c49a47b06220f217ec",
+      "result": {
+        "ok": true,
+        "data": {
+          "artifactId": "6a3eee7f-91ae-4a85-9f61-8bb32b46dc5b",
+          "version": 2,
+          "title": "Migration fixture",
+          "persisted": true,
+          "contentCheck": {
+            "characters": 40,
+            "maxCharacters": null,
+            "method": "unicode_non_whitespace_v1"
+          }
+        }
+      }
+    },
+    "m2-completed-mock:source": {
+      "fingerprint": "af61ed967c818bb26ce2e33115bed87a4345ce8d341131276e0c9709711f30d4",
+      "result": {
+        "ok": true,
+        "data": {
+          "artifactId": "a25f6af5-7d45-4b87-9445-d8feb67e3516",
+          "version": 1,
+          "title": "Migration fixture",
+          "persisted": true,
+          "contentCheck": {
+            "characters": 16,
+            "maxCharacters": null,
+            "method": "unicode_non_whitespace_v1"
+          }
+        }
+      }
+    },
+    "m2-completed-mock:1:generate": {
+      "fingerprint": "ac24d89ad13888c4e7eb6507c0f8029ebc41c2bf1e0d8737ebf233cb733aa6db",
+      "result": {
+        "ok": true,
+        "data": {
+          "jobId": "73803b81-d4ac-4726-a529-1ca0114d23d0",
+          "status": "pending_submit",
+          "mode": "mock",
+          "simulated": true,
+          "mediaAvailable": false
+        }
+      }
+    },
+    "m2-completed-mock:revision": {
+      "fingerprint": "5f632e53e085ab1b80bfbfb0c5cb9701f0d2e69b795d212befc2b9c956ca1dc9",
+      "result": {
+        "ok": true,
+        "data": {
+          "artifactId": "a25f6af5-7d45-4b87-9445-d8feb67e3516",
+          "version": 2,
+          "title": "Migration fixture",
+          "persisted": true,
+          "contentCheck": {
+            "characters": 40,
+            "maxCharacters": null,
+            "method": "unicode_non_whitespace_v1"
+          }
+        }
+      }
+    },
+    "m2-completed-mock:2:await-original": {
+      "fingerprint": "3b8be23a75bda87ae8eede1f0d6cc6bf9b915b50f88542431d5c89b3c3f627aa",
+      "result": {
+        "ok": true,
+        "data": {
+          "jobId": "73803b81-d4ac-4726-a529-1ca0114d23d0",
+          "revision": 2,
+          "mode": "mock",
+          "simulated": true,
+          "mediaAvailable": false,
+          "status": "succeeded",
+          "queryState": "idle",
+          "request": {
+            "provider": "mock",
+            "model": "mock-t2v",
+            "capabilitiesVersion": "v1",
+            "prompt": "A single shot of a cafe.",
+            "spec": {
+              "durationSeconds": 5.0,
+              "resolution": "720p",
+              "aspectRatio": "16:9"
+            },
+            "sourceRefs": [
+              {
+                "artifactId": "a25f6af5-7d45-4b87-9445-d8feb67e3516",
+                "version": 1
+              }
+            ]
+          },
+          "submitAttempts": 1,
+          "queryAttempts": 0,
+          "createdAt": "2030-01-01T00:00:00+00:00",
+          "updatedAt": "2030-01-01T00:00:00+00:00",
+          "nextPollAt": null,
+          "error": null,
+          "result": {
+            "simulated": true,
+            "mediaAvailable": false,
+            "requestFingerprint": "416b8a7bb5e912311724b3ae29698b168b75bb42206c4f8ca48a5e1cc2ee1771",
+            "spec": {
+              "durationSeconds": 5.0,
+              "resolution": "720p",
+              "aspectRatio": "16:9"
+            },
+            "sourceRefs": [
+              {
+                "artifactId": "a25f6af5-7d45-4b87-9445-d8feb67e3516",
+                "version": 1
+              }
+            ],
+            "artifactRefs": [],
+            "summary": "模拟视频任务完成，仅保存结果描述，没有生成可播放媒体。"
+          }
+        }
+      }
+    }
+  },
+  "jobs": {
+    "fdb86a5a-e4a3-45e0-a31a-e96119b8fb41": {
+      "contractVersion": 1,
+      "id": "fdb86a5a-e4a3-45e0-a31a-e96119b8fb41",
+      "context": {
+        "projectId": "waiting-project",
+        "sessionId": "waiting-project",
+        "runId": "m2-waiting-mock",
+        "modelStep": 1,
+        "toolCallId": "generate"
+      },
+      "operationKey": "m2-waiting-mock:1:generate",
+      "revision": 2,
+      "mode": "mock",
+      "request": {
+        "provider": "mock",
+        "model": "mock-t2v",
+        "capabilitiesVersion": "v1",
+        "prompt": "A single shot of a cafe.",
+        "spec": {
+          "durationSeconds": 5.0,
+          "resolution": "720p",
+          "aspectRatio": "16:9"
+        },
+        "sourceRefs": [
+          {
+            "artifactId": "6a3eee7f-91ae-4a85-9f61-8bb32b46dc5b",
+            "version": 1
+          }
+        ]
+      },
+      "requestFingerprint": "513b542472b40954bcf0ba2dd3d05a7ad2d072055be9d8b85abb8d206c612db0",
+      "capabilities": {
+        "provider": "mock",
+        "model": "mock-t2v",
+        "capabilitiesVersion": "v1",
+        "mode": "mock",
+        "inputTypes": [
+          "text"
+        ],
+        "specs": [
+          {
+            "durationSeconds": 5.0,
+            "resolution": "720p",
+            "aspectRatio": "16:9"
+          },
+          {
+            "durationSeconds": 10.0,
+            "resolution": "1080p",
+            "aspectRatio": "9:16"
+          }
+        ],
+        "supportsCancel": false,
+        "supportsIdempotentSubmit": false
+      },
+      "status": "running",
+      "providerTaskId": "mock-62d34610-b4a6-4298-8235-3ed58751b3ce",
+      "submitAttempts": 1,
+      "queryAttempts": 0,
+      "consecutiveQueryErrors": 0,
+      "queryState": "polling",
+      "queryStartedAt": null,
+      "policy": {
+        "intervalSeconds": 2.0,
+        "submitTimeoutSeconds": 15.0,
+        "queryTimeoutSeconds": 15.0,
+        "retryDelaysSeconds": [
+          1.0,
+          2.0,
+          4.0
+        ]
+      },
+      "nextPollAt": "2030-01-01T00:00:02+00:00",
+      "createdAt": "2030-01-01T00:00:00+00:00",
+      "updatedAt": "2030-01-01T00:00:00+00:00",
+      "error": null,
+      "result": null
+    },
+    "73803b81-d4ac-4726-a529-1ca0114d23d0": {
+      "contractVersion": 1,
+      "id": "73803b81-d4ac-4726-a529-1ca0114d23d0",
+      "context": {
+        "projectId": "complete-project",
+        "sessionId": "complete-project",
+        "runId": "m2-completed-mock",
+        "modelStep": 1,
+        "toolCallId": "generate"
+      },
+      "operationKey": "m2-completed-mock:1:generate",
+      "revision": 2,
+      "mode": "mock",
+      "request": {
+        "provider": "mock",
+        "model": "mock-t2v",
+        "capabilitiesVersion": "v1",
+        "prompt": "A single shot of a cafe.",
+        "spec": {
+          "durationSeconds": 5.0,
+          "resolution": "720p",
+          "aspectRatio": "16:9"
+        },
+        "sourceRefs": [
+          {
+            "artifactId": "a25f6af5-7d45-4b87-9445-d8feb67e3516",
+            "version": 1
+          }
+        ]
+      },
+      "requestFingerprint": "416b8a7bb5e912311724b3ae29698b168b75bb42206c4f8ca48a5e1cc2ee1771",
+      "capabilities": {
+        "provider": "mock",
+        "model": "mock-t2v",
+        "capabilitiesVersion": "v1",
+        "mode": "mock",
+        "inputTypes": [
+          "text"
+        ],
+        "specs": [
+          {
+            "durationSeconds": 5.0,
+            "resolution": "720p",
+            "aspectRatio": "16:9"
+          },
+          {
+            "durationSeconds": 10.0,
+            "resolution": "1080p",
+            "aspectRatio": "9:16"
+          }
+        ],
+        "supportsCancel": false,
+        "supportsIdempotentSubmit": false
+      },
+      "status": "succeeded",
+      "providerTaskId": "mock-3197c9a4-d98b-4fe5-9c34-7e9f364f1350",
+      "submitAttempts": 1,
+      "queryAttempts": 0,
+      "consecutiveQueryErrors": 0,
+      "queryState": "idle",
+      "queryStartedAt": null,
+      "policy": {
+        "intervalSeconds": 2.0,
+        "submitTimeoutSeconds": 15.0,
+        "queryTimeoutSeconds": 15.0,
+        "retryDelaysSeconds": [
+          1.0,
+          2.0,
+          4.0
+        ]
+      },
+      "nextPollAt": null,
+      "createdAt": "2030-01-01T00:00:00+00:00",
+      "updatedAt": "2030-01-01T00:00:00+00:00",
+      "error": null,
+      "result": {
+        "simulated": true,
+        "mediaAvailable": false,
+        "requestFingerprint": "416b8a7bb5e912311724b3ae29698b168b75bb42206c4f8ca48a5e1cc2ee1771",
+        "spec": {
+          "durationSeconds": 5.0,
+          "resolution": "720p",
+          "aspectRatio": "16:9"
+        },
+        "sourceRefs": [
+          {
+            "artifactId": "a25f6af5-7d45-4b87-9445-d8feb67e3516",
+            "version": 1
+          }
+        ],
+        "artifactRefs": [],
+        "summary": "模拟视频任务完成，仅保存结果描述，没有生成可播放媒体。"
+      }
+    }
+  },
+  "waits": {
+    "fd77f5bc-d2dc-48c9-9966-ca214335b052": {
+      "id": "fd77f5bc-d2dc-48c9-9966-ca214335b052",
+      "context": {
+        "projectId": "waiting-project",
+        "sessionId": "waiting-project",
+        "runId": "m2-waiting-mock",
+        "modelStep": 2,
+        "toolCallId": "await-original"
+      },
+      "resource": {
+        "kind": "job",
+        "id": "fdb86a5a-e4a3-45e0-a31a-e96119b8fb41"
+      },
+      "operationFingerprint": "05279d92e29c165732ddc37974397cf951a2e95e0a73536a31266b88b09149ce",
+      "batchIndex": 0,
+      "revision": 1,
+      "generation": 1,
+      "status": "armed",
+      "startedAt": "2030-01-01T00:00:00+00:00",
+      "deadlineAt": "2030-01-01T00:10:00+00:00",
+      "timeoutError": {
+        "code": "JOB_WAIT_TIMEOUT",
+        "message": "任务 fdb86a5a-e4a3-45e0-a31a-e96119b8fb41 的本次等待已到期；Job 将继续独立跟踪。"
+      },
+      "autoResume": true,
+      "checkpointId": "domain-fixture-checkpoint",
+      "interruptId": "domain-fixture-interrupt",
+      "result": null,
+      "claimedModelSteps": null,
+      "deliveredCheckpointId": null
+    },
+    "m2-delivered-wait": {
+      "id": "m2-delivered-wait",
+      "context": {
+        "projectId": "complete-project",
+        "sessionId": "complete-project",
+        "runId": "m2-completed-mock",
+        "modelStep": 2,
+        "toolCallId": "await-original"
+      },
+      "resource": {
+        "kind": "job",
+        "id": "73803b81-d4ac-4726-a529-1ca0114d23d0"
+      },
+      "operationFingerprint": "3b8be23a75bda87ae8eede1f0d6cc6bf9b915b50f88542431d5c89b3c3f627aa",
+      "batchIndex": 0,
+      "revision": 0,
+      "generation": 1,
+      "status": "delivered",
+      "startedAt": "2030-01-01T00:00:00+00:00",
+      "deadlineAt": "2030-01-01T00:10:00+00:00",
+      "timeoutError": {
+        "code": "WAIT_TIMEOUT",
+        "message": "外部任务等待已到期。"
+      },
+      "autoResume": true,
+      "checkpointId": "domain-fixture-checkpoint",
+      "interruptId": "domain-fixture-interrupt",
+      "result": {
+        "ok": true,
+        "data": {
+          "jobId": "73803b81-d4ac-4726-a529-1ca0114d23d0",
+          "revision": 2,
+          "mode": "mock",
+          "simulated": true,
+          "mediaAvailable": false,
+          "status": "succeeded",
+          "queryState": "idle",
+          "request": {
+            "provider": "mock",
+            "model": "mock-t2v",
+            "capabilitiesVersion": "v1",
+            "prompt": "A single shot of a cafe.",
+            "spec": {
+              "durationSeconds": 5.0,
+              "resolution": "720p",
+              "aspectRatio": "16:9"
+            },
+            "sourceRefs": [
+              {
+                "artifactId": "a25f6af5-7d45-4b87-9445-d8feb67e3516",
+                "version": 1
+              }
+            ]
+          },
+          "submitAttempts": 1,
+          "queryAttempts": 0,
+          "createdAt": "2030-01-01T00:00:00+00:00",
+          "updatedAt": "2030-01-01T00:00:00+00:00",
+          "nextPollAt": null,
+          "error": null,
+          "result": {
+            "simulated": true,
+            "mediaAvailable": false,
+            "requestFingerprint": "416b8a7bb5e912311724b3ae29698b168b75bb42206c4f8ca48a5e1cc2ee1771",
+            "spec": {
+              "durationSeconds": 5.0,
+              "resolution": "720p",
+              "aspectRatio": "16:9"
+            },
+            "sourceRefs": [
+              {
+                "artifactId": "a25f6af5-7d45-4b87-9445-d8feb67e3516",
+                "version": 1
+              }
+            ],
+            "artifactRefs": [],
+            "summary": "模拟视频任务完成，仅保存结果描述，没有生成可播放媒体。"
+          }
+        }
+      },
+      "claimedModelSteps": 2,
+      "deliveredCheckpointId": "domain-fixture-delivered"
+    }
+  },
+  "media": {},
+  "storyboards": {},
+  "assets": {},
+  "films": {}
+}
