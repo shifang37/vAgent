@@ -51,7 +51,7 @@ $env:VAGENT_HOME = Join-Path $PWD '.vagent'
 
 - Kling `kling-3.0-turbo` 与 fal `kling-video/v3/standard/text-to-video` 未做真实账号样本，真实结果主机、编码与账单未验证。
 - headless 的真实 DeepSeek 计划与真实付费授权未执行；离线与受控供应商证据继续有效。
-- Wan 图生视频/首尾帧已实现并有离线和受控 HTTP 验证，但未执行真实付费样本。
+- Wan 图生视频/首尾帧已实现并有离线和受控 HTTP 验证；**2026-10-22 后续补做 i2v/flf2v 各一条北京 5 秒 720P 真实样本并成功（见 [i2v/flf2v 验收](./M2_I2V_ACCEPTANCE.md)），两条输出不能直接流复制拼接**。
 - 成片只做同参数镜头间的流复制拼接，不做转场、字幕、配乐、转码或导出参数定制；镜头延长因上游通道限制未实现。
 - 未接入 Sora、Veo、Seedance、Replicate；可执行插件/插件市场、Studio 时间线编辑、素材删除/检索、按能力表自动选模型、跨项目记忆与自动摘要仍未实现。
 - 公共 PyPI 发布未做；本版只提供仓库内构建的 wheel/sdist。

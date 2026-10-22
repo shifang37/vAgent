@@ -122,6 +122,7 @@ PASS: installed wheel, Web assets, config, streaming, text/quality, MCP, mock vi
 ## 9. 未做真实样本与后续限制
 
 - Kling `kling-3.0-turbo` 与 fal `kling-video/v3/standard/text-to-video` 未做真实账号样本，能力表只能称「文档支持，未做真实样本」；其真实结果主机、编码与账单未验证。
+- **2026-10-22 后续补记**：万相 `i2v`/`flf2v` 已各补做一条北京 5 秒 720P 真实样本并成功（见 [i2v/flf2v 验收](./M2_I2V_ACCEPTANCE.md)）；两条输出不能直接流复制拼接。
 - headless 的真实 DeepSeek 计划、真实付费授权路径未执行；M3 E3 的受控供应商与脚本编排证据继续有效，但不等于账号已验证。
 - 真实成片只覆盖万相真实输出、本地流复制与浏览器解码；Kling/fal 输出之间的兼容性未验证，继续由 `mp4-copy-signature-v1` 逐字段拒绝不同配置。
 - 公共 PyPI 发布仍独立于本地 wheel 验收；可执行插件与插件市场继续顺延。

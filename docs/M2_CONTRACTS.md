@@ -153,6 +153,8 @@ mock/legacy 变体保留原工具名与描述；M2 live 变体的 `toolsVersion/
 
 未确认（保留为 D4 验证项，不作肯定承诺）：当前账号对 i2v 的模型授权与 IP 权限；i2v 真实结果主机与重定向（沿用 `wan-result-hosts-v2` 允许集，若不符则在 D4 追加策略版本）；`first_frame` 真实输出画幅与 audio 表现；实际账单（保持 `unknown`）；免费额度是否抵扣。
 
+**2026-10-22 后续补记**：按另行批准的小额度补做 `i2v` 与 `flf2v` 各一条北京 5 秒 720P 真实样本；模型授权、结果主机（`dashscope-a717.oss-accelerate.aliyuncs.com`）、画幅（1280×720）与音频（AAC）已验证，实际账单仍为 `unknown`。两条输出编码/分辨率相同但时间线相差超过一帧，暂不能直接流复制拼接。证据见 [i2v/flf2v 验收](./M2_I2V_ACCEPTANCE.md)。
+
 [D4]: https://help.aliyun.com/zh/model-studio/get-temporary-file-url
 
 ## 12. D3 实现补记（2026-10-17）
