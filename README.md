@@ -41,7 +41,7 @@ M3 E0 已完成 Kling 3.0 Turbo 直连与 fal standard 静音中转的官方核�
 
 **2026-10-22 补做万相 i2v/flf2v 真实样本**：`wan2.7-i2v-2026-04-25` 在北京 5 秒 720P 下，首帧图生视频（task `0520a9b5…`）与首尾帧生视频（task `6add91d2…`）各一条真实任务成功并交付本地 MP4（6,109,743 B / 5,991,195 B，均 1280×720 H.264+AAC 5.033 秒）；结果主机在允许集内，估算各 3.00 CNY、实际账单 unknown。两条输出编码与分辨率相同，但时间线相差超过一帧，**copy-only** 的 `film assemble` 当时返回 `FILM_INPUT_INCOMPATIBLE`；随后 M4 加入自动转码回退，当前 `film assemble` 已能把两条合成 **5,968,116 字节 / 10.000 秒 / 30fps** 的成片，并记录 `ffmpeg-concat-normalize-v4` 与 profile。详见 [i2v/flf2v 验收](./docs/M2_I2V_ACCEPTANCE.md) 与 [M4 归一化](./docs/M4_NORMALIZATION.md)。
 
-每个独立完成的代码部分都同步更新本 README、提交并推送 GitHub。阶段目标见 [M1 计划](./M1_PLAN.md)、[M2 任务规划](./docs/M2_PLAN.md)、[M3 任务规划](./docs/M3_PLAN.md)、[M4 归一化](./docs/M4_NORMALIZATION.md)、[两 Key 直用方案](./docs/KEYS_ONLY_PLAN.md) 和 [Harness 设计](./AGENT_HARNESS_DESIGN.md)。
+每个独立完成的代码部分都同步更新本 README、提交并推送 GitHub。阶段目标见 [M1 计划](./M1_PLAN.md)、[M2 任务规划](./docs/M2_PLAN.md)、[M3 任务规划](./docs/M3_PLAN.md)、[M4 归一化](./docs/M4_NORMALIZATION.md)、[M5 短剧流水线规划](./docs/M5_PLAN.md)、[两 Key 直用方案](./docs/KEYS_ONLY_PLAN.md) 和 [Harness 设计](./AGENT_HARNESS_DESIGN.md)。
 
 ## 本地 Web 与真实编排
 
