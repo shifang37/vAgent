@@ -2,7 +2,7 @@
 
 面向视频创作的 Agent 实习项目，使用 **Python + DeepSeek + LangGraph**，自主设计上下文、项目记忆、Skills、工具执行与护栏，再接入视频生成模型。
 
-当前已实现 **Python CLI + 本地 Web Agent**，前端通过同源 API/SSE 调用共享 LangGraph Runner。M1–M3 已发布并合入 master（M3 合并提交 `ef8bdda`，2026-10-21，发布版本 **v0.3.0**，[发布说明](./docs/RELEASE_0.3.0.md)），支持真实万相多镜头本地 MP4 交付、逐镜头重做、素材库、用量统计和客户端序列连播，以及本地拼接成片、Kling/fal 多供应商、headless 与用户 skills；两 Key 直用 K0–K3 已完成。**M4 时间线归一化与 M5 剧本→分集分场分镜已在 `master` 开发版交付；M5 E4 于 2026-10-22 完成离线套件、CLI/Web 分集流程、安装态、受控浏览器与获批真实样本，尚未打新 tag。****2026-10-21 完成 M3 E0 契约冻结与 E1 本地拼接成片**：schema v5 的 `films`、`mp4-copy-signature-v1` 流复制签名、包内 FFmpeg 拼接、`film_assemble`/`film_read`（tools/rules 5/5）、`vagent film`、成片媒体分支与 Web 成片面板均已交付，**E1 全程视频 submit=0**。**2026-10-21 完成 M3 E2 多供应商与中转**：Job/Request v6、`multi-provider-v3`（Kling Singapore 直连与 fal standard 静音中转）、逐 provider/currency 与 Kling VIDEO_UNIT 预算桶、认证任务结果来源绑定与公网连接固定、tools/rules 6/6（冻结 5/5 与 4/4 仍可恢复）以及设置页多供应商 Key 均已交付，**E2 全程视频 submit=0**。**2026-10-21 完成 M3 E3 headless 与用户 skills**：`vagent headless` 两阶段计划/授权/集合等待/本地拼接交付、结构化 `--json` 与冻结退出码、`VAGENT_HOME/skills` 合并发现与坏文件隔离均已交付，**E3 离线证据、视频 submit=0**。**2026-10-21 完成 M3 E4 端到端验收与打包**：离线「一句话→多镜头→本地拼接成片」套件 6/6、安装态 wheel 成片工作台与 6 用例 PASS、受控浏览器 7/7、四组 CI 通过，并用 M2 真实分镜与三个真实万相 MP4 以零新增费用完成成片（42 项检查）；新增付费样本未执行。首轮发现见 [编排测试报告](./docs/AGENT_ORCHESTRATION_ACCEPTANCE.md)，当前边界见 [M3 契约](./docs/M3_CONTRACTS.md)、[E0 验收](./docs/M3_E0_ACCEPTANCE.md)、[E1 验收](./docs/M3_E1_ACCEPTANCE.md)、[E2 验收](./docs/M3_E2_ACCEPTANCE.md)、[E3 验收](./docs/M3_E3_ACCEPTANCE.md) 与 [M3 验收](./docs/M3_ACCEPTANCE.md)。
+当前已实现 **Python CLI + 本地 Web Agent**，前端通过同源 API/SSE 调用共享 LangGraph Runner。M1–M5 已发布并合入 master（M3 合并提交 `ef8bdda` 于 2026-10-21；M4 时间线归一化与 M5 分集分场分镜于 2026-10-22，发布版本 **v0.4.0**，[发布说明](./docs/RELEASE_0.4.0.md)），支持真实万相多镜头本地 MP4 交付、逐镜头重做、素材库、用量统计和客户端序列连播，以及本地拼接成片与自动归一化、Kling/fal 多供应商、headless 与用户 skills；两 Key 直用 K0–K3 已完成。**M4 自动时间线归一化与 M5 剧本→分集分场分镜已随 v0.4.0 发布**：M5 E4 于 2026-10-22 完成离线套件、CLI/Web 分集流程、安装态、受控浏览器与获批真实样本（`fridge-notes` 18 镜头 / 7 场，18 次 Wan 提交、估算 54.00 CNY、7 条逐场成片）。**2026-10-21 完成 M3 E0 契约冻结与 E1 本地拼接成片**：schema v5 的 `films`、`mp4-copy-signature-v1` 流复制签名、包内 FFmpeg 拼接、`film_assemble`/`film_read`（tools/rules 5/5）、`vagent film`、成片媒体分支与 Web 成片面板均已交付，**E1 全程视频 submit=0**。**2026-10-21 完成 M3 E2 多供应商与中转**：Job/Request v6、`multi-provider-v3`（Kling Singapore 直连与 fal standard 静音中转）、逐 provider/currency 与 Kling VIDEO_UNIT 预算桶、认证任务结果来源绑定与公网连接固定、tools/rules 6/6（冻结 5/5 与 4/4 仍可恢复）以及设置页多供应商 Key 均已交付，**E2 全程视频 submit=0**。**2026-10-21 完成 M3 E3 headless 与用户 skills**：`vagent headless` 两阶段计划/授权/集合等待/本地拼接交付、结构化 `--json` 与冻结退出码、`VAGENT_HOME/skills` 合并发现与坏文件隔离均已交付，**E3 离线证据、视频 submit=0**。**2026-10-21 完成 M3 E4 端到端验收与打包**：离线「一句话→多镜头→本地拼接成片」套件 6/6、安装态 wheel 成片工作台与 6 用例 PASS、受控浏览器 7/7、四组 CI 通过，并用 M2 真实分镜与三个真实万相 MP4 以零新增费用完成成片（42 项检查）；新增付费样本未执行。首轮发现见 [编排测试报告](./docs/AGENT_ORCHESTRATION_ACCEPTANCE.md)，当前边界见 [M3 契约](./docs/M3_CONTRACTS.md)、[E0 验收](./docs/M3_E0_ACCEPTANCE.md)、[E1 验收](./docs/M3_E1_ACCEPTANCE.md)、[E2 验收](./docs/M3_E2_ACCEPTANCE.md)、[E3 验收](./docs/M3_E3_ACCEPTANCE.md) 与 [M3 验收](./docs/M3_ACCEPTANCE.md)。
 
 任务 2 已补齐本地配置向导、CLI/Web 流式回复和 9 类固定评测。**2026-10-09 完成 A5：完整真实套件 9/9 通过，M1-A 已验收。** 最终套件包含 3 次显式恢复，累计 27 次模型调用、25 次工具调用；此前失败记录完整保留，详见 [M1-A 验收记录](./docs/M1A_ACCEPTANCE.md)。**2026-10-10 完成 B5，M1-B 的 B0–B5 已验收**：真实 DeepSeek + Mock 套件 5/5 通过，累计 15 次模型调用、14 次工具调用，3 个 Job 各提交一次。应用自动推进模拟任务，持久等待、停止、重启恢复及 CLI/Web 已通过回归和仓库外 wheel 验证。详见 [M1-B 验收](./docs/M1B_ACCEPTANCE.md)；真实视频接入属于后续 M1-C。
 
@@ -363,6 +363,7 @@ src/vagent/
   cli.py       argparse 命令行与配置展示
   application.py CLI/Web 共用的生命周期与执行服务
   web.py       回环 HTTP API、CSRF、SSE 与打包页面
+  headless.py  E3：headless 两阶段计划/授权/集合等待与本地拼接交付
   mcp_bridge.py MCP stdio 发现、显式只读白名单与异步工具桥
   mcp_server.py 内置镜头时长与帧数计算服务
   config.py    配置来源、原子保存与 Key 校验
@@ -376,14 +377,14 @@ src/vagent/
   context.py   上下文组装与完整轮次裁剪
   quality.py   记忆冲突、用户字数要求与正文计数校验
   tools.py     工具注册、Pydantic 校验、项目与产物操作
-  storage.py   单写锁、事务、原子替换、操作日志、schema v1/v2→v3 迁移
+  storage.py   单写锁、事务、原子替换、操作日志、schema 迁移与逐字节备份
   skills.py    技能发现、元信息与按需正文读取
   contracts.py B0：不依赖 Store/SDK 的严格 JSON 类型
   waiting.py   通用执行上下文、延迟结果和版本化等待指针
   wait_runtime.py B3：持久等待、结果领取/交付、停止、计时与恢复协调
   video/contracts.py v1 Mock / v2 live 请求、Job、费用、媒体与供应商契约
   video/jobs.py B1：原子登记、请求冻结、去重、版本检查和启动恢复
-  video/tools.py off/mock/live 独立视图、四工具、等待解析与历史兼容
+  video/tools.py off/mock/live 独立视图、分镜/成片/分集工具、等待解析与历史兼容
   video/worker.py 串行提交/查询、超时、持久重试、配置阻塞与停止
   video/media.py C2：安全文件访问、完整性、原子提交、可用性与幂等修复
   video/media_worker.py C2：独立串行下载、持久额度/期限与强退恢复
@@ -391,10 +392,14 @@ src/vagent/
   video/media_response.py C2：已核验文件的 GET/HEAD、Range 与下载响应
   video/mp4.py C2：有界 MP4 结构/样本校验与实测元数据
   video/copy_signature.py E1：mp4-copy-signature-v1 流复制签名（codec 配置、时间线、edit list 与 priming）
-  video/assembler.py E1：包内 FFmpeg 定位/指纹、按样本推导的接缝时间线、concat 流复制与输出校验
+  video/assembler.py E1：包内 FFmpeg 定位/指纹、按样本推导的接缝时间线、concat 流复制与输出校验；M4 在签名不兼容时回退 ffmpeg-concat-normalize-v4（1280×720/30fps + AAC 48k）
   video/films.py E1：Film/FilmVersion/FilmMedia 契约、只增不改校验、输入选择与启动清理
   video/film_service.py E1：锁内冻结、锁外拼接、重获锁复核后一次提交与指纹幂等
   web/film-state.js E1：成片面板的纯状态逻辑（版本列表、播放/下载、显式拼接请求）
+  video/episodes.py M5 E0：Episode/Scene/Character/Style 契约、只增不改版本与集级预算不变量
+  video/adaptation.py M5 E1：text-split-zh-v1 确定性章节/场景/对白切分与镜头草案
+  video/consistency.py M5 E2：角色/风格提示模板与跨镜头一致性证据
+  web/episode-state.js M5 E4：分集面板的纯状态逻辑（逐场汇总、集级预算、成片标签）
   video/storyboards.py D1：分镜/镜头/素材域契约、只增不改版本与提交级不变量
   video/views.py D1/D3：工具与本地客户端共用的 Job/分镜有界投影（含镜头媒体派生）
   video/assets.py D3：素材库导入（魔数/尺寸/哈希校验、按项目去重、文件恢复）与只读读取
@@ -457,9 +462,9 @@ description: 说明哪些任务需要这个技能。
 
 ## 数据兼容与限制
 
-默认数据目录为 `~/.vagent/`，可用 `VAGENT_HOME` 覆盖。`state.json` 保存会话、项目、产物、Run、操作结果、jobs/waits、media 索引与 M2 的 `storyboards`/`assets` 集合；E3 的 headless 计划、授权指纹、登记结果与交付摘要保存在 Run 记录的可选 `headless` 字段（未使用时不写该字段，不改变 schema v5，也不迁移旧记录）；`checkpoints.sqlite` 保存图执行位置和消息。B1 的 `mock-video.json` 独立保存模拟上游受理记录、请求、轨迹和调用计数。应在程序退出后备份完整数据目录。配置 Key 不写入状态；真实 Job 的私有上游 URL 仅保存在本地状态中，不经公开接口返回。`inspect` 会显示创作正文。
+默认数据目录为 `~/.vagent/`，可用 `VAGENT_HOME` 覆盖。`state.json` 保存会话、项目、产物、Run、操作结果、jobs/waits、media 索引与 M2 的 `storyboards`/`assets` 集合、M5 的 `episodes`/`scenes`/`characters`/`styles` 集合；E3 的 headless 计划、授权指纹、登记结果与交付摘要保存在 Run 记录的可选 `headless` 字段（未使用时不写该字段，不改变存储 schema，也不迁移旧记录）；`checkpoints.sqlite` 保存图执行位置和消息。B1 的 `mock-video.json` 独立保存模拟上游受理记录、请求、轨迹和调用计数。应在程序退出后备份完整数据目录。配置 Key 不写入状态；真实 Job 的私有上游 URL 仅保存在本地状态中，不经公开接口返回。`inspect` 会显示创作正文。
 
-当前存储为 schema v5。打开 v1–v4 数据时，在实例锁下使用原版本校验器验证状态与消息，先将原始字节保存为同目录的 `state-v1-<UUID>.json` 等备份，再原子迁移。迁移只增加缺少的顶层集合（v4 新增 `storyboards`/`assets`，v5 新增 `films`）并升级版本，历史 Job、Run、Operation、来源版本和指纹不重编码、不补写默认字段，也不修改 SQLite；运行恢复单独提交。`media` 索引在 v5 成为联合类型：旧的生成媒体记录保持原字段按原校验器解析，`contractVersion=2/kind=film` 才走成片校验器，旧媒体不补 `kind`、不改写。旧 Mock Job 保持 contract v1，新 live Job 使用 v2。缺少视频字段的旧 Run 按 off 解释，execution v1/v2 与上下文 v1/v2 按原签名恢复；M3 E1 新 Run 仍为 execution v3，但 tools/rules 为 5/5，恢复 4/4 Run 时按 `toolFeatures` 身份重建冻结注册表并核对签名，签名逐字节不变。迁移写入失败、损坏数据和未知版本保留原状态文件。v5/v4/v3 不能交给更旧的应用直接读取；回退需在服务退出后恢复完整数据目录，单份状态备份不能替代它。
+当前存储为 schema v6。打开 v1–v5 数据时，在实例锁下使用原版本校验器验证状态与消息，先将原始字节保存为同目录的 `state-v1-<UUID>.json` 等备份，再原子迁移。迁移只增加缺少的顶层集合（v4 新增 `storyboards`/`assets`，v5 新增 `films`，v6 新增 `episodes`/`scenes`/`characters`/`styles`）并升级版本，历史 Job、Run、Operation、来源版本和指纹不重编码、不补写默认字段，也不修改 SQLite；运行恢复单独提交。`media` 索引在 v5 成为联合类型：旧的生成媒体记录保持原字段按原校验器解析，`contractVersion=2/kind=film` 才走成片校验器，旧媒体不补 `kind`、不改写。旧 Mock Job 保持 contract v1，新 live Job 使用 v2。缺少视频字段的旧 Run 按 off 解释，execution v1/v2 与上下文 v1/v2 按原签名恢复；execution/context/checkpoint 仍为 3/2/1，工具面自 1/1 起逐代追加（M5 为 9/9），恢复旧 Run 时按 `toolFeatures` 身份重建冻结注册表并核对签名，签名逐字节不变。迁移写入失败、损坏数据和未知版本保留原状态文件。v6/v5/v4/v3 不能交给更旧的应用直接读取；回退需在服务退出后恢复完整数据目录，单份状态备份不能替代它。
 
 - 成功会话可跨重启继续；执行中的普通 Run 重启后标记为 `interrupted`，已提交产物保留，不自动重放。B3 保留有效的 `waiting_external` 和原 Run 名额，启动时核对等待、检查点、配置与原预算后继续；后续模型尝试已经开始但未完成时要求显式恢复。
 - B1 已登记但尚未提交的 Job 可由 Worker 继续推进；丢失提交结果的任务进入 `unknown`，不自动重提。已确认上游 ID 只用于继续查询，失败窗口和累计次数跨重启保留。
