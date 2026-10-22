@@ -612,7 +612,8 @@ def save_episode(args: dict, state: dict, project_id: str) -> dict:
     shots = sum(scene.latest.shot_count for scene in scenes)
     if not EPISODE_MIN_SHOTS <= shots <= EPISODE_MAX_SHOTS:
         raise AppError(
-            "EPISODE_SHOT_BUDGET", f"分集共 {shots} 个镜头，必须在 {EPISODE_MIN_SHOTS}–{EPISODE_MAX_SHOTS} 之间。"
+            "EPISODE_SHOT_BUDGET",
+            f"分集共 {shots} 个镜头，必须在 {EPISODE_MIN_SHOTS}–{EPISODE_MAX_SHOTS} 之间。",
         )
     target = _episode_target(args, shots)
     budget = ShotBudget(shot_count=shots, target_duration_seconds=target)
@@ -677,9 +678,7 @@ def _character_summary(record: Character) -> dict:
         "appearance": latest.appearance,
         "wardrobe": latest.wardrobe,
         "voice": latest.voice.model_dump(mode="json", by_alias=True) if latest.voice else None,
-        "relationships": [
-            link.model_dump(mode="json", by_alias=True) for link in latest.relationships
-        ],
+        "relationships": [link.model_dump(mode="json", by_alias=True) for link in latest.relationships],
         "referenceAssetIds": list(latest.reference_asset_ids),
         "currentVersion": record.current_version,
         "revision": record.revision,

@@ -26,7 +26,14 @@ TS = "2030-01-01T00:00:00+00:00"
 
 
 def style_record(style_id="style-1", *, project_id="coffee", version=1, name="冷色调"):
-    entry = StyleVersion(version=version, name=name, genre=("悬疑",), palette="冷蓝灰", camera_language="手持跟拍", created_at=TS)
+    entry = StyleVersion(
+        version=version,
+        name=name,
+        genre=("悬疑",),
+        palette="冷蓝灰",
+        camera_language="手持跟拍",
+        created_at=TS,
+    )
     record = Style(
         id=style_id,
         project_id=project_id,
@@ -109,7 +116,9 @@ def episode_record(episode_id, refs, *, project_id="coffee", style_id=None, targ
         version=version,
         target_duration_seconds=target,
         shot_budget=budget,
-        scenes=tuple(SceneRef(scene_id=scene_id, scene_version=scene_version) for scene_id, scene_version in refs),
+        scenes=tuple(
+            SceneRef(scene_id=scene_id, scene_version=scene_version) for scene_id, scene_version in refs
+        ),
         created_at=TS,
     )
     record = Episode(
@@ -132,11 +141,11 @@ def insert(store, **collections):
 def seed_episode(store, *, asset_id=None, **overrides):
     """One atomic commit: bibles, scenes and the episode that freezes them."""
     characters = {"character-a": character_record(assets=tuple([asset_id] if asset_id else []))}
-    characters["character-b"] = character_record(
-        "character-b", name="陈默", relationships=("character-a",)
-    )
+    characters["character-b"] = character_record("character-b", name="陈默", relationships=("character-a",))
     scenes = {
-        "scene-1": scene_record("scene-1", "episode-1", shot_count=6, duration=45, character_ids=("character-a",)),
+        "scene-1": scene_record(
+            "scene-1", "episode-1", shot_count=6, duration=45, character_ids=("character-a",)
+        ),
         "scene-2": scene_record(
             "scene-2", "episode-1", shot_count=6, duration=45, character_ids=("character-a", "character-b")
         ),
@@ -212,7 +221,9 @@ def test_episode_budget_must_match_its_frozen_scenes(store, change, code):
     seed_episode(store)
     with pytest.raises(AppError) as error:
         store.transaction(
-            lambda draft: draft["episodes"].__setitem__("episode-1", episode_record("episode-1", [("scene-1", 1), ("scene-2", 1)], **change))
+            lambda draft: draft["episodes"].__setitem__(
+                "episode-1", episode_record("episode-1", [("scene-1", 1), ("scene-2", 1)], **change)
+            )
         )
     assert error.value.code == code
 

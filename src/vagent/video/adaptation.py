@@ -54,9 +54,7 @@ DIVIDER = re.compile(r"^(?:-{3,}|\*{3,}|_{3,})$")
 
 QUOTE_PATTERNS = (re.compile(r"「([^」]{1,300})」"), re.compile(r"“([^”]{1,300})”"))
 SPEAKER_PREFIX = re.compile(r"^\s*([\u4e00-\u9fa5A-Za-z0-9]{1,8})\s*[：:]")
-SPEAKER_VERB = re.compile(
-    r"([\u4e00-\u9fa5]{2,4})(?:低声说|轻声说|说道|问道|答道|喊道|说|问|道|答)"
-)
+SPEAKER_VERB = re.compile(r"([\u4e00-\u9fa5]{2,4})(?:低声说|轻声说|说道|问道|答道|喊道|说|问|道|答)")
 SENTENCE_END = re.compile(r"[。！？；\n]")
 
 NOT_A_NAME = frozenset(
@@ -87,7 +85,21 @@ NOT_A_NAME = frozenset(
 )
 
 # Trailing function words that a verb-attribution regex can swallow ("陈默没有问").
-NAME_TAIL_STOPWORDS = ("没有", "已经", "正在", "一直", "忽然", "突然", "也", "又", "还", "就", "却", "不", "在")
+NAME_TAIL_STOPWORDS = (
+    "没有",
+    "已经",
+    "正在",
+    "一直",
+    "忽然",
+    "突然",
+    "也",
+    "又",
+    "还",
+    "就",
+    "却",
+    "不",
+    "在",
+)
 
 # Frozen lexicon: only these words decide a scene's time of day and location.
 TIME_OF_DAY_WORDS = (
@@ -266,12 +278,14 @@ def split_scenes(chapter_title: str, body: str) -> list[_Scene]:
     current: list[str] = []
     for paragraph in paragraphs:
         if current:
-            oversized = len(current) >= SCENE_PARAGRAPH_LIMIT or sum(
-                len(item) for item in current
-            ) >= SCENE_CHARACTER_LIMIT
-            shifted = len(current) >= 2 and _detect_time_of_day(
-                [paragraph]
-            ) != _detect_time_of_day(current) != "unknown"
+            oversized = (
+                len(current) >= SCENE_PARAGRAPH_LIMIT
+                or sum(len(item) for item in current) >= SCENE_CHARACTER_LIMIT
+            )
+            shifted = (
+                len(current) >= 2
+                and _detect_time_of_day([paragraph]) != _detect_time_of_day(current) != "unknown"
+            )
             if _scene_marker(paragraph) or oversized or shifted:
                 groups.append(current)
                 current = []
@@ -347,10 +361,7 @@ def recognize_characters(scenes: list[_Scene]) -> list[dict]:
                 continue
             seen[item.speaker] = seen.get(item.speaker, 0) + 1
             first.setdefault(item.speaker, scene.index)
-    return [
-        {"name": name, "dialogueCount": count, "firstScene": first[name]}
-        for name, count in seen.items()
-    ]
+    return [{"name": name, "dialogueCount": count, "firstScene": first[name]} for name, count in seen.items()]
 
 
 def _scene_shot_targets(scenes: list[_Scene]) -> list[int]:
@@ -452,7 +463,9 @@ def draft_stored_scene(version: dict) -> list[dict]:
     what the drafting rules read, so the drafts stay reproducible without keeping
     a second copy of them in the Store.
     """
-    scene = _Scene(index=int(version.get("index") or 1), heading=version["heading"], paragraphs=[version["synopsis"]])
+    scene = _Scene(
+        index=int(version.get("index") or 1), heading=version["heading"], paragraphs=[version["synopsis"]]
+    )
     scene.location = version.get("location")
     scene.time_of_day = version.get("timeOfDay") or "unknown"
     scene.dialogue = [
@@ -467,9 +480,7 @@ def draft_stored_scene(version: dict) -> list[dict]:
     scene.shot_count = int(version["shotCount"])
     scene.duration_seconds = int(version["durationSeconds"])
     shots = draft_shots(scene)
-    for shot, seconds in zip(
-        shots, _shot_durations(scene.duration_seconds, scene.shot_count), strict=True
-    ):
+    for shot, seconds in zip(shots, _shot_durations(scene.duration_seconds, scene.shot_count), strict=True):
         shot["durationSeconds"] = seconds
     return shots
 
@@ -506,9 +517,7 @@ def plan_episode(text: str, *, title: str | None = None) -> dict:
 
     targets = _scene_shot_targets(scenes)
     total_shots = sum(targets)
-    total_seconds = max(
-        EPISODE_MIN_SECONDS, min(EPISODE_MAX_SECONDS, total_shots * TARGET_SECONDS_PER_SHOT)
-    )
+    total_seconds = max(EPISODE_MIN_SECONDS, min(EPISODE_MAX_SECONDS, total_shots * TARGET_SECONDS_PER_SHOT))
     durations = _scene_durations(targets, total_seconds)
     for scene, shots, seconds in zip(scenes, targets, durations, strict=True):
         scene.shot_count = shots

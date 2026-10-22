@@ -64,13 +64,8 @@ def test_plan_is_deterministic_and_reproducible(path):
 def test_dialogue_is_never_dropped(path):
     text = normalize(load(path))
     plan = plan_of(path)
-    quotes = [
-        line.strip()
-        for line in _quoted_lines(text)
-    ]
-    extracted = [
-        line["text"] for scene in plan["scenes"] for line in scene["dialogue"]
-    ]
+    quotes = [line.strip() for line in _quoted_lines(text)]
+    extracted = [line["text"] for scene in plan["scenes"] for line in scene["dialogue"]]
     assert plan["dialogueCount"] == len(quotes) == len(extracted)
     assert sorted(extracted) == sorted(quotes)
     assert plan["dialogueCount"] > 0
@@ -93,9 +88,7 @@ def test_budget_respects_every_frozen_limit(path):
     assert EPISODE_MIN_SHOTS <= len(shots) <= EPISODE_MAX_SHOTS
     assert len(scenes) <= SCENE_LIMIT
     assert sum(scene["shotCount"] for scene in scenes) == len(shots)
-    assert sum(scene["durationSeconds"] for scene in scenes) == plan["shotBudget"][
-        "targetDurationSeconds"
-    ]
+    assert sum(scene["durationSeconds"] for scene in scenes) == plan["shotBudget"]["targetDurationSeconds"]
     assert EPISODE_MIN_SECONDS <= plan["shotBudget"]["targetDurationSeconds"] <= EPISODE_MAX_SECONDS
     for scene in scenes:
         assert 1 <= scene["shotCount"] <= SCENE_MAX_SHOTS
@@ -164,9 +157,7 @@ def test_a_single_short_scene_cannot_reach_the_frozen_minimum():
 
 
 def test_too_many_scenes_is_refused_instead_of_merging_silently():
-    blocks = "\n\n".join(
-        f"内景 房间 夜\n\n第{i}次推门。门开着。" for i in range(1, SCENE_LIMIT + 2)
-    )
+    blocks = "\n\n".join(f"内景 房间 夜\n\n第{i}次推门。门开着。" for i in range(1, SCENE_LIMIT + 2))
     with pytest.raises(AppError) as error:
         plan_episode(blocks)
     assert error.value.code == "EPISODE_SHOT_BUDGET"

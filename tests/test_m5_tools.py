@@ -15,9 +15,7 @@ from vagent.video.tools import (
     VIDEO_TOOLS_VERSION,
 )
 
-TEXT = (Path(__file__).parent / "fixtures" / "m5" / "texts" / "rainy-cafe.md").read_text(
-    encoding="utf-8"
-)
+TEXT = (Path(__file__).parent / "fixtures" / "m5" / "texts" / "rainy-cafe.md").read_text(encoding="utf-8")
 M5_TOOLS = ("episode_plan", "episode_save", "episode_read", "bible_save", "bible_read")
 
 
@@ -131,8 +129,7 @@ def test_episode_save_persists_scenes_dialogue_and_budget(store):
     assert episode.title == "雨夜咖啡店"
     assert [ref.scene_id for ref in episode.latest.scenes] == saved["sceneIds"]
     stored_dialogue = sum(
-        len(Scene.model_validate(state["scenes"][scene_id]).latest.dialogue)
-        for scene_id in saved["sceneIds"]
+        len(Scene.model_validate(state["scenes"][scene_id]).latest.dialogue) for scene_id in saved["sceneIds"]
     )
     assert stored_dialogue == plan["dialogueCount"] > 0
     first = Scene.model_validate(state["scenes"][saved["sceneIds"][0]])
