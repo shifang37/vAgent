@@ -47,8 +47,11 @@ MEDIA_VALIDATION_VERSION = "mp4-avc-v1"
 
 RENDER_VERSION = "ffmpeg-render-v1"
 # E3 renders from the delivered shots, so the version records a render-native
-# assembly instead of pretending a copy/normalize concat produced it.
+# assembly instead of pretending a copy/normalize concat produced it. M7 E3 adds a
+# timeline assembly: the same local encode, but the edit order/trims come from a
+# frozen TimelineVersion instead of the episode's own scene order.
 RENDER_NATIVE_ASSEMBLY = "ffmpeg-render-native-v1"
+RENDER_TIMELINE_ASSEMBLY = "ffmpeg-render-timeline-v1"
 PROFILE_720P = "720p-h264-aac-v1"
 PROFILE_1080P = "1080p-h264-aac-v1"
 EXPORT_PROFILES = (PROFILE_720P, PROFILE_1080P)
@@ -259,6 +262,14 @@ class RenderSubtitleSource(Contract):
     track_sha256: Fingerprint
 
 
+class RenderTimelineSource(Contract):
+    """E3 only: the frozen edit a timeline render consumed, never an episode render."""
+
+    timeline_id: Identifier
+    timeline_version: int = Field(ge=1)
+    timeline_sha256: Fingerprint
+
+
 class RenderSources(Contract):
     episode_id: Identifier | None = None
     # A storyboard render freezes its storyboard version; an episode render freezes
@@ -268,6 +279,8 @@ class RenderSources(Contract):
     shot_version_ids: JsonTuple[Identifier] = Field(min_length=1, max_length=64)
     audio_assets: JsonTuple[Identifier] = Field(default=(), max_length=MAX_RENDER_AUDIO_TRACKS)
     subtitle_track: RenderSubtitleSource | None = None
+    # Null for every M3/M6 render; a timeline render always names its edit.
+    timeline: RenderTimelineSource | None = None
     font: FontRef
 
     @model_validator(mode="after")
@@ -278,6 +291,8 @@ class RenderSources(Contract):
             raise ValueError("A render names exactly one storyboard or episode version")
         if self.episode_id is not None and self.episode_version is None:
             raise ValueError("An episode render must freeze the episode version")
+        if self.timeline is not None and self.episode_version is None:
+            raise ValueError("A timeline render freezes the episode version too")
         return self
 
 
@@ -375,6 +390,7 @@ class FilmAssembly(Contract):
         "ffmpeg-concat-normalize-v3",
         "ffmpeg-concat-normalize-v4",
         "ffmpeg-render-native-v1",
+        "ffmpeg-render-timeline-v1",
     ] = ASSEMBLY_VERSION
     compatibility_version: Literal["mp4-copy-signature-v1"] = COMPATIBILITY_VERSION
     engine: FilmEngine
@@ -709,7 +725,11 @@ def verify_film_render(state: dict, film: Film, version: FilmVersion) -> None:
             raise AppError("FILM_MEDIA_INVALID", "渲染引用的字幕版本与登记的指纹不一致。")
     if (render.measurements.size_bytes, render.measurements.sha256) != (version.size_bytes, version.sha256):
         raise AppError("FILM_MEDIA_INVALID", "渲染测量值与成片版本不一致。")
-    if version.assembly.assembly_version == RENDER_NATIVE_ASSEMBLY:
+    if (version.assembly.assembly_version == RENDER_TIMELINE_ASSEMBLY) != (
+        render.sources.timeline is not None
+    ):
+        raise AppError("FILM_MEDIA_INVALID", "时间线渲染记录与装配版本不一致。")
+    if version.assembly.assembly_version in {RENDER_NATIVE_ASSEMBLY, RENDER_TIMELINE_ASSEMBLY}:
         # E3 full renders start a film history from the delivered shots; no earlier
         # assembled copy has to exist (episode renders never have one).
         return

@@ -28,6 +28,22 @@ CONTRACT_MODULES = (
     "vagent.video.subtitles",
     "vagent.video.tts",
 )
+# E3 appends the timeline render source/assembly literal and the timeline inputs; the
+# transitive ``$defs`` of Film/FilmVersion/Database are the whole declared drift.
+E3_ALLOWED_CHANGED = {
+    ("vagent.storage", "Database"),
+    ("vagent.storage", "DatabaseV5"),
+    ("vagent.storage", "DatabaseV7"),
+    ("vagent.storage", "DatabaseV8"),
+    ("vagent.video.films", "Film"),
+    ("vagent.video.films", "FilmAssembly"),
+    ("vagent.video.films", "FilmRender"),
+    ("vagent.video.films", "FilmVersion"),
+    ("vagent.video.films", "RenderSources"),
+    ("vagent.video.renders", "FilmRenderArgs"),
+    ("vagent.video.renders", "RenderReadArgs"),
+    ("vagent.video.renders", "RenderTask"),
+}
 
 
 def contract_schemas():
@@ -71,6 +87,9 @@ def test_every_e0_baseline_schema_hash_is_unchanged():
     current = contract_schemas()
     for module_name, models in BASELINE["schemaSha256"].items():
         for name, digest in models.items():
+            if (module_name, name) in E3_ALLOWED_CHANGED:
+                assert current[module_name][name] != digest, f"{module_name}.{name} should change"
+                continue
             assert current[module_name][name] == digest, f"{module_name}.{name} changed"
     # E1 only appends v9 models; the 165 baseline models keep their exact shape.
     assert {"DatabaseV9"} <= set(current["vagent.storage"])
@@ -79,6 +98,20 @@ def test_every_e0_baseline_schema_hash_is_unchanged():
     # E2 appends the batch domain without touching any frozen baseline model.
     batches = importlib.import_module("vagent.video.batches")
     assert {"Batch", "BatchEpisode", "BatchEstimate"} <= {name for name in vars(batches) if name[0].isupper()}
+    # E3 appends the timeline domain and the timeline render source.
+    timelines = importlib.import_module("vagent.video.timelines")
+    assert {
+        "Timeline",
+        "TimelineVersion",
+        "TimelineClip",
+        "TimelineTransition",
+        "TimelineSubtitleRef",
+        "TimelineAudioTrack",
+        "TimelineTitleCard",
+    } <= {name for name in vars(timelines) if name[0].isupper()}
+    films = importlib.import_module("vagent.video.films")
+    assert "RenderTimelineSource" in {name for name in vars(films) if name[0].isupper()}
+    assert films.RENDER_TIMELINE_ASSEMBLY == "ffmpeg-render-timeline-v1"
 
 
 def test_database_v9_adds_exactly_the_three_empty_collections():
@@ -117,8 +150,8 @@ def test_frozen_stage_limits_and_tool_groups():
     limits = BASELINE["limits"]
     assert limits["storageSchemaVersion"] == 8
     assert limits["tools"]["videoToolsVersion"] == 13
-    assert (tools.VIDEO_TOOLS_VERSION, tools.VIDEO_RULES_VERSION) == (16, 16)
-    assert (tools.LIVE_VIDEO_TOOLS_VERSION, tools.LIVE_VIDEO_RULES_VERSION) == (16, 16)
+    assert (tools.VIDEO_TOOLS_VERSION, tools.VIDEO_RULES_VERSION) == (18, 18)
+    assert (tools.LIVE_VIDEO_TOOLS_VERSION, tools.LIVE_VIDEO_RULES_VERSION) == (18, 18)
     groups = {
         "M2": tools.M2_TOOL_NAMES,
         "M3": tools.M3_TOOL_NAMES,
@@ -132,14 +165,25 @@ def test_frozen_stage_limits_and_tool_groups():
     for group, names in limits["toolGroups"].items():
         assert list(groups[group]) == names
     # E1 appends exactly the season group and leaves every earlier group intact;
-    # E2 appends only the season batch tool.
+    # E2 appends only the season batch tool; E3 appends the timeline pair.
     assert tools.M7_E1_TOOL_NAMES == ("season_save", "season_read")
     assert tools.M7_E2_TOOL_NAMES == ("season_generate",)
-    assert tools.M7_TOOL_NAMES == (*tools.M7_E1_TOOL_NAMES, *tools.M7_E2_TOOL_NAMES)
+    assert tools.M7_E3_TOOL_NAMES == ("timeline_save", "timeline_read")
+    assert tools.M7_TOOL_NAMES == (
+        *tools.M7_E1_TOOL_NAMES,
+        *tools.M7_E2_TOOL_NAMES,
+        *tools.M7_E3_TOOL_NAMES,
+    )
     assert tools.WAIT_SET_LIMIT == limits["wait"]["setLimit"] == 20
     assert tools.WAIT_TIMEOUT_SECONDS == limits["wait"]["timeoutSeconds"] == 600
     # M7 freezes the season limits named in the contract.
     assert (SEASON_PER_PROJECT_LIMIT, SEASON_EPISODE_LIMIT) == (8, 4)
+    # E3 timeline limits are the contract's 20 clips / 19 transitions / 1–90 s.
+    from vagent.video import timelines
+
+    assert (timelines.TIMELINE_CLIP_LIMIT, timelines.TIMELINE_TRANSITION_LIMIT) == (20, 19)
+    assert (timelines.TIMELINE_MIN_SECONDS, timelines.TIMELINE_MAX_SECONDS) == (1, 90)
+    assert timelines.TIMELINE_CONTRACT == "timeline-zh-v1"
 
 
 def test_fresh_store_is_schema_nine_with_three_empty_collections(store):

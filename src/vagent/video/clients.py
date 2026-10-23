@@ -34,6 +34,8 @@ CLIENT_PROMPTS = {
     "film_render": "本地界面发起的整片渲染（不调用模型）。",
     "season_save": "本地界面发起的季成员保存（不调用模型）。",
     "season_generate": "本地界面发起的季批量登记（不调用模型）。",
+    "timeline_save": "本地界面发起的时间线保存（不调用模型）。",
+    "audio_import": "本地界面发起的 BGM/SFX 导入（不调用模型）。",
 }
 CLIENT_GROUPS = (
     "shot_generate",
@@ -45,6 +47,8 @@ CLIENT_GROUPS = (
     "film_render",
     "season_save",
     "season_generate",
+    "timeline_save",
+    "audio_import",
 )
 
 
@@ -507,7 +511,11 @@ async def film_render(
     replayed = _replay_or_conflict(service, session_id, client_request_id, "film_render", args)
     if replayed is not None:
         return replayed
-    if model.scope == "storyboard":
+    if model.scope == "timeline":
+        target = service.store.snapshot()["timelines"].get(model.timeline_id)
+        if target is None or target["projectId"] != session_id:
+            raise AppError("TIMELINE_NOT_FOUND", "当前项目中没有这条时间线。")
+    elif model.scope == "storyboard":
         target = service.store.snapshot()["storyboards"].get(model.storyboard_id)
         if target is None or target["projectId"] != session_id:
             raise AppError("NOT_FOUND", "当前项目中没有这个分镜。")
@@ -521,6 +529,8 @@ async def film_render(
         client_request_id=client_request_id,
         group="film_render",
         require_mode_config=False,
+        # A render is local FFmpeg work; it must stay available with video mode off.
+        metadata_only=True,
     )
     result = await service.renders.render(
         args,
@@ -576,3 +586,91 @@ async def export_subtitles(
     if not result.get("ok"):
         raise AppError(result["error"]["code"], result["error"]["message"])
     return _result(service, result["data"], context.run_id, result["data"].get("storyboardId"))
+
+
+def save_timeline(
+    service,
+    *,
+    session_id: str,
+    client_request_id: str,
+    episode_id: str,
+    clips,
+    transitions=None,
+    subtitle=None,
+    audio=None,
+    title_cards=None,
+    timeline_id: str | None = None,
+    expected_revision: int | None = None,
+) -> dict:
+    """Save one episode timeline from the local workbench; metadata only."""
+    from vagent.video.timelines import save_timeline
+
+    args = {
+        "episodeId": episode_id,
+        "clips": list(clips),
+        "transitions": list(transitions or ()),
+        "audio": list(audio or ()),
+        "titleCards": list(title_cards or ()),
+        **({"subtitle": subtitle} if subtitle is not None else {}),
+        **({"timelineId": timeline_id} if timeline_id is not None else {}),
+        **({"expectedRevision": expected_revision} if expected_revision is not None else {}),
+    }
+    replayed = _replay_or_conflict(service, session_id, client_request_id, "timeline_save", args)
+    if replayed is not None:
+        return replayed
+    raw = service.store.snapshot()["episodes"].get(episode_id)
+    if raw is None or raw["projectId"] != session_id:
+        raise AppError("EPISODE_NOT_FOUND", "当前项目中没有这个分集。")
+    context = client_context(
+        service,
+        session_id=session_id,
+        client_request_id=client_request_id,
+        group="timeline_save",
+        require_mode_config=False,
+        metadata_only=True,
+    )
+    result = service.store.operation(
+        _operation_key(context.run_id, "timeline_save"),
+        "timeline_save",
+        args,
+        lambda draft: save_timeline(args, draft, session_id),
+    )
+    if not result.get("ok"):
+        raise AppError(result["error"]["code"], result["error"]["message"])
+    return _result(service, result["data"], context.run_id)
+
+
+async def import_audio(
+    service,
+    *,
+    session_id: str,
+    client_request_id: str,
+    data: bytes,
+    kind: str,
+    title: str,
+    source_url: str,
+    license_text: str,
+    filename: str | None = None,
+) -> dict:
+    """Import one BGM/SFX file as an explicit local action; no provider call."""
+    from vagent.video.audio_import import import_audio as import_audio_file
+
+    context = client_context(
+        service,
+        session_id=session_id,
+        client_request_id=client_request_id,
+        group="audio_import",
+        require_mode_config=False,
+        metadata_only=True,
+    )
+    result = await import_audio_file(
+        service,
+        project_id=session_id,
+        data=data,
+        kind=kind,
+        title=title,
+        source_url=source_url,
+        license=license_text,
+        filename=filename,
+    )
+    return _result(service, result, context.run_id)

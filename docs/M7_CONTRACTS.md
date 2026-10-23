@@ -17,6 +17,15 @@
 > - **创建前预览**：新增只读 `GET /api/seasons/{id}/estimate`（Web 客户端动作，不是模型工具），用与登记相同的推导回显逐集镜头数、逐集/合计估算与批量余量；模型侧仍由 `season_read` 与 `season_generate` 的结果回显。
 > - **`season_read`**：额外返回该季的 `batches` 摘要列表（最新在前）；`batch` 字段为最近批次或 `batchId` 指定的批次。
 > - **打开时校验**：Store 打开对 `batches` 只做结构、成员归属与 Job 引用校验（`initial=True`），不做“新批次必须 running/revision 0”与逐次推进校验；这两条只在提交事务中执行。
+>
+> **E3 已实施（2026-10-23）**：`Timeline`/`TimelineVersion`、`timeline_save`/`timeline_read`、`film_render` 的 `timeline` scope、`ffmpeg-render-timeline-v1`、`timeline-subtitle-remap-v1`、客户端 BGM/SFX 导入、Web 时间线工作台，tools/rules **18/18**（冻结 16/16）。实现中对本文件的细化（不改冻结语义）：
+>
+> - **时间线记录**：`DatabaseV9.timelines` 保持为 JSON 对象集合，由 `validate_timeline_changes` 在打开与每次提交时校验所有权、指纹和只增不改历史；**不在 Store 校验中重解析分集/镜头**，否则一次分集编辑或分镜改尺寸会让整库打不开。渲染时才重新解析并把过期报告为 `TIMELINE_SOURCE_MISSING`。
+> - **clip 的引用语义**：每条 clip 必须引用已注册的 `ShotVersion`（未交付也可保存用于排期），源时长按该 `ShotVersion` 所属的分镜版本计算；同一镜头在一条版本内至多一次。单条有效时长必须 ≥1 秒，`inMs/outMs` 为镜头内毫秒；渲染以 `-ss`/`-t` + 30 fps 重编码实现，输出与有效时长允许 ±1 帧。
+> - **字幕重映射的精确基准**：cue 的源时间是整集字幕轨的冻结时间线（`SubtitleTrackVersion.timeline`），clip 的 `inMs/outMs` 是镜头内偏移。实现先把 cue 换算为镜头内偏移（`cue.start − trackEntry.start`），再减去 clip 的入点，得到 `有效起点 + (局部 − inMs)`；这样第二镜之后不会累积漂移。时间线引用的字幕版本必须与 `episodeVersion` 一致，否则 `RENDER_TIMELINE_MISMATCH`。
+> - **音轨的权威性**：`scope=timeline` 只混音 `TimelineVersion.audio` 列出的资产，不再沿用 M6 的“全部已导入 BGM/SFX 自动混入”；voice 由重映射后的 cue 定位，完全裁掉的 cue 不参与混音；BGM/SFX 按 `startMs/gainDb` 放置。
+> - **渲染与版本**：`FilmVersion.assembly_version=ffmpeg-render-timeline-v1`、`render.sources.timeline` 记录时间线 ID/版本/指纹；同一集的时间线渲染与整集渲染共享一条成片历史（按指纹幂等，旧版本逐字节保留）。`FilmRenderArgs`/`RenderReadArgs`/`RenderTask` 只追加 `timeline` 相关可选字段。
+> - **客户端动作**：`POST /api/sessions/{id}/timelines/save`、`GET /api/episodes/{id}/timeline`、`POST /api/audio/import` 与 `GET /api/audio` 都是本地动作；保存时间线/导入音频使用 `videoMode=off` 的 metadata-only 客户端 Run，渲染使用本地 `film_render`（不再要求视频模式）。导入只接受 WAV/MP4（≤25 MB、≤60 秒），强制 `license`/`sourceUrl`，按 SHA-256 去重，模型只看到 `audioId`。
 
 ## 1. 决策与版本
 
@@ -104,7 +113,7 @@ E0 前的 9 个决策点已确认，冻结如下：
 
 **时间线跟随时集版本，而不是替代它。** 时间线版本不复制镜头描述、预算或媒体；它只引用 `(storyboardId, shotVersionId, shotId, sceneId)`。分集版本变化后，旧时间线被标记为 `stale=true`，渲染返回 `TIMELINE_SOURCE_MISSING`，必须先保存新版本。
 
-### 2.4 E3 允许追加的渲染字段（届时逐项列出）
+### 2.4 E3 追加的渲染字段（已逐项实施）
 
 时间线渲染需要把来源写入成片版本，E3 才追加以下**可选**字段；E1 不得提前改动既有模型：
 
@@ -242,7 +251,7 @@ M6 的 18 个错误码全部保留；M7 新增：
 |---|---|---|
 | E1 季与 schema 9 | **已交付（2026-10-23）**：schema v9（`seasons`/`batches`/`timelines` 三个空集合）、`Season`/`SeasonVersion`、`season_save`/`season_read`、v8→v9 逐字节备份、CLI/Web 季面板；tools/rules **15/15**（冻结 13/13）。见 [E1 验收](./M7_E1_ACCEPTANCE.md) | 旧 v1–v8 数据可读；季成员唯一、顺序只增不改；无 Job、无模型、submit=0 |
 | E2 批量队列 | **已交付（2026-10-23）**：`Batch`/`BatchEpisode`、`season_generate`（1–3 集、逐集原子、失败隔离、显式恢复、60 Job/180 CNY 预检）、Store 崩溃恢复（`BATCH_INTERRUPTED`）、`season_read` 批次交付计数、CLI/Web 批量确认与恢复；tools/rules **16/16**（冻结 15/15）。见 [E2 验收](./M7_E2_ACCEPTANCE.md) | 3 集批次中单集失败不阻塞其他集；单集交付失败可由 `shot_redo` 修复且不影响其他集；恢复不重复提交；不确定提交不重投；受控/离线 submit=0 |
-| E3 时间线工作台 | **待实施**：`Timeline`/`TimelineVersion`、`timeline_save`/`timeline_read`、`film_render` 的 `timeline` scope、`ffmpeg-render-timeline-v1`、字幕/音频重映射、客户端 BGM/SFX 导入、Web 裁剪/排序/转场/预览/导出；tools/rules **18/18**（冻结 16/16） | 重排/裁剪/转场后成片可播放且时长正确；字幕不漂移；旧版本保留；同指纹幂等；失败不提交 |
+| E3 时间线工作台 | **已交付（2026-10-23）**：`Timeline`/`TimelineVersion`/`TimelineClip`/`TimelineTransition`/`TimelineSubtitleRef`/`TimelineAudioTrack`/`TimelineTitleCard`、`timeline_save`/`timeline_read`、`film_render` 的 `timeline` scope、`ffmpeg-render-timeline-v1`、`timeline-subtitle-remap-v1`、客户端 BGM/SFX 导入、Web 裁剪/排序/转场/预览/导出；tools/rules **18/18**（冻结 16/16）。见 [E3 验收](./M7_E3_ACCEPTANCE.md) | 重排/裁剪/转场后成片可播放且时长正确；字幕不漂移；旧版本保留；同指纹幂等；失败不提交 |
 | E4 验收 | **待实施**：`scripts/evaluate_m7.py` 默认离线、3 集批次/失败隔离/恢复、时间线 v1→v2 重拼、浏览器工作台、安装态与 CI；复用已有本地媒体 | 3 集批量中单集失败不阻塞；恢复不重复提交；时间线编辑后重拼版本只增不改；浏览器可编辑/预览/导出；真实付费样本需单独授权 |
 
 ## 10. 明确不做

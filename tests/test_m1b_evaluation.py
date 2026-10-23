@@ -16,7 +16,9 @@ def options(tmp_path, *, limit=40):
         home=tmp_path / "data",
         output=tmp_path / "report.json",
         live=False,
-        context_bytes=65536,
+        # M7 rules growth enlarged the frozen instructions; this is an evaluation
+        # fixture budget, not the product default (VAGENT_CONTEXT_BYTES stays 65536).
+        context_bytes=98304,
         max_model_calls=limit,
         continue_from=None,
     )

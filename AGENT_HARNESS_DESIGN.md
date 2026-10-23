@@ -334,9 +334,9 @@ E2（音频）的边界选择：
 - **工具面**：`audio_generate` 是 `async_write_execute`（无 Job、无等待），tools/rules 11/11，冻结 10/10 与更早变体；`episode_read` 只追加 `audio` 投影。headless 规划排除该付费写工具。
 - **混音**：`mix-zh-v1` 以 `amix normalize=0` 保留 voice 0 dB/BGM −18 dB/SFX −6 dB，BGM 用 `sidechaincompress`（−20 dB 线性 0.1、8、20 ms、400 ms）ducking；两遍 `loudnorm`（−16 LUFS/−1 dBTP/LRA 11）后用 EBU R128 复测成品，超差即 `LOUDNESS_OUT_OF_RANGE` 并删除产物。E2 只交付本地混音服务，`film_render` 集成留给 E3。
 
-### 8.8 M7 多集与工作台（E0 冻结，E1/E2 已交付）
+### 8.8 M7 多集与工作台（E0 冻结，E1/E2/E3 已交付）
 
-M7 契约见 [M7 契约](./docs/M7_CONTRACTS.md)，E0 基线与本地裁剪探针见 [E0 验收](./docs/M7_E0_ACCEPTANCE.md) 与 `docs/M7_E0_BASELINE.json`。**E0 只冻结要求与基线，不改产品代码：视频 submit=0、模型调用=0、TTS 请求=0。** E1 已交付（见 [E1 验收](./docs/M7_E1_ACCEPTANCE.md)）：schema 9 三个空集合与 v8→v9 逐字节备份、`Season`/`SeasonVersion`、`season_save`/`season_read`、tools/rules 15/15（冻结 13/13）、CLI/Web 季面板。E2 已交付（见 [E2 验收](./docs/M7_E2_ACCEPTANCE.md)）：`Batch`/`BatchEpisode`、`season_generate`、逐集独立事务与失败隔离、显式 `resumeBatchId` 恢复、Store 崩溃恢复、CLI/Web 批量确认与恢复，tools/rules 16/16（冻结 15/15）。既有 165 个契约模型哈希不变，视频 submit=0、模型调用=0、TTS 请求=0。
+M7 契约见 [M7 契约](./docs/M7_CONTRACTS.md)，E0 基线与本地裁剪探针见 [E0 验收](./docs/M7_E0_ACCEPTANCE.md) 与 `docs/M7_E0_BASELINE.json`。**E0 只冻结要求与基线，不改产品代码：视频 submit=0、模型调用=0、TTS 请求=0。** E1 已交付（见 [E1 验收](./docs/M7_E1_ACCEPTANCE.md)）：schema 9 三个空集合与 v8→v9 逐字节备份、`Season`/`SeasonVersion`、`season_save`/`season_read`、tools/rules 15/15（冻结 13/13）、CLI/Web 季面板。E2 已交付（见 [E2 验收](./docs/M7_E2_ACCEPTANCE.md)）：`Batch`/`BatchEpisode`、`season_generate`、逐集独立事务与失败隔离、显式 `resumeBatchId` 恢复、Store 崩溃恢复、CLI/Web 批量确认与恢复，tools/rules 16/16（冻结 15/15）。E3 已交付（见 [E3 验收](./docs/M7_E3_ACCEPTANCE.md)）：`Timeline`/`TimelineVersion`/`TimelineClip`/`TimelineTransition`/`TimelineSubtitleRef`/`TimelineAudioTrack`/`TimelineTitleCard`、`timeline_save`/`timeline_read`、`film_render` 的 `timeline` scope、`ffmpeg-render-timeline-v1`、`timeline-subtitle-remap-v1`、客户端 BGM/SFX 导入、CLI/HTTP/Web 工作台，tools/rules 18/18（冻结 16/16）。既有 165 个契约模型哈希只有 E3 声明的传递 `$defs` 漂移，视频 submit=0、模型调用=0、TTS 请求=0。
 
 E1 的实现边界：
 
@@ -354,6 +354,17 @@ E2 的实现边界：
 - **恢复与崩溃**：`resumeBatchId` 与 `episodeIds` 互斥，只为非成功集创建 `resumeOf` 新批次并按当前版本重新冻结；打开 Store 时 `recover_interrupted_batches` 把残留 `running` 收为 `partial`/`failed`，`pending/running` 成员写 `BATCH_INTERRUPTED`，不自动重跑。
 - **幂等**：批次 ID 由（项目 + 操作键）uuid5 派生；普通生成对相同指纹的已终态批次直接重放，恢复不复用旧批次。
 - **工具面**：E2 追加 `season_generate`（16/16），15/15 与更早变体按 `toolFeatures` 冻结；`season_read` 增加 `batchId` 与批次交付计数，headless 继续排除该写工具。
+
+E3 的实现边界：
+
+- **时间线域**：`Timeline`/`TimelineVersion` 严格契约；`contract=timeline-zh-v1`，版本连续只增不改（≤64），每集恰好一条；clip 引用已登记的 `ShotVersion`（未交付可保存排期），`inMs/outMs` 为镜头内毫秒，单条 ≥1 秒；转场 0.1–1.0 秒且 ≤ 相邻裁剪镜头 1/3；有效时长 1–90 秒；指纹只含 `contract/episodeId/episodeVersion/clips/transitions/subtitle/audio/titleCards`。
+- **Store 校验**：`validate_timeline_changes` 复核模型、所有权、每集唯一、内容指纹与只增不改历史；**不在打开/提交时重解析分集/镜头**，避免一次分集编辑让旧时间线把整库变成 `INVALID_STORE`。过期由 `timeline_read.stale` 与渲染期的 `TIMELINE_SOURCE_MISSING` 呈现。
+- **保存并发**：相同内容重放当前版本（`replayed=true`），内容变化必须带 `expectedRevision`，缺失/过期 `TIMELINE_VERSION_CONFLICT`；旧版本逐字节保留。
+- **渲染**：`film_render` 的 `scope=timeline` 只读冻结版本；锁内解析 clip/media/字幕/音轨/标题卡，锁外逐 clip 归一化并按 `-ss/-t` 裁剪、跨场组装、转场、标题卡、音频与两遍 `loudnorm`；装配字面量 `ffmpeg-render-timeline-v1`，`RenderSources.timeline` 记录 ID/版本/指纹；同指纹幂等，旧成片版本保留。
+- **字幕**：`timeline-subtitle-remap-v1` 先把 cue 换算为镜头内偏移再按 clip 入点映射（时间线外丢弃、窗口外夹取），字幕版本必须与 `episodeVersion` 一致；旁挂 SRT/ASS 与 `render.subtitle.retimed=true` 同源重算。
+- **音频**：时间线的 `audio[]` 是唯一混音清单；voice 按重映射 cue 定位，BGM/SFX 按 `startMs/gainDb`；沿用 `mix-zh-v1`。
+- **客户端素材**：`POST /api/audio/import` / `vagent audio import` 是受控上传，不是模型工具；WAV/MP4、≤25 MB、≤60 秒、强制 `license`/`sourceUrl`、按 SHA-256 去重，模型只看到 `audioId`。
+- **工具面**：E3 追加 `timeline_save`/`timeline_read`（18/18），16/16 与更早变体按 `toolFeatures` 冻结；headless 继续不加入时间线渲染。
 
 后续阶段的边界选择：
 

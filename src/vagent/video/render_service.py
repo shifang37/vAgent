@@ -26,13 +26,20 @@ from vagent.video.assembler import (
     bundled_engine,
     format_seconds,
 )
-from vagent.video.audio import NARRATOR_SPEAKER, AudioAsset, AudioMedia, ProviderAudioSource
+from vagent.video.audio import (
+    NARRATOR_SPEAKER,
+    AudioAsset,
+    AudioMedia,
+    ProviderAudioSource,
+    speaker_of,
+)
 from vagent.video.episodes import Episode, Scene
 from vagent.video.films import (
     EXPORT_PROFILES,
     MAX_RENDER_AUDIO_TRACKS,
     RENDER_JOB_TIMEOUT_SECONDS,
     RENDER_NATIVE_ASSEMBLY,
+    RENDER_TIMELINE_ASSEMBLY,
     RENDER_TIMEOUT_SECONDS,
     RENDER_VERSION,
     Film,
@@ -54,6 +61,7 @@ from vagent.video.films import (
     RenderSources,
     RenderSubtitle,
     RenderSubtitleSource,
+    RenderTimelineSource,
     RenderTitleCard,
     RenderTransition,
     RenderVideoFacts,
@@ -82,13 +90,14 @@ from vagent.video.renders import (
     estimated_render_seconds,
     latest_render_task,
     remap_cues,
+    remap_timeline_cues,
     render_fingerprint,
     render_read_view,
     task_from_state,
     validate_title_cards,
     validate_transitions,
 )
-from vagent.video.storyboards import latest_shot_version, storyboard_in_state
+from vagent.video.storyboards import ShotVersion, latest_shot_version, storyboard_in_state
 from vagent.video.subtitle_font import FontRef, bundled_font_path, font_ref
 from vagent.video.subtitle_service import ProbedStreams, parse_streams
 from vagent.video.subtitles import (
@@ -101,6 +110,14 @@ from vagent.video.subtitles import (
     render_title_ass,
     track_by_id,
     track_version_sha256,
+)
+from vagent.video.timelines import (
+    Timeline,
+    clip_duration,
+    episode_source,
+    timeline_version_sha256,
+    title_card_args,
+    transition_args,
 )
 
 TOOL_NAME = "film_render"
@@ -140,6 +157,11 @@ class PlannedShot:
     start: Fraction
     duration: Fraction
     scene_id: str | None
+    storyboard_id: str | None = None
+    storyboard_version: int = 0
+    storyboard_revision: int = 0
+    # E3 timeline renders seek this far into the source and keep ``duration`` seconds.
+    trim_start: Fraction = Fraction(0)
 
 
 @dataclass
@@ -191,6 +213,15 @@ class RenderPlan:
     audio: AudioPlan
     retimed: bool
     fingerprint: str
+    # E3 timeline renders freeze the edit alongside the rendered media.
+    timeline_id: str | None = None
+    timeline_version: int | None = None
+    timeline_fingerprint: str | None = None
+    timeline_sha256: str | None = None
+    timeline_clips: tuple = ()
+    transition_args: tuple = ()
+    timeline_subtitle: object | None = None
+    timeline_audio: tuple = ()
 
     @property
     def target_id(self) -> str:
@@ -232,12 +263,18 @@ class RenderService:
             project_id,
             episode_id=parsed.episode_id,
             storyboard_id=parsed.storyboard_id,
+            timeline_id=parsed.timeline_id,
         )
         film = None
         if parsed.episode_id is not None:
             film = find_episode_film(state, project_id, parsed.episode_id)
         elif parsed.storyboard_id is not None:
             film = find_film(state, project_id, parsed.storyboard_id)
+        elif parsed.timeline_id is not None:
+            raw_timeline = state["timelines"].get(parsed.timeline_id)
+            if raw_timeline is None or raw_timeline["projectId"] != project_id:
+                raise AppError("TIMELINE_NOT_FOUND", "当前项目中没有这条时间线。")
+            film = find_episode_film(state, project_id, raw_timeline["episodeId"])
         return render_read_view(state, task, film=film)
 
     def episode_summary(self, state: dict, project_id: str, episode_id: str | None) -> dict | None:
@@ -269,7 +306,16 @@ class RenderService:
         task = build_task(
             task_id=str(uuid4()),
             project_id=project_id,
-            args=args_model,
+            args=(
+                args_model.model_copy(
+                    update={
+                        "episode_id": plan.episode_id,
+                        "timeline_version": plan.timeline_version,
+                    }
+                )
+                if plan.timeline_id is not None
+                else args_model
+            ),
             fingerprint=plan.fingerprint,
             scenes=[
                 RenderSceneProgress(
@@ -321,20 +367,23 @@ class RenderService:
         profile = profile_for(args.subtitle_mode, name=args.profile)
         if args.scope == "storyboard":
             plan = self._plan_storyboard(state, project_id, args, profile, engine, reference)
-        else:
+        elif args.scope == "episode":
             plan = self._plan_episode(state, project_id, args, profile, engine, reference)
-        active = validate_transitions(plan.entries, args.transitions)
+        else:
+            plan = self._plan_timeline(state, project_id, args, profile, engine, reference)
+        transitions_arg = plan.transition_args if plan.timeline_id is not None else args.transitions
+        active = validate_transitions(plan.entries, transitions_arg)
         effective = effective_entries(plan.entries, active)
         total = effective_duration(effective)
         if total <= 0 or total > 90:
             raise RenderError("RENDER_PROFILE_UNSUPPORTED", "（成片时长必须不超过 90 秒）", stage="source")
-        validate_title_cards(args.title_cards, total)
-        track, frozen, track_sha = self._resolve_track(state, project_id, args, plan.entries)
+        validate_title_cards(plan.title_cards, total)
+        track, frozen, track_sha = self._resolve_track(state, project_id, args, plan)
         plan.track, plan.track_version, plan.track_sha256 = track, frozen, track_sha
         plan.transitions = active
         plan.effective = effective
         plan.total = total
-        plan.retimed = bool(active)
+        plan.retimed = bool(active) or (plan.timeline_id is not None and track is not None)
         plan.audio = self._audio_plan(state, project_id, plan, args)
         plan.fingerprint = self._fingerprint(plan, args)
         return plan
@@ -463,6 +512,166 @@ class RenderService:
             fingerprint="",
         )
 
+    def _plan_timeline(self, state, project_id, args, profile, engine, reference) -> RenderPlan:
+        raw = state["timelines"].get(args.timeline_id)
+        if raw is None or raw["projectId"] != project_id:
+            raise AppError("TIMELINE_NOT_FOUND", "当前项目中没有这条时间线，未渲染。")
+        record = Timeline.model_validate(raw)
+        chosen = (
+            next((item for item in record.versions if item.version == args.timeline_version), None)
+            if args.timeline_version is not None
+            else record.versions[-1]
+        )
+        if chosen is None:
+            raise AppError("TIMELINE_NOT_FOUND", "这个时间线版本不存在，未渲染。")
+        episode_raw = state["episodes"].get(record.episode_id)
+        if episode_raw is None or episode_raw["projectId"] != project_id:
+            raise RenderError("TIMELINE_SOURCE_MISSING", "（时间线引用的分集不存在）", stage="source")
+        episode = Episode.model_validate(episode_raw)
+        if chosen.episode_version != episode.current_version:
+            raise RenderError(
+                "TIMELINE_SOURCE_MISSING",
+                "（时间线已过期：分集版本已变化，请重新保存时间线）",
+                stage="source",
+            )
+        source = episode_source(state, project_id, episode)
+        shots: list[PlannedShot] = []
+        groups: list[list[PlannedShot]] = []
+        group_board: list[str] = []
+        for clip in chosen.clips:
+            located = source.get(clip.shot_id)
+            if located is None:
+                raise RenderError(
+                    "TIMELINE_SOURCE_MISSING", f"（镜头 {clip.shot_id} 不在分集当前版本中）", stage="source"
+                )
+            if located["storyboardId"] != clip.storyboard_id:
+                raise RenderError(
+                    "TIMELINE_SOURCE_MISSING", f"（镜头 {clip.shot_id} 的分镜引用已变化）", stage="source"
+                )
+            board = located["storyboard"]
+            shot_version = next(
+                (item for item in board.shot_versions if item.id == clip.shot_version_id), None
+            )
+            if shot_version is None or shot_version.shot_id != clip.shot_id:
+                raise RenderError(
+                    "TIMELINE_SOURCE_MISSING", f"（镜头 {clip.shot_id} 的已注册版本不存在）", stage="source"
+                )
+            media = self._pinned_media(state, project_id, shot_version)
+            if media is None:
+                raise RenderError(
+                    "TIMELINE_SOURCE_MISSING", f"（镜头 {clip.shot_id} 尚未交付本地媒体）", stage="source"
+                )
+            shot = PlannedShot(
+                shot_id=clip.shot_id,
+                shot_version_id=shot_version.id,
+                job_id=shot_version.job_id,
+                media_id=media.id,
+                relative_path=media.relative_path,
+                sha256=media.sha256,
+                size_bytes=media.size_bytes,
+                start=Fraction(0),
+                duration=clip_duration(clip),
+                scene_id=clip.scene_id or located["sceneId"],
+                storyboard_id=board.id,
+                storyboard_version=shot_version.storyboard_version,
+                storyboard_revision=board.revision,
+                trim_start=Fraction(clip.in_ms, 1000),
+            )
+            shots.append(shot)
+            if groups and group_board[-1] == board.id:
+                groups[-1].append(shot)
+            else:
+                groups.append([shot])
+                group_board.append(board.id)
+        if not shots:
+            raise RenderError("TIMELINE_SOURCE_MISSING", "（时间线没有镜头）", stage="source")
+        offset = Fraction(0)
+        for shot in shots:
+            shot.start = offset
+            offset += shot.duration
+        scenes = [
+            PlannedScene(
+                scene_id=group[0].scene_id,
+                storyboard_id=group[0].storyboard_id or "",
+                storyboard_version=group[0].storyboard_version,
+                storyboard_revision=group[0].storyboard_revision,
+                shots=group,
+            )
+            for group in groups
+        ]
+        entries = [
+            ShotEntry(
+                shot_id=shot.shot_id,
+                storyboard_id=shot.storyboard_id or "",
+                scene_id=shot.scene_id,
+                start=shot.start,
+                duration=shot.duration,
+            )
+            for shot in shots
+        ]
+        return RenderPlan(
+            project_id=project_id,
+            scope="timeline",
+            storyboard_id=None,
+            episode_id=episode.id,
+            storyboard_version=None,
+            episode_version=chosen.episode_version,
+            revision=record.revision,
+            scenes=scenes,
+            shots=shots,
+            entries=entries,
+            transitions={},
+            title_cards=title_card_args(chosen),
+            effective=[],
+            total=Fraction(0),
+            profile=profile,
+            mode=args.subtitle_mode,
+            track=None,
+            track_version=None,
+            track_sha256=None,
+            font=reference,
+            engine=engine,
+            audio=AudioPlan(),
+            retimed=False,
+            fingerprint="",
+            timeline_id=record.id,
+            timeline_version=chosen.version,
+            timeline_fingerprint=chosen.fingerprint,
+            timeline_sha256=timeline_version_sha256(chosen),
+            timeline_clips=chosen.clips,
+            transition_args=transition_args(chosen),
+            timeline_subtitle=chosen.subtitle,
+            timeline_audio=chosen.audio,
+        )
+
+    def _pinned_media(self, state, project_id, shot_version: ShotVersion):
+        """The exact media of one registered ShotVersion, verified like a render input."""
+        job = state["jobs"].get(shot_version.job_id)
+        media_id = shot_version.media_id
+        if media_id is None and isinstance(job, dict):
+            refs = (job.get("result") or {}).get("mediaRefs") or []
+            media_id = refs[0].get("mediaId") if refs else None
+        if media_id is None:
+            return None
+        raw_media = state["media"].get(media_id)
+        if raw_media is None:
+            return None
+        try:
+            parsed = parse_media(raw_media)
+        except Exception:
+            return None
+        if isinstance(parsed, (FilmMedia, AudioMedia)):
+            return None
+        if (
+            parsed.project_id != project_id
+            or job is None
+            or job.get("status") != "succeeded"
+            or parsed.metadata.video_codec != "h264"
+            or (job.get("result") or {}).get("mediaRefs", [{}])[0].get("mediaId") != parsed.id
+        ):
+            return None
+        return parsed
+
     # -- frozen sources --------------------------------------------------------
     @staticmethod
     def _scene_for_storyboard(state, storyboard_id):
@@ -559,7 +768,10 @@ class RenderService:
             for shot in shots
         ]
 
-    def _resolve_track(self, state, project_id, args: FilmRenderArgs, entries: list[ShotEntry]):
+    def _resolve_track(self, state, project_id, args: FilmRenderArgs, plan: RenderPlan):
+        entries = plan.entries
+        if args.scope == "timeline":
+            return self._resolve_timeline_track(state, project_id, args, plan)
         track = None
         if args.track_id is not None:
             track = track_by_id(state, args.track_id, project_id)
@@ -600,8 +812,33 @@ class RenderService:
             return None, None, None
         return track, version, track_version_sha256(version)
 
+    def _resolve_timeline_track(self, state, project_id, args: FilmRenderArgs, plan: RenderPlan):
+        """A timeline may carry no subtitles; when it does, it must be the episode track."""
+        reference = plan.timeline_subtitle
+        if reference is None:
+            if args.subtitle_mode != "soft":
+                raise RenderError("SUBTITLE_TRACK_MISSING", "（该时间线没有绑定字幕轨）", stage="subtitle")
+            return None, None, None
+        track = track_by_id(state, reference.track_id, project_id)
+        if track is None or track.scope != "episode" or track.episode_id != plan.episode_id:
+            raise RenderError("SUBTITLE_TRACK_MISSING", "（时间线的字幕轨不属于该集）", stage="subtitle")
+        version = next((item for item in track.versions if item.version == reference.track_version), None)
+        if version is None:
+            raise RenderError("SUBTITLE_TRACK_MISSING", "（指定字幕版本不存在）", stage="subtitle")
+        if version.episode_version != plan.episode_version:
+            raise RenderError(
+                "RENDER_TIMELINE_MISMATCH", "（字幕轨与时间线依据的分集版本不一致）", stage="subtitle"
+            )
+        if not version.cues:
+            if args.subtitle_mode != "soft":
+                raise RenderError("SUBTITLE_TRACK_MISSING", "（字幕版本没有 cue）", stage="subtitle")
+            return None, None, None
+        return track, version, track_version_sha256(version)
+
     # -- audio planning --------------------------------------------------------
     def _audio_plan(self, state, project_id, plan: RenderPlan, args: FilmRenderArgs) -> AudioPlan:
+        if plan.scope == "timeline":
+            return self._timeline_audio_plan(state, project_id, plan)
         result = AudioPlan()
         lines = self._dialogue_lines(state, plan)
         voice_assets = self._voice_assets(state, project_id, plan)
@@ -685,12 +922,96 @@ class RenderService:
             raise RenderError("RENDER_SOURCE_MISSING", "（音频轨超过上限）", stage="audio")
         return result
 
+    def _timeline_audio_plan(self, state, project_id, plan: RenderPlan) -> AudioPlan:
+        """The frozen timeline's audio list is authoritative; nothing else is mixed."""
+        result = AudioPlan()
+        lines = self._dialogue_lines(state, plan)
+        cues = list(plan.track_version.cues) if plan.track_version is not None else []
+        cue_starts = self._cue_starts(lines, cues)
+        for entry in plan.timeline_audio:
+            raw = state["audio"].get(entry.audio_id)
+            if raw is None or raw.get("projectId") != project_id:
+                raise RenderError("AUDIO_ASSET_MISSING", "（时间线引用的音频资产缺失）", stage="audio")
+            asset = AudioAsset.model_validate(raw)
+            version = next((item for item in asset.versions if item.version == entry.audio_version), None)
+            if version is None or asset.kind != entry.kind:
+                raise RenderError("AUDIO_ASSET_MISSING", "（指定音频版本缺失）", stage="audio")
+            media = self._audio_media(state, version)
+            if entry.kind == "voice":
+                source = version.source
+                if not isinstance(source, ProviderAudioSource):
+                    raise RenderError("AUDIO_ASSET_MISSING", "（配音资产来源非法）", stage="audio")
+                index = next(
+                    (
+                        number
+                        for number, line in enumerate(lines)
+                        if line[0] == source.text and (line[1] or NARRATOR_SPEAKER) == speaker_of(source)
+                    ),
+                    None,
+                )
+                cue = cue_starts.get(index) if index is not None else None
+                start = self._timeline_cue_start(cue, plan) if cue is not None else None
+                if start is None:
+                    # The cue is entirely outside the edit: it contributes no audio.
+                    continue
+                gain = entry.gain_db
+                ducking = False
+                binding = self._voice_binding(source)
+            else:
+                start = Fraction(entry.start_ms, 1000)
+                gain = entry.gain_db
+                ducking = entry.kind == "bgm"
+                binding = None
+            result.tracks.append(
+                MixTrack(
+                    audio_id=asset.id,
+                    audio_version=version.version,
+                    kind=entry.kind,
+                    path=media[0],
+                    duration_seconds=version.duration_seconds,
+                    start_seconds=start,
+                    gain_db=gain,
+                    ducking=ducking,
+                    sha256=version.sha256,
+                )
+            )
+            result.assets.append(asset.id)
+            result.rendered.append(
+                RenderAudioTrack(
+                    audio_id=asset.id,
+                    audio_version=version.version,
+                    kind=entry.kind,
+                    gain_db=gain,
+                    start=Rational.of(start),
+                    ducking=ducking,
+                    voice_binding=binding,
+                )
+            )
+        if len(result.tracks) > MAX_RENDER_AUDIO_TRACKS:
+            raise RenderError("RENDER_SOURCE_MISSING", "（音频轨超过上限）", stage="audio")
+        return result
+
+    def _timeline_cue_start(self, cue: SubtitleCue, plan: RenderPlan) -> Fraction | None:
+        """The effective start of a frozen cue under the timeline's clip windows."""
+        positions = {clip.shot_id: index for index, clip in enumerate(plan.timeline_clips)}
+        index = positions.get(cue.shot_id) if cue.shot_id is not None else None
+        if index is None or plan.track_version is None:
+            return None
+        reference = next((item for item in plan.track_version.timeline if item.shot_id == cue.shot_id), None)
+        if reference is None:
+            return None
+        clip = plan.timeline_clips[index]
+        target = plan.effective[index]
+        source = Fraction(cue.start.total_microseconds(), 1_000_000)
+        mapped = target.start + (source - reference.start.fraction() - Fraction(clip.in_ms, 1000))
+        return min(max(mapped, target.start), target.start + target.duration)
+
     @staticmethod
     def _dialogue_lines(state, plan: RenderPlan):
         from vagent.video.episodes import Scene
 
         lines: list[tuple[str, str | None]] = []
-        if plan.scope == "episode" and plan.episode_id is not None:
+        if plan.scope in {"episode", "timeline"} and plan.episode_id is not None:
             episode = state["episodes"][plan.episode_id]
             for reference in episode["versions"][-1]["scenes"]:
                 scene = Scene.model_validate(state["scenes"][reference["sceneId"]])
@@ -793,6 +1114,21 @@ class RenderService:
     # -- fingerprint / replay --------------------------------------------------
     @staticmethod
     def _fingerprint(plan: RenderPlan, args: FilmRenderArgs) -> str:
+        shots = []
+        for shot in plan.shots:
+            entry = {
+                "shotId": shot.shot_id,
+                "shotVersionId": shot.shot_version_id,
+                "mediaId": shot.media_id,
+                "sha256": shot.sha256,
+                "start": format_seconds(shot.start),
+                "duration": format_seconds(shot.duration),
+            }
+            if plan.timeline_id is not None:
+                # Only timeline renders change the source window; earlier payloads stay
+                # byte-identical so recorded fingerprints still replay.
+                entry["trimStart"] = format_seconds(shot.trim_start)
+            shots.append(entry)
         payload = {
             "renderVersion": RENDER_VERSION,
             "scope": plan.scope,
@@ -801,17 +1137,7 @@ class RenderService:
             "episodeId": plan.episode_id,
             "storyboardVersion": plan.storyboard_version,
             "episodeVersion": plan.episode_version,
-            "shots": [
-                {
-                    "shotId": shot.shot_id,
-                    "shotVersionId": shot.shot_version_id,
-                    "mediaId": shot.media_id,
-                    "sha256": shot.sha256,
-                    "start": format_seconds(shot.start),
-                    "duration": format_seconds(shot.duration),
-                }
-                for shot in plan.shots
-            ],
+            "shots": shots,
             "trackId": plan.track.id if plan.track else None,
             "trackVersion": plan.track_version.version if plan.track_version else None,
             "trackSha256": plan.track_sha256,
@@ -846,6 +1172,13 @@ class RenderService:
             "font": plan.font.model_dump(mode="json", by_alias=True),
             "mixVersion": MIX_VERSION,
         }
+        if plan.timeline_id is not None:
+            payload["timeline"] = {
+                "timelineId": plan.timeline_id,
+                "timelineVersion": plan.timeline_version,
+                "timelineSha256": plan.timeline_sha256,
+                "timelineFingerprint": plan.timeline_fingerprint,
+            }
         return render_fingerprint(payload)
 
     @staticmethod
@@ -867,17 +1200,25 @@ class RenderService:
         )
         if match is None:
             return None
+
+        def same_target(raw: dict) -> bool:
+            if raw["scope"] != plan.scope:
+                return False
+            if plan.scope == "storyboard":
+                return raw.get("storyboardId") == plan.storyboard_id
+            if plan.scope == "timeline":
+                return (
+                    raw.get("timelineId") == plan.timeline_id
+                    and raw.get("timelineVersion") == plan.timeline_version
+                )
+            return raw.get("episodeId") == plan.episode_id
+
         task = next(
             (
                 RenderTask.model_validate(raw)
                 for raw in state.get("renders", {}).values()
                 if raw["projectId"] == plan.project_id
-                and raw["scope"] == plan.scope
-                and (
-                    raw.get("storyboardId") == plan.storyboard_id
-                    if plan.scope == "storyboard"
-                    else raw.get("episodeId") == plan.episode_id
-                )
+                and same_target(raw)
                 and raw["fingerprint"] == plan.fingerprint
                 and raw["status"] == "succeeded"
             ),
@@ -890,6 +1231,8 @@ class RenderService:
             "scope": plan.scope,
             "storyboardId": plan.storyboard_id,
             "episodeId": plan.episode_id,
+            "timelineId": plan.timeline_id,
+            "timelineVersion": plan.timeline_version,
             "profile": plan.profile["name"],
             "subtitleMode": plan.mode,
             "estimatedSeconds": task.estimated_seconds if task is not None else 0,
@@ -1038,10 +1381,25 @@ class RenderService:
                 except MixError as error:
                     raise RenderError(error.code, f"（{error}）", stage=error.stage) from None
             derived = (
-                remap_cues(list(plan.track_version.cues), plan.entries, plan.effective)
+                remap_timeline_cues(
+                    list(plan.track_version.cues),
+                    plan.track_version.timeline,
+                    plan.timeline_clips,
+                    plan.effective,
+                )
+                if plan.timeline_id is not None and plan.track_version is not None
+                else remap_cues(list(plan.track_version.cues), plan.entries, plan.effective)
                 if plan.track_version is not None
                 else []
             )
+            if plan.track_version is not None and not derived:
+                # Every cue of this track fell outside the edit. A soft export simply
+                # has no subtitle; a burn/both export cannot honour its request.
+                if args_model.subtitle_mode != "soft":
+                    raise RenderError(
+                        "SUBTITLE_TRACK_MISSING", "（重映射后没有可显示的字幕 cue）", stage="subtitle"
+                    )
+            subtitle_used = plan.track_version is not None and bool(derived)
             produced = await self._render_final(
                 plan,
                 args_model,
@@ -1050,6 +1408,7 @@ class RenderService:
                 scene_paths,
                 mixed,
                 derived,
+                subtitle_used,
                 deadline,
             )
             produced.update(
@@ -1059,6 +1418,7 @@ class RenderService:
                     "part_relative": part_relative,
                     "mixed": mixed,
                     "derived_cues": derived,
+                    "subtitle_used": subtitle_used,
                 }
             )
             return produced
@@ -1191,7 +1551,11 @@ class RenderService:
             )
         filters.append(f"[{joined}]null[outv]")
         command = [str(plan.engine.path), "-hide_banner", "-nostdin", "-loglevel", "warning", "-nostats"]
-        for path in paths:
+        for shot, path in zip(scene.shots, paths, strict=True):
+            if shot.trim_start > 0:
+                # Seek before opening the input: the encoder still decodes accurately
+                # from the previous keyframe, and timestamps restart at zero.
+                command += ["-ss", format_seconds(shot.trim_start)]
             command += ["-i", str(path)]
         command += [
             "-filter_complex",
@@ -1235,6 +1599,7 @@ class RenderService:
         scenes: list[tuple[Path, Fraction]],
         mixed,
         derived: list[SubtitleCue],
+        subtitle_used: bool,
         deadline: float,
     ) -> dict:
         filters = [
@@ -1295,13 +1660,13 @@ class RenderService:
             filters.append(f"[{joined}]subtitles=titles.ass:fontsdir=fonts[titlecards]")
             title_label = "titlecards"
         video_label = title_label
-        if args.subtitle_mode in {"burn", "both"}:
+        if subtitle_used and args.subtitle_mode in {"burn", "both"}:
             filters.append(f"[{video_label}]subtitles=sub.ass:fontsdir=fonts[burned]")
             video_label = "burned"
         filters.append(f"[{video_label}]null[finalv]")
-        srt_bytes = render_srt(derived).encode("utf-8") if derived else b""
+        srt_bytes = render_srt(derived).encode("utf-8") if subtitle_used else b""
         ass_text = render_ass(derived, width=plan.profile["width"], height=plan.profile["height"])
-        if plan.track_version is not None:
+        if subtitle_used:
             (work / "sub.srt").write_bytes(srt_bytes)
             (work / "sub.ass").write_text(ass_text, encoding="utf-8", newline="\n")
         command = [str(plan.engine.path), "-hide_banner", "-nostdin", "-loglevel", "warning", "-nostats"]
@@ -1318,10 +1683,10 @@ class RenderService:
                 "anullsrc=channel_layout=stereo:sample_rate=48000",
             ]
         subtitle_index = len(scenes) + 1
-        if plan.track_version is not None and args.subtitle_mode in {"soft", "both"}:
+        if subtitle_used and args.subtitle_mode in {"soft", "both"}:
             command += ["-i", "sub.srt"]
         command += ["-filter_complex", ";".join(filters), "-map", "[finalv]", "-map", f"{audio_index}:a"]
-        if plan.track_version is not None and args.subtitle_mode in {"soft", "both"}:
+        if subtitle_used and args.subtitle_mode in {"soft", "both"}:
             command += ["-map", f"{subtitle_index}:0", "-c:s", "mov_text", "-metadata:s:s:0", "language=zho"]
             command += ["-disposition:s:0", "0"]
         command += [
@@ -1366,7 +1731,7 @@ class RenderService:
         except (OSError, ValueError):
             raise RenderError("RENDER_VALIDATION_FAILED", "（MP4 结构无效）", stage="validate") from None
         streams = await self._probe(plan.engine, output, deadline)
-        self._validate(plan, args, streams, metadata)
+        self._validate(plan, args, streams, metadata, subtitle_used)
         digest = _hash_file(output)
         return {
             "size_bytes": size,
@@ -1374,12 +1739,18 @@ class RenderService:
             "metadata": metadata,
             "streams": streams,
             "sidecar_sha256": hashlib.sha256(srt_bytes).hexdigest()
-            if plan.track_version is not None and args.subtitle_mode in {"soft", "both"}
+            if subtitle_used and args.subtitle_mode in {"soft", "both"}
             else None,
         }
 
     @staticmethod
-    def _validate(plan: RenderPlan, args: FilmRenderArgs, streams: ProbedStreams, metadata) -> None:
+    def _validate(
+        plan: RenderPlan,
+        args: FilmRenderArgs,
+        streams: ProbedStreams,
+        metadata,
+        subtitle_used: bool = True,
+    ) -> None:
         if streams.video is None:
             raise RenderError("RENDER_VALIDATION_FAILED", "（缺少视频轨）", stage="validate")
         if streams.video["codec"] != "h264":
@@ -1400,7 +1771,7 @@ class RenderService:
         if metadata.video_codec != "h264" or not metadata.has_audio:
             raise RenderError("RENDER_VALIDATION_FAILED", "（MP4 结构缺少视频或音频）", stage="validate")
         mov_text = [item for item in streams.subtitles if item["codec"] == "mov_text"]
-        if args.subtitle_mode in {"soft", "both"} and plan.track_version is not None and not mov_text:
+        if args.subtitle_mode in {"soft", "both"} and subtitle_used and not mov_text:
             raise RenderError("RENDER_VALIDATION_FAILED", "（缺少 mov_text 字幕轨）", stage="validate")
         if args.subtitle_mode == "burn" and streams.subtitles:
             raise RenderError("RENDER_VALIDATION_FAILED", "（烧录输出不应再有字幕轨）", stage="validate")
@@ -1531,7 +1902,7 @@ class RenderService:
         )
         subtitle = None
         sources_subtitle = None
-        if plan.track is not None and plan.track_version is not None:
+        if produced.get("subtitle_used", True) and plan.track is not None and plan.track_version is not None:
             subtitle = RenderSubtitle(
                 track_id=plan.track.id,
                 track_version=plan.track_version.version,
@@ -1606,12 +1977,21 @@ class RenderService:
             ),
             measurements=measurements,
             sources=RenderSources(
-                episode_id=plan.episode_id if plan.scope == "episode" else None,
+                episode_id=plan.episode_id if plan.scope in {"episode", "timeline"} else None,
                 storyboard_version=plan.storyboard_version,
                 episode_version=plan.episode_version,
                 shot_version_ids=tuple(shot.shot_version_id for shot in plan.shots),
                 audio_assets=tuple(plan.audio.assets),
                 subtitle_track=sources_subtitle,
+                timeline=(
+                    RenderTimelineSource(
+                        timeline_id=plan.timeline_id,
+                        timeline_version=plan.timeline_version,
+                        timeline_sha256=plan.timeline_sha256,
+                    )
+                    if plan.timeline_id is not None
+                    else None
+                ),
                 font=plan.font,
             ),
             fingerprint=plan.fingerprint,
@@ -1629,7 +2009,7 @@ class RenderService:
                 id=film_id,
                 project_id=plan.project_id,
                 storyboard_id=plan.storyboard_id if plan.scope == "storyboard" else None,
-                episode_id=plan.episode_id if plan.scope == "episode" else None,
+                episode_id=plan.episode_id if plan.scope in {"episode", "timeline"} else None,
                 current_version=1,
                 versions=(version,),
                 revision=1,
@@ -1687,12 +2067,17 @@ class RenderService:
         return self._result(draft, plan, updated_task, film, number)
 
     def _native_version(self, plan, produced, render, number, timestamp, film_id) -> FilmVersion:
+        timeline_assembly = plan.timeline_id is not None
+        assembly_version = RENDER_TIMELINE_ASSEMBLY if timeline_assembly else RENDER_NATIVE_ASSEMBLY
+        effective = {item.shot_id: item for item in plan.effective}
         timeline = tuple(
             FilmSegment(
                 shot_id=shot.shot_id,
                 shot_version_id=shot.shot_version_id,
-                start=Rational.of(shot.start),
-                duration=Rational.of(shot.duration),
+                start=Rational.of(effective[shot.shot_id].start if timeline_assembly else shot.start),
+                duration=Rational.of(
+                    effective[shot.shot_id].duration if timeline_assembly else shot.duration
+                ),
                 signature_sha256=shot.sha256,
                 priming=Rational.microseconds(0),
             )
@@ -1709,24 +2094,36 @@ class RenderService:
             )
             for shot in plan.shots
         )
+        compatibility_payload = {
+            "scope": plan.scope,
+            "profile": plan.profile,
+            "shots": [
+                {
+                    "shotId": shot.shot_id,
+                    "sha256": shot.sha256,
+                    **({"trimStart": format_seconds(shot.trim_start)} if timeline_assembly else {}),
+                }
+                for shot in plan.shots
+            ],
+        }
+        if timeline_assembly:
+            compatibility_payload["timeline"] = {
+                "timelineId": plan.timeline_id,
+                "timelineVersion": plan.timeline_version,
+                "timelineSha256": plan.timeline_sha256,
+            }
         assembly = FilmAssembly(
-            assembly_version=RENDER_NATIVE_ASSEMBLY,
+            assembly_version=assembly_version,
             engine=FilmEngine(
                 package_version=PACKAGE_VERSION,
                 ffmpeg_version=plan.engine.ffmpeg_version,
                 binary_sha256=plan.engine.binary_sha256,
             ),
-            compatibility_sha256=canonical_sha256(
-                {
-                    "scope": plan.scope,
-                    "profile": plan.profile,
-                    "shots": [{"shotId": shot.shot_id, "sha256": shot.sha256} for shot in plan.shots],
-                }
-            ),
+            compatibility_sha256=canonical_sha256(compatibility_payload),
             timeline=timeline,
             fingerprint=canonical_sha256(
                 {
-                    "assemblyVersion": RENDER_NATIVE_ASSEMBLY,
+                    "assemblyVersion": assembly_version,
                     "renderFingerprint": plan.fingerprint,
                     "timeline": [segment.model_dump(mode="json", by_alias=True) for segment in timeline],
                 }
@@ -1757,6 +2154,8 @@ class RenderService:
             "scope": plan.scope,
             "storyboardId": plan.storyboard_id,
             "episodeId": plan.episode_id,
+            "timelineId": plan.timeline_id,
+            "timelineVersion": plan.timeline_version,
             "profile": plan.profile["name"],
             "subtitleMode": plan.mode,
             "estimatedSeconds": task.estimated_seconds,

@@ -46,7 +46,7 @@ class Harness:
         )
 
     def runner(self, model=None, **kwargs):
-        return AgentRunner(
+        return agent_runner(
             store=self.store,
             model=model or self.model,
             tools=self.tools,
@@ -287,7 +287,7 @@ async def test_auto_resume_keeps_result_when_configuration_or_budget_is_unavaila
 
         harness.coordinator.runner_factory = missing
     elif problem == "mode":
-        harness.coordinator.runner_factory = lambda _: AgentRunner(
+        harness.coordinator.runner_factory = lambda _: agent_runner(
             store=store, model=harness.model, tools=create_project_tools()
         )
     elif problem == "checkpoint":
@@ -475,7 +475,7 @@ async def test_generic_external_resource_uses_the_same_production_wait_path(stor
     model = ScriptedModel(
         lambda messages, step: tool_call("report") if step == 0 else AIMessage(content="report delivered")
     )
-    runner = AgentRunner(store=store, model=model, tools=registry, clock=video_clock)
+    runner = agent_runner(store=store, model=model, tools=registry, clock=video_clock)
     first = await runner.run("coffee", "report")
     assert (
         first["executionVersion"] == 3
@@ -506,7 +506,7 @@ async def test_unregistered_deferred_marker_cannot_fabricate_a_wait_or_result(st
     )
     registry.register_wait_resolver("report", lambda _: {"ok": True, "data": "must not use"})
     model = ScriptedModel(lambda *_: tool_call("report"))
-    result = await AgentRunner(store=store, model=model, tools=registry).run("coffee", "report")
+    result = await agent_runner(store=store, model=model, tools=registry).run("coffee", "report")
     assert result["errorCode"] == "WAIT_NOT_FOUND" and model.calls == 1
     assert not store.snapshot()["waits"] and not store.snapshot()["operations"]
     assert not outcomes(result)["call-1"]["ok"]
@@ -710,3 +710,15 @@ async def test_application_exit_during_preparation_reconstructs_interrupt(tmp_pa
         service.wait_coordinator.notify()
         final = await wait_for_status(service, first["id"], "completed")
         assert final["modelSteps"] == 2 and final["toolCalls"] == 1 and model.calls == 1
+
+
+def agent_runner(**kwargs):
+    """An AgentRunner with the evaluation fixture context budget.
+
+    M7 froze a longer rules text; the product default (65536) is unchanged, while
+    these scripted histories need the same 96 KiB headroom as the evaluation suites.
+    """
+    from vagent.context import ContextBuilder
+
+    kwargs.setdefault("context", ContextBuilder(98304))
+    return AgentRunner(**kwargs)

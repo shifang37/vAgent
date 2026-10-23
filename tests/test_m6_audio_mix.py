@@ -256,3 +256,27 @@ def test_loudnorm_and_ebur128_parsers_extract_the_frozen_keys():
     assert loudness_in_tolerance(measured)
     assert not loudness_in_tolerance({**measured, "integratedLufs": -17.0})
     assert not loudness_in_tolerance({**measured, "truePeakDb": -0.5})
+
+
+def test_loudnorm_second_pass_ignores_silence_sentinels():
+    """A near-silent first pass reports -3.4e38 / -inf; FFmpeg rejects them."""
+    from vagent.video.mixer import _loudnorm_stage
+
+    silence = {
+        "input_i": "-3.402823e+38",
+        "input_tp": "-inf",
+        "input_lra": "0.00",
+        "input_thresh": "-70.00",
+        "target_offset": "0.00",
+    }
+    stage = _loudnorm_stage(silence)
+    assert "measured_I" not in stage and "linear=true" not in stage
+    normal = {
+        "input_i": "-16.00",
+        "input_tp": "-1.50",
+        "input_lra": "7.00",
+        "input_thresh": "-26.00",
+        "target_offset": "0.00",
+    }
+    assert "measured_I=-16.00" in _loudnorm_stage(normal)
+    assert "linear=true" in _loudnorm_stage(normal)

@@ -237,16 +237,42 @@ def loudness_in_tolerance(measurement: dict) -> bool:
     return true_peak <= TARGET_TRUE_PEAK_DB + 1e-6
 
 
+def _measured_number(value, *, low: float, high: float) -> str | None:
+    """A JSON measurement is usable only when it is finite and in a sane range.
+
+    A near-silent first pass can report ``-inf``; FFmpeg then rejects the second
+    pass with ``Error parsing global options: Result too large``. Falling back to the
+    unmeasured dynamic stage is the correct behaviour for silence.
+    """
+    try:
+        number = float(value)
+    except (TypeError, ValueError):
+        return None
+    if number != number or number in (float("inf"), float("-inf")):
+        return None
+    if number < low or number > high:
+        return None
+    return str(value)
+
+
 def _loudnorm_stage(measured: dict | None, *, linear: bool = True) -> str:
     stage = f"loudnorm=I={TARGET_LUFS:g}:TP={TARGET_TRUE_PEAK_DB:g}:LRA={TARGET_LRA:g}"
     if measured is not None:
-        stage += (
-            f":measured_I={measured['input_i']}:measured_TP={measured['input_tp']}"
-            f":measured_LRA={measured['input_lra']}:measured_thresh={measured['input_thresh']}"
-            f":offset={measured.get('target_offset', '0')}"
-        )
-        if linear:
-            stage += ":linear=true"
+        fields = {
+            "measured_I": _measured_number(measured.get("input_i"), low=-100.0, high=0.0),
+            "measured_TP": _measured_number(measured.get("input_tp"), low=-100.0, high=20.0),
+            "measured_LRA": _measured_number(measured.get("input_lra"), low=0.0, high=100.0),
+            "measured_thresh": _measured_number(measured.get("input_thresh"), low=-120.0, high=0.0),
+            "offset": _measured_number(measured.get("target_offset"), low=-100.0, high=100.0) or "0",
+        }
+        if all(value is not None for value in fields.values()):
+            stage += (
+                f":measured_I={fields['measured_I']}:measured_TP={fields['measured_TP']}"
+                f":measured_LRA={fields['measured_LRA']}:measured_thresh={fields['measured_thresh']}"
+                f":offset={fields['offset']}"
+            )
+            if linear:
+                stage += ":linear=true"
     return stage + ":print_format=json"
 
 

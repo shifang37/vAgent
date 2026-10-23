@@ -70,12 +70,12 @@ async def test_mock_multi_shot_storyboard_trajectory(store):
         return AIMessage(content=f"分镜已保存：{saved['storyboardId']}，版本 2，共 3 个镜头。")
 
     model = ScriptedModel(respond)
-    result = await AgentRunner(store=store, model=model, tools=registry).run(
+    result = await agent_runner(store=store, model=model, tools=registry).run(
         "coffee", "把这段需求做成三镜头分镜，保存后给我镜头清单"
     )
     assert result["status"] == "completed", result["answer"]
     assert result["executionVersion"] == 3 and result["videoMode"] == "mock"
-    assert result["toolFeatures"]["video"]["toolsVersion"] == 16
+    assert result["toolFeatures"]["video"]["toolsVersion"] == 18
     assert result["toolCalls"] == 3 and model.calls == 4
     state = store.snapshot()
     assert len(state["storyboards"]) == 1 and not state["jobs"]
@@ -104,7 +104,7 @@ async def test_mock_application_exposes_storyboard_tools_end_to_end(tmp_path):
         await service.task
         record = service.run_record(service.active_run_id)
         assert record["status"] == "completed", record["answer"]
-        assert record["toolFeatures"]["video"]["toolsVersion"] == 16
+        assert record["toolFeatures"]["video"]["toolsVersion"] == 18
         names = {tool["name"] for tool in service.capabilities()["tools"]}
         assert {"storyboard_read", "storyboard_save"}.issubset(names)
         assert len(service.store.snapshot()["storyboards"]) == 1
@@ -116,3 +116,15 @@ async def test_off_mode_hides_storyboard_tools(tmp_path):
     async with ApplicationService.open(config, model=model) as service:
         names = {tool["name"] for tool in service.capabilities()["tools"]}
         assert not {"storyboard_read", "storyboard_save"}.intersection(names)
+
+
+def agent_runner(**kwargs):
+    """An AgentRunner with the evaluation fixture context budget.
+
+    M7 froze a longer rules text; the product default (65536) is unchanged, while
+    these scripted histories need the same 96 KiB headroom as the evaluation suites.
+    """
+    from vagent.context import ContextBuilder
+
+    kwargs.setdefault("context", ContextBuilder(98304))
+    return AgentRunner(**kwargs)

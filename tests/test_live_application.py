@@ -269,9 +269,9 @@ async def test_live_application_model_tools_replay_http_views_and_client_closure
         return AIMessage(content=f"原任务 {remembered['jobId']} 已登记，等待本地交付。")
 
     model = ScriptedModel(respond)
-    # M7 E1 appends the season chapter to the frozen rules text; this scripted
-    # four-tool-call history now needs slightly more than the default 64 KiB budget.
-    config = live_config(tmp_path, api_key="text-api-secret", context_bytes=73728)
+    # M7 E1/E3 appended the season and timeline chapters to the frozen rules text;
+    # this scripted four-tool-call history now needs more than the default 64 KiB budget.
+    config = live_config(tmp_path, api_key="text-api-secret", context_bytes=98304)
     app = create_app(config, model=model)
     async with app.router.lifespan_context(app):
         service = app.state.service
@@ -288,8 +288,8 @@ async def test_live_application_model_tools_replay_http_views_and_client_closure
             and record["executionVersion"] == 3
             and record["contextVersion"] == 2
         )
-        assert record["toolFeatures"]["video"]["toolsVersion"] == 16
-        assert record["toolFeatures"]["video"]["rulesVersion"] == 16
+        assert record["toolFeatures"]["video"]["toolsVersion"] == 18
+        assert record["toolFeatures"]["video"]["rulesVersion"] == 18
         await eventually(lambda: service.job(remembered["jobId"])["status"] == "downloading")
         job = service.job(remembered["jobId"])
         assert job["providerTaskId"] == "wan-original" and job["submitAttempts"] == 1

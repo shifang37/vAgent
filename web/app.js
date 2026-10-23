@@ -77,6 +77,27 @@ import {
   subtitleCueAt,
 } from "./episode-state.js";
 
+import {
+  TIMELINE_CLIP_LIMIT,
+  timelineAudioRows,
+  timelineDraft,
+  timelineDraftTransitions,
+  timelineErrorLabel,
+  timelineMeta,
+  timelineMetaText,
+  timelineMove,
+  timelinePreview,
+  timelineRenderBody,
+  timelineSaveBody,
+  timelineSetTransition,
+  timelineSubtitleOptions,
+  timelineSummary,
+  timelineSummaryText,
+  timelineTransitionFor,
+  timelineTrim,
+  timelineValidation,
+} from "./timeline-state.js";
+
 const $ = (selector) => document.querySelector(selector);
 const paths = {
   "plus-square":
@@ -111,6 +132,8 @@ const paths = {
   chart: '<path d="M5 20V10m5 10V4m5 16v-7m5 7V8"/>',
   season:
     '<path d="M4 5h16v14H4zM4 9h16M9 9v10M13 12h4m-4 3h4"/>',
+  timeline:
+    '<path d="M3 6h18M3 18h18M7 6v12M17 6v12M3 12h18"/><circle cx="12" cy="12" r="2"/>',
 };
 function icons(root = document) {
   root.querySelectorAll("[data-icon]").forEach((el) => {
@@ -195,6 +218,21 @@ let seasonView = null,
   seasonBatchBusy = false,
   seasonBatchError = null,
   pendingSeasonBatch = null;
+// M7 E3 timeline workbench: one editable draft over the frozen server timeline.
+// Preview is client-side ordering/trim playback; the export is the deliverable.
+let timelineEditor = null,
+  timelineClips = [],
+  timelineTransitions = [],
+  timelineSubtitle = null,
+  timelineAudio = [],
+  timelineTitleCards = [],
+  timelineBusy = false,
+  timelineError = null,
+  timelineNotice = null,
+  timelineEpisodeId = null,
+  timelinePreviewState = { index: -1, plan: [] },
+  timelineAudioBusy = false,
+  pendingTimelineAudio = null;
 const IMAGE_TYPES = ["image/png", "image/jpeg", "image/webp"];
 const MAX_IMAGE_BYTES = 20 * 1024 * 1024;
 const currentRun = () => snapshot?.run;
@@ -395,6 +433,7 @@ function resetStoryboardUi() {
   $("#artifact-panel").hidden = true;
   $("#episode-panel").hidden = true;
   $("#season-panel").hidden = true;
+  $("#timeline-panel").hidden = true;
   seasonView = null;
   seasonList = [];
   seasonEditing = null;
@@ -405,6 +444,19 @@ function resetStoryboardUi() {
   seasonBatchBusy = false;
   seasonBatchError = null;
   pendingSeasonBatch = null;
+  timelineEditor = null;
+  timelineClips = [];
+  timelineTransitions = [];
+  timelineSubtitle = null;
+  timelineAudio = [];
+  timelineTitleCards = [];
+  timelineError = null;
+  timelineNotice = null;
+  timelineEpisodeId = null;
+  timelineBusy = false;
+  timelineAudioBusy = false;
+  pendingTimelineAudio = null;
+  timelinePreviewState = { index: -1, plan: [] };
 }
 async function selectSession(id) {
   const generation = ++viewGeneration;
@@ -600,6 +652,7 @@ function render() {
   renderStoryboardPanel();
   renderEpisodePanel();
   renderSeasonPanel();
+  renderTimelinePanel();
 }
 function metric(label, value) {
   return `<div class="metric"><small>${label}</small><strong>${value ?? "—"}</strong></div>`;
@@ -682,6 +735,7 @@ function openStoryboardPanel() {
   $("#observe-panel").hidden = true;
   $("#episode-panel").hidden = true;
   $("#season-panel").hidden = true;
+  $("#timeline-panel").hidden = true;
   $("#storyboard-panel").hidden = false;
   renderStoryboardPanel();
 }
@@ -691,6 +745,7 @@ function openInspector(mode) {
   $("#storyboard-panel").hidden = true;
   $("#episode-panel").hidden = true;
   $("#season-panel").hidden = true;
+  $("#timeline-panel").hidden = true;
   $("#observe-panel").hidden = true;
   $("#artifact-panel").hidden = false;
 }
@@ -701,6 +756,7 @@ function openEpisodePanel() {
   $("#observe-panel").hidden = true;
   $("#storyboard-panel").hidden = true;
   $("#season-panel").hidden = true;
+  $("#timeline-panel").hidden = true;
   $("#episode-panel").hidden = false;
   renderEpisodePanel();
 }
@@ -720,6 +776,7 @@ async function openSceneStoryboard(storyboardId) {
   $("#observe-panel").hidden = true;
   $("#episode-panel").hidden = true;
   $("#season-panel").hidden = true;
+  $("#timeline-panel").hidden = true;
   $("#storyboard-panel").hidden = false;
   filmLoadedKey = null;
   filmState = null;
@@ -939,6 +996,9 @@ function renderEpisodePanel() {
     : '<li class="meta">这个分集还没有引用角色圣经。</li>';
   panel.innerHTML = `${panelHeading("分集", "close-episode")}
     <p class="meta">${escapeHTML(meta.title)} · 当前版本 ${meta.currentVersion} · revision ${meta.revision} · ${meta.sceneCount} 场 / ${meta.shotCount} 镜 / ${meta.targetDurationSeconds} 秒</p>
+    <div class="episode-actions">
+      <button class="secondary" data-action="open-timeline" data-episode-id="${escapeHTML(view.episodeId || "")}">打开时间线工作台</button>
+    </div>
     <div class="episode-budget">
       <span>镜头交付 <strong>${progress.delivered}/${progress.planned}</strong></span>
       <span>集级任务 <strong>${budget.usedJobs}/${budget.jobCap}</strong></span>
@@ -1310,8 +1370,462 @@ function renderSeasonPanel() {
   icons(panel);
 }
 
-function renderStoryboardPanel() {
-  const panel = $("#storyboard-panel");
+// --- M7 E3: the timeline workbench -------------------------------------------
+// One episode -> one append-only timeline. The panel edits a local draft, saves it
+// as a new frozen version, previews source clips in edit order, and exports locally.
+
+function timelineProjectEpisodes() {
+  return snapshot?.episode?.episodes || [];
+}
+
+async function openTimelinePanel() {
+  panelMode = "timeline";
+  $("#artifact-panel").hidden = true;
+  $("#storyboard-panel").hidden = true;
+  $("#episode-panel").hidden = true;
+  $("#season-panel").hidden = true;
+  $("#timeline-panel").hidden = true;
+  $("#timeline-panel").hidden = false;
+  const episodes = timelineProjectEpisodes();
+  if (!timelineEpisodeId || !episodes.some((item) => item.episodeId === timelineEpisodeId)) {
+    timelineEpisodeId = episodes[0]?.episodeId || null;
+  }
+  timelinePreviewState = { index: -1, plan: [] };
+  if (timelineEpisodeId) await loadTimeline(timelineEpisodeId);
+  else renderTimelinePanel();
+}
+
+function resetTimelineDraft(editor) {
+  timelineEditor = editor;
+  timelineClips = timelineDraft(editor);
+  timelineTransitions = timelineDraftTransitions(editor);
+  const options = timelineSubtitleOptions(editor);
+  const savedSubtitle = editor?.timeline?.latest?.subtitle;
+  timelineSubtitle = savedSubtitle
+    ? { trackId: savedSubtitle.trackId, trackVersion: savedSubtitle.trackVersion }
+    : options[0]
+      ? { trackId: options[0].trackId, trackVersion: options[0].version }
+      : null;
+  const savedAudio = editor?.timeline?.latest?.audio;
+  if (Array.isArray(savedAudio)) {
+    timelineAudio = savedAudio.map((item) => ({
+      audioId: item.audioId,
+      audioVersion: item.audioVersion,
+      kind: item.kind,
+      gainDb: item.gainDb ?? 0,
+      startMs: item.startMs ?? 0,
+      selected: true,
+    }));
+  } else {
+    timelineAudio = timelineSubtitle
+      ? timelineAudioRows(editor)
+          .filter((item) => item.kind === "voice")
+          .map((item) => ({
+            audioId: item.audioId,
+            audioVersion: item.audioVersion,
+            kind: item.kind,
+            gainDb: 0,
+            startMs: 0,
+            selected: true,
+          }))
+      : [];
+  }
+  timelineTitleCards = (editor?.timeline?.latest?.titleCards || []).map((card) => ({
+    text: card.text,
+    startMs: card.startMs,
+    durationMs: card.durationMs,
+  }));
+}
+
+async function loadTimeline(episodeId) {
+  if (!activeId || !episodeId) return;
+  timelineEpisodeId = episodeId;
+  timelineBusy = true;
+  timelineError = null;
+  renderTimelinePanel();
+  try {
+    const editor = await api(
+      `/api/episodes/${encodeURIComponent(episodeId)}/timeline?projectId=${encodeURIComponent(activeId)}`,
+    );
+    resetTimelineDraft(editor);
+    stopTimelinePreview();
+  } catch (error) {
+    timelineError = { code: error.code, message: error.message };
+  } finally {
+    timelineBusy = false;
+    if (panelMode === "timeline") renderTimelinePanel();
+  }
+}
+
+function timelineEpisodeLabel() {
+  const episode = timelineProjectEpisodes().find((item) => item.episodeId === timelineEpisodeId);
+  return episode?.title || timelineEpisodeId || "未选择分集";
+}
+
+function timelineTitleCardRows() {
+  return timelineTitleCards
+    .map(
+      (card, index) => `<div class="timeline-title-card">
+        <input data-title-text="${index}" maxlength="120" value="${escapeHTML(card.text)}" aria-label="标题卡 ${index + 1} 文字" />
+        <label>开始 ms <input type="number" min="0" max="90000" step="100" data-title-start="${index}" value="${card.startMs}" /></label>
+        <label>时长 ms <input type="number" min="100" max="90000" step="100" data-title-duration="${index}" value="${card.durationMs}" /></label>
+        <button class="secondary" data-action="timeline-title-remove" data-index="${index}">删除</button>
+      </div>`,
+    )
+    .join("");
+}
+
+function timelineAudioRowsHTML() {
+  const library = timelineAudioRows(timelineEditor);
+  return library
+    .map((row) => {
+      const chosen = timelineAudio.find((item) => item.audioId === row.audioId && item.kind === row.kind);
+      const offset = chosen || { gainDb: 0, startMs: 0 };
+      const kindLabel = row.kind === "voice" ? "配音" : row.kind === "bgm" ? "配乐" : "音效";
+      return `<div class="timeline-audio-row">
+        <label class="timeline-audio-pick">
+          <input type="checkbox" data-timeline-audio="${escapeHTML(row.audioId)}" data-kind="${row.kind}"
+            ${chosen ? "checked" : ""} />
+          <span><strong>${escapeHTML(kindLabel)} · ${escapeHTML(row.title)}</strong>
+          <small>${row.durationSeconds ? `${row.durationSeconds.toFixed(1)} 秒` : ""}${row.mediaUrl ? "" : " · 媒体缺失"}</small></span>
+        </label>
+        ${row.kind === "voice"
+          ? '<span class="meta">按重映射后的字幕 cue 定位</span>'
+          : `<label>增益 dB <input type="number" min="-60" max="12" step="1" data-audio-gain="${escapeHTML(row.audioId)}" value="${offset.gainDb}" /></label>
+             <label>起点 ms <input type="number" min="0" max="90000" step="100" data-audio-start="${escapeHTML(row.audioId)}" value="${offset.startMs}" /></label>`}
+      </div>`;
+    })
+    .join("");
+}
+
+function renderTimelinePanel() {
+  const panel = $("#timeline-panel");
+  if (panelMode !== "timeline") {
+    panel.hidden = true;
+    return;
+  }
+  panel.hidden = false;
+  const episodes = timelineProjectEpisodes();
+  if (!timelineEpisodeId || !episodes.length) {
+    panel.innerHTML = `${panelHeading("时间线", "close-timeline")}
+      <p class="empty">当前项目还没有可编排的分集。先保存分集与分镜并交付镜头，再回到这里裁剪与重排。</p>`;
+    icons(panel);
+    return;
+  }
+  const meta = timelineMeta(timelineEditor?.timeline);
+  const summary = timelineSummary(timelineClips, timelineTransitions);
+  const check = timelineValidation(timelineClips, timelineTransitions);
+  const options = timelineSubtitleOptions(timelineEditor);
+  const episodePicker = `<select id="timeline-episode" aria-label="选择分集">
+    ${episodes
+      .map(
+        (episode) =>
+          `<option value="${escapeHTML(episode.episodeId)}" ${episode.episodeId === timelineEpisodeId ? "selected" : ""}>${escapeHTML(episode.title || episode.episodeId)}</option>`,
+      )
+      .join("")}
+  </select>`;
+  const subtitlePicker = `<select id="timeline-subtitle" aria-label="整集字幕轨">
+    <option value="">无字幕</option>
+    ${options
+      .map(
+        (option) =>
+          `<option value="${escapeHTML(option.trackId)}" ${timelineSubtitle?.trackId === option.trackId ? "selected" : ""}>${escapeHTML(option.label)} · ${option.cueCount} 条 cue</option>`,
+      )
+      .join("")}
+  </select>`;
+  const clipsHTML = timelineClips
+    .map((clip, index) => {
+      const transition = timelineTransitionFor(timelineTransitions, clip.shotId);
+      const last = index === timelineClips.length - 1;
+      return `<article class="timeline-clip ${clip.mediaAvailable ? "" : "is-missing"}" data-index="${index}">
+        <div class="timeline-clip-order">${index + 1}</div>
+        <div class="timeline-clip-body">
+          <strong>${escapeHTML(clip.title || clip.shotId)}</strong>
+          <small>源 ${(clip.sourceDurationMs / 1000).toFixed(1)} 秒 · ${clip.mediaAvailable ? "已交付" : "未交付"}</small>
+          <div class="timeline-trims">
+            <label>入 ms <input type="number" min="0" max="${clip.sourceDurationMs}" step="100" data-trim-in="${index}" value="${clip.inMs}" /></label>
+            <label>出 ms <input type="number" min="0" max="${clip.sourceDurationMs}" step="100" data-trim-out="${index}" value="${clip.outMs}" /></label>
+            <span class="meta">${((clip.outMs - clip.inMs) / 1000).toFixed(1)} 秒</span>
+          </div>
+        </div>
+        <div class="timeline-clip-actions">
+          <button class="secondary" data-action="timeline-move-up" data-index="${index}" ${index === 0 ? "disabled" : ""} aria-label="上移">↑</button>
+          <button class="secondary" data-action="timeline-move-down" data-index="${index}" ${last ? "disabled" : ""} aria-label="下移">↓</button>
+          <button class="secondary" data-action="timeline-clip-remove" data-index="${index}" aria-label="移除">移除</button>
+        </div>
+        ${
+          last
+            ? ""
+            : `<div class="timeline-transition">
+                <label>转场
+                  <select data-transition="${index}" aria-label="第 ${index + 1} 个镜头后的转场">
+                    <option value="cut" ${!transition ? "selected" : ""}>硬切</option>
+                    <option value="fade" ${transition?.type === "fade" ? "selected" : ""}>淡出淡入</option>
+                    <option value="crossfade" ${transition?.type === "crossfade" ? "selected" : ""}>叠化</option>
+                  </select>
+                </label>
+                <label>时长 ms <input type="number" min="100" max="1000" step="50" data-transition-ms="${index}" value="${transition?.durationMs ?? 500}" ${transition ? "" : "disabled"} /></label>
+              </div>`
+        }
+      </article>`;
+    })
+    .join("");
+  const previewPlan = timelinePreview(timelineClips, timelineTransitions);
+  const previewLabel = timelinePreviewState.index >= 0
+    ? `预览第 ${timelinePreviewState.index + 1}/${previewPlan.length} 段 · ${escapeHTML(previewPlan[timelinePreviewState.index]?.title || "")}`
+    : "客户端顺序预览：按裁剪窗口播放源镜头，不合成字幕与混音；导出才是交付物。";
+  panel.innerHTML = `${panelHeading("时间线", "close-timeline")}
+    <div class="timeline-toolbar">
+      ${episodePicker}
+      <button class="secondary" data-action="timeline-reload" ${timelineBusy ? "disabled" : ""}>刷新</button>
+    </div>
+    <p class="meta">${escapeHTML(timelineMetaText(meta))}${timelineEditor?.episodeTitle ? ` · ${escapeHTML(timelineEditor.episodeTitle)}` : ""}</p>
+    <p class="meta">${escapeHTML(timelineSummaryText(summary))}</p>
+    ${timelineEditor?.timeline?.stale ? '<p class="meta timeline-warning">分集版本已变化：时间线已过期，请调整后重新保存再渲染。</p>' : ""}
+    ${timelineError ? `<p class="meta timeline-error">${escapeHTML(timelineError.code)} · ${escapeHTML(timelineErrorLabel(timelineError.code))} ${escapeHTML(timelineError.message || "")}</p>` : ""}
+    ${timelineNotice ? `<p class="meta timeline-notice">${escapeHTML(timelineNotice)}</p>` : ""}
+    <div class="timeline-section-head"><strong>镜头与裁剪</strong><span class="meta">${timelineClips.length}/${TIMELINE_CLIP_LIMIT}</span></div>
+    <div class="timeline-clips">${clipsHTML || '<p class="empty">还没有可编排的已注册镜头。</p>'}</div>
+    <div class="timeline-actions">
+      <button class="secondary" data-action="timeline-add-all" ${timelineBusy ? "disabled" : ""}>按分集顺序重置镜头</button>
+      <button class="secondary" data-action="timeline-play-preview" ${timelineBusy || !previewPlan.length ? "disabled" : ""}>顺序预览</button>
+      <button class="secondary" data-action="timeline-stop-preview">停止预览</button>
+    </div>
+    <div class="timeline-preview">
+      <video id="timeline-preview-video" controls preload="metadata" playsinline aria-label="时间线顺序预览"></video>
+      <p class="meta" id="timeline-preview-label">${previewLabel}</p>
+    </div>
+    <div class="timeline-section-head"><strong>字幕与音轨</strong><span class="meta">字幕轨按 timeline-subtitle-remap-v1 重映射</span></div>
+    <label class="timeline-field">整集字幕 ${subtitlePicker}</label>
+    <div class="timeline-audio-list">${timelineAudioRowsHTML() || '<p class="meta">还没有配音或已导入的 BGM/SFX。</p>'}</div>
+    <div class="timeline-audio-import">
+      <strong>导入 BGM/SFX</strong>
+      <p class="meta">只接受 WAV/MP4（≤25 MB、≤60 秒），必须填写许可与来源；相同文件按 SHA-256 去重。</p>
+      <label>类型 <select id="timeline-audio-kind"><option value="bgm">配乐</option><option value="sfx">音效</option></select></label>
+      <label>标题 <input id="timeline-audio-title" maxlength="120" placeholder="雨声" /></label>
+      <label>来源 URL <input id="timeline-audio-source" maxlength="500" placeholder="https://..." /></label>
+      <label>许可 <input id="timeline-audio-license" maxlength="120" placeholder="CC0" /></label>
+      <button class="secondary" data-action="timeline-import-audio" ${timelineAudioBusy ? "disabled" : ""}>${timelineAudioBusy ? "正在导入…" : "选择文件并导入"}</button>
+    </div>
+    <div class="timeline-section-head"><strong>标题卡</strong><span class="meta">${timelineTitleCards.length}/4 · 不重叠不越界</span></div>
+    <div class="timeline-title-cards">${timelineTitleCardRows() || '<p class="meta">还没有标题卡。</p>'}</div>
+    <div class="timeline-actions">
+      <button class="secondary" data-action="timeline-title-add" ${timelineTitleCards.length >= 4 ? "disabled" : ""}>添加标题卡</button>
+    </div>
+    ${check.ok ? "" : `<p class="meta timeline-error">${escapeHTML(check.error)}</p>`}
+    <div class="timeline-actions">
+      <button class="primary" data-action="timeline-save" ${timelineBusy || !check.ok ? "disabled" : ""}>${timelineBusy ? "正在保存…" : meta ? `保存为新版本（当前 v${meta.currentVersion}）` : "保存时间线"}</button>
+      <button class="secondary" data-action="timeline-render" ${!meta || !check.ok || timelineBusy ? "disabled" : ""}>导出成片</button>
+    </div>
+    <div class="timeline-render-options">
+      <label>档位 <select id="timeline-profile"><option value="720p-h264-aac-v1">720P</option><option value="1080p-h264-aac-v1">1080P（上采样）</option></select></label>
+      <label>字幕 <select id="timeline-mode"><option value="soft">软字幕</option><option value="burn">烧录</option><option value="both">软字幕 + 烧录</option></select></label>
+    </div>
+    <p class="meta">保存只追加新的 TimelineVersion，不改分镜、预算或既有成片；导出全程本地 FFmpeg，不登记任务、不调用供应商。时间线过期或镜头未交付时导出会拒绝且不提交成片。</p>`;
+  icons(panel);
+  const video = panel.querySelector("#timeline-preview-video");
+  if (video) {
+    video.addEventListener("timeupdate", () => watchTimelinePreview(video));
+    video.addEventListener("ended", () => advanceTimelinePreview(video));
+  }
+}
+
+function timelinePreviewItems() {
+  return timelinePreview(timelineClips, timelineTransitions).filter((item) => item.mediaUrl);
+}
+
+function seekTimelinePreview(video) {
+  const items = timelinePreviewState.plan;
+  const item = items[timelinePreviewState.index];
+  if (!item) return;
+  const apply = () => {
+    try {
+      video.currentTime = item.inMs / 1000;
+    } catch {}
+    video.play().catch(() => {});
+  };
+  if (video.readyState >= 1) apply();
+  else video.addEventListener("loadedmetadata", apply, { once: true });
+}
+
+function playTimelinePreview() {
+  const items = timelinePreviewItems();
+  if (!items.length) {
+    toast("没有可播放的镜头媒体。");
+    return;
+  }
+  const video = $("#timeline-preview-video");
+  if (!video) return;
+  timelinePreviewState = { index: 0, plan: items, switching: false };
+  video.src = items[0].mediaUrl;
+  seekTimelinePreview(video);
+  const label = $("#timeline-preview-label");
+  if (label) label.textContent = `预览第 1/${items.length} 段 · ${items[0].title}`;
+}
+
+function watchTimelinePreview(video) {
+  const state = timelinePreviewState;
+  const item = state.plan[state.index];
+  if (!item || state.switching) return;
+  if (video.currentTime * 1000 >= item.outMs - 30) advanceTimelinePreview(video);
+}
+
+function advanceTimelinePreview(video) {
+  const state = timelinePreviewState;
+  if (state.index < 0 || state.switching) return;
+  if (state.index + 1 >= state.plan.length) {
+    state.index = -1;
+    video.pause();
+    const label = $("#timeline-preview-label");
+    if (label) label.textContent = "预览结束；导出才是交付物。";
+    return;
+  }
+  state.index += 1;
+  state.switching = true;
+  const item = state.plan[state.index];
+  const release = () => {
+    state.switching = false;
+  };
+  video.src = item.mediaUrl;
+  video.addEventListener("loadedmetadata", release, { once: true });
+  setTimeout(release, 800);
+  seekTimelinePreview(video);
+  const label = $("#timeline-preview-label");
+  if (label) label.textContent = `预览第 ${state.index + 1}/${state.plan.length} 段 · ${item.title}`;
+}
+
+function stopTimelinePreview() {
+  timelinePreviewState = { index: -1, plan: [], switching: false };
+  const video = $("#timeline-preview-video");
+  if (video) {
+    video.pause();
+    video.removeAttribute("src");
+    video.load();
+  }
+  const label = $("#timeline-preview-label");
+  if (label) label.textContent = "客户端顺序预览：按裁剪窗口播放源镜头，不合成字幕与混音；导出才是交付物。";
+}
+
+function timelineAudioBody() {
+  return timelineAudio
+    .filter((item) => item.selected)
+    .map((item) => ({
+      audioId: item.audioId,
+      audioVersion: item.audioVersion,
+      kind: item.kind,
+      gainDb: Number(item.gainDb) || 0,
+      startMs: item.kind === "voice" ? 0 : Math.max(0, Math.round(Number(item.startMs) || 0)),
+    }));
+}
+
+async function saveTimeline() {
+  if (!activeId || !timelineEpisodeId || timelineBusy) return;
+  const check = timelineValidation(timelineClips, timelineTransitions);
+  if (!check.ok) {
+    timelineError = { code: "TIMELINE_INVALID", message: check.error };
+    renderTimelinePanel();
+    return;
+  }
+  timelineBusy = true;
+  timelineError = null;
+  timelineNotice = null;
+  renderTimelinePanel();
+  try {
+    const meta = timelineMeta(timelineEditor?.timeline);
+    const body = timelineSaveBody({
+      clientRequestId: crypto.randomUUID(),
+      episodeId: timelineEpisodeId,
+      timelineId: meta?.timelineId,
+      expectedRevision: meta?.revision,
+      clips: timelineClips,
+      transitions: timelineTransitions,
+      subtitle: timelineSubtitle,
+      audio: timelineAudioBody(),
+      titleCards: timelineTitleCards,
+    });
+    const result = await post(`/api/sessions/${encodeURIComponent(activeId)}/timelines/save`, body);
+    timelineNotice = result.replayed
+      ? `内容未变化，复用 v${result.currentVersion}。`
+      : `已保存 v${result.currentVersion}。`;
+    await loadTimeline(timelineEpisodeId);
+  } catch (error) {
+    timelineError = { code: error.code, message: error.message };
+  } finally {
+    timelineBusy = false;
+    if (panelMode === "timeline") renderTimelinePanel();
+  }
+}
+
+async function renderTimelineFilm() {
+  if (!activeId || !timelineEpisodeId || timelineBusy) return;
+  const meta = timelineMeta(timelineEditor?.timeline);
+  if (!meta) {
+    toast("请先保存时间线。");
+    return;
+  }
+  timelineBusy = true;
+  timelineError = null;
+  timelineNotice = null;
+  renderTimelinePanel();
+  try {
+    const body = timelineRenderBody({
+      clientRequestId: crypto.randomUUID(),
+      timelineId: meta.timelineId,
+      timelineVersion: meta.version,
+      profile: $("#timeline-profile")?.value || "720p-h264-aac-v1",
+      mode: $("#timeline-mode")?.value || "soft",
+    });
+    const result = await post(`/api/sessions/${encodeURIComponent(activeId)}/films/render`, body);
+    timelineNotice = `导出完成：成片 v${result.filmVersion}（${(result.film?.latest?.durationSeconds || 0).toFixed(1)} 秒）。`;
+    await loadTimeline(timelineEpisodeId);
+    await refreshSession(activeId).catch(() => {});
+  } catch (error) {
+    timelineError = { code: error.code, message: error.message };
+  } finally {
+    timelineBusy = false;
+    if (panelMode === "timeline") renderTimelinePanel();
+  }
+}
+
+function toggleTimelineAudio(audioId, kind) {
+  const found = timelineAudio.find((item) => item.audioId === audioId && item.kind === kind);
+  if (found) {
+    timelineAudio = timelineAudio.filter((item) => item !== found);
+    return;
+  }
+  const row = timelineAudioRows(timelineEditor).find((item) => item.audioId === audioId);
+  if (!row) return;
+  timelineAudio = [
+    ...timelineAudio,
+    {
+      audioId: row.audioId,
+      audioVersion: row.audioVersion,
+      kind: row.kind,
+      gainDb: row.kind === "bgm" ? -18 : row.kind === "sfx" ? -6 : 0,
+      startMs: 0,
+      selected: true,
+    },
+  ];
+}
+
+async function importTimelineAudio() {
+  const kind = $("#timeline-audio-kind")?.value || "bgm";
+  const title = ($("#timeline-audio-title")?.value || "").trim();
+  const sourceUrl = ($("#timeline-audio-source")?.value || "").trim();
+  const license = ($("#timeline-audio-license")?.value || "").trim();
+  if (!title || !sourceUrl || !license) {
+    timelineError = {
+      code: "AUDIO_LICENSE_MISSING",
+      message: "导入音频必须填写标题、来源 URL 与许可。",
+    };
+    renderTimelinePanel();
+    return;
+  }
+  pendingTimelineAudio = { kind, title, sourceUrl, license };
+  $("#audio-input").click();
+}
+
+function renderStoryboardPanel() {  const panel = $("#storyboard-panel");
   if (panelMode !== "storyboard") {
     panel.hidden = true;
     return;
@@ -2270,6 +2784,103 @@ $("#season-panel").addEventListener("change", (event) => {
 $("#season-panel").addEventListener("input", (event) => {
   if (event.target.id === "season-title") seasonDraftTitle = event.target.value;
 });
+$("#timeline-panel").addEventListener("change", (event) => {
+  const target = event.target;
+  if (target.id === "timeline-episode") {
+    loadTimeline(target.value);
+    return;
+  }
+  if (target.id === "timeline-subtitle") {
+    const option = timelineSubtitleOptions(timelineEditor).find(
+      (item) => item.trackId === target.value,
+    );
+    timelineSubtitle = option ? { trackId: option.trackId, trackVersion: option.version } : null;
+    if (!timelineSubtitle) {
+      // A voice track needs a subtitle track; drop the selection instead of failing.
+      timelineAudio = timelineAudio.filter((item) => item.kind !== "voice");
+    }
+    renderTimelinePanel();
+    return;
+  }
+  if (target.dataset?.trimIn != null || target.dataset?.trimOut != null) {
+    const index = Number(target.dataset.trimIn ?? target.dataset.trimOut);
+    const clip = timelineClips[index];
+    if (!clip) return;
+    const nextIn = target.dataset.trimIn != null ? Number(target.value) : clip.inMs;
+    const nextOut = target.dataset.trimOut != null ? Number(target.value) : clip.outMs;
+    timelineClips = timelineTrim(timelineClips, index, nextIn, nextOut);
+    renderTimelinePanel();
+    return;
+  }
+  if (target.dataset?.transition != null) {
+    const index = Number(target.dataset.transition);
+    const clip = timelineClips[index];
+    if (!clip) return;
+    const existing = timelineTransitionFor(timelineTransitions, clip.shotId);
+    timelineTransitions = timelineSetTransition(
+      timelineTransitions,
+      clip.shotId,
+      target.value,
+      existing?.durationMs ?? 500,
+    );
+    renderTimelinePanel();
+    return;
+  }
+  if (target.dataset?.transitionMs != null) {
+    const index = Number(target.dataset.transitionMs);
+    const clip = timelineClips[index];
+    if (!clip) return;
+    const existing = timelineTransitionFor(timelineTransitions, clip.shotId);
+    timelineTransitions = timelineSetTransition(
+      timelineTransitions,
+      clip.shotId,
+      existing?.type || "fade",
+      Math.max(100, Math.min(1000, Number(target.value) || 500)),
+    );
+    renderTimelinePanel();
+    return;
+  }
+  if (target.dataset?.timelineAudio) {
+    toggleTimelineAudio(target.dataset.timelineAudio, target.dataset.kind);
+    renderTimelinePanel();
+    return;
+  }
+  if (target.dataset?.audioGain != null || target.dataset?.audioStart != null) {
+    const audioId = target.dataset.audioGain || target.dataset.audioStart;
+    timelineAudio = timelineAudio.map((item) =>
+      item.audioId !== audioId
+        ? item
+        : {
+            ...item,
+            ...(target.dataset.audioGain != null
+              ? { gainDb: Math.max(-60, Math.min(12, Number(target.value) || 0)) }
+              : { startMs: Math.max(0, Number(target.value) || 0) }),
+          },
+    );
+  }
+});
+$("#timeline-panel").addEventListener("input", (event) => {
+  const target = event.target;
+  if (target.dataset?.titleText != null) {
+    const index = Number(target.dataset.titleText);
+    timelineTitleCards = timelineTitleCards.map((card, position) =>
+      position === index ? { ...card, text: target.value } : card,
+    );
+  }
+  if (target.dataset?.titleStart != null || target.dataset?.titleDuration != null) {
+    const index = Number(target.dataset.titleStart ?? target.dataset.titleDuration);
+    timelineTitleCards = timelineTitleCards.map((card, position) =>
+      position !== index
+        ? card
+        : {
+            ...card,
+            ...(target.dataset.titleStart != null
+              ? { startMs: Math.max(0, Number(target.value) || 0) }
+              : { durationMs: Math.max(100, Number(target.value) || 100) }),
+          },
+    );
+  }
+});
 $("#image-input").addEventListener("change", async (event) => {
   const file = event.target.files[0];
   event.target.value = "";
@@ -2307,6 +2918,40 @@ $("#image-input").addEventListener("change", async (event) => {
   } finally {
     uploadingImage = false;
     renderAssetPanel();
+  }
+});
+$("#audio-input").addEventListener("change", async (event) => {
+  const file = event.target.files[0];
+  event.target.value = "";
+  const pending = pendingTimelineAudio;
+  pendingTimelineAudio = null;
+  if (!file || !pending || !activeId) return;
+  if (file.size > 25 * 1024 * 1024) {
+    toast("音频不能超过 25 MB。");
+    return;
+  }
+  timelineAudioBusy = true;
+  timelineError = null;
+  renderTimelinePanel();
+  try {
+    const form = new FormData();
+    form.append("clientRequestId", crypto.randomUUID());
+    form.append("projectId", activeId);
+    form.append("kind", pending.kind);
+    form.append("title", pending.title);
+    form.append("sourceUrl", pending.sourceUrl);
+    form.append("license", pending.license);
+    form.append("file", file, file.name);
+    const created = await upload("/api/audio/import", form);
+    timelineNotice = created.replayed
+      ? "相同音频已存在，复用原资产。"
+      : "音频已导入，可在音轨列表中勾选。";
+    await loadTimeline(timelineEpisodeId);
+  } catch (error) {
+    timelineError = { code: error.code, message: error.message };
+  } finally {
+    timelineAudioBusy = false;
+    if (panelMode === "timeline") renderTimelinePanel();
   }
 });
 $("#dialog").addEventListener("close", () => {
@@ -2411,6 +3056,56 @@ document.addEventListener("click", async (event) => {
     if (action === "storyboard") openStoryboardPanel();
     if (action === "episode") openEpisodePanel();
     if (action === "season") openSeasonPanel();
+    if (action === "timeline") await openTimelinePanel();
+    if (action === "open-timeline") {
+      timelineEpisodeId = event.target.closest("[data-episode-id]")?.dataset.episodeId || null;
+      await openTimelinePanel();
+    }
+    if (action === "close-timeline") {
+      panelMode = null;
+      stopTimelinePreview();
+      $("#timeline-panel").hidden = true;
+    }
+    if (action === "timeline-reload") await loadTimeline(timelineEpisodeId);
+    if (action === "timeline-add-all") {
+      timelineClips = timelineDraft({ ...timelineEditor, timeline: null });
+      timelineTransitions = [];
+      timelineNotice = "已按分集顺序重置镜头；保存后才会生效。";
+      timelineError = null;
+      renderTimelinePanel();
+    }
+    if (action === "timeline-move-up" || action === "timeline-move-down") {
+      const index = Number(event.target.closest("[data-index]")?.dataset.index);
+      timelineClips = timelineMove(timelineClips, index, action === "timeline-move-up" ? -1 : 1);
+      renderTimelinePanel();
+    }
+    if (action === "timeline-clip-remove") {
+      const index = Number(event.target.closest("[data-index]")?.dataset.index);
+      timelineClips = timelineClips.filter((_clip, position) => position !== index);
+      timelineTransitions = timelineTransitions.filter((item) =>
+        timelineClips.some((clip) => clip.shotId === item.afterShotId),
+      );
+      renderTimelinePanel();
+    }
+    if (action === "timeline-title-add") {
+      if (timelineTitleCards.length < 4) {
+        timelineTitleCards = [
+          ...timelineTitleCards,
+          { text: "片头", startMs: 0, durationMs: 2000 },
+        ];
+        renderTimelinePanel();
+      }
+    }
+    if (action === "timeline-title-remove") {
+      const index = Number(event.target.closest("[data-index]")?.dataset.index);
+      timelineTitleCards = timelineTitleCards.filter((_card, position) => position !== index);
+      renderTimelinePanel();
+    }
+    if (action === "timeline-save") await saveTimeline();
+    if (action === "timeline-render") await renderTimelineFilm();
+    if (action === "timeline-play-preview") playTimelinePreview();
+    if (action === "timeline-stop-preview") stopTimelinePreview();
+    if (action === "timeline-import-audio") importTimelineAudio();
     if (action === "open-scene-storyboard")
       await openSceneStoryboard(
         event.target.closest("[data-storyboard-id]")?.dataset.storyboardId,

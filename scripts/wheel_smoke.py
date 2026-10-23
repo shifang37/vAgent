@@ -1040,6 +1040,7 @@ async def smoke_m6_workbench(directory, evaluation_report):
                 "episode-state.js",
                 "subtitle-state.js",
                 "render-state.js",
+                "timeline-state.js",
                 "styles.css",
                 "index.html",
             ):

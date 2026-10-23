@@ -59,6 +59,13 @@
         ></button>
         <button
           class="icon-button"
+          data-action="timeline"
+          aria-label="时间线"
+          title="时间线、裁剪、转场与导出"
+          data-icon="timeline"
+        ></button>
+        <button
+          class="icon-button"
           data-action="assets"
           aria-label="素材库"
           title="素材库"
@@ -243,6 +250,12 @@
             accept="image/png,image/jpeg,image/webp"
             hidden
           />
+          <input
+            id="audio-input"
+            type="file"
+            accept=".wav,.m4a,audio/wav,audio/mp4"
+            hidden
+          />
         </section>
         <section id="inspiration" class="inspiration">
           <div class="section-heading">
@@ -296,6 +309,12 @@
       id="season-panel"
       class="artifact-panel season-panel"
       aria-label="季、多集与成员顺序"
+      hidden
+    ></aside>
+    <aside
+      id="timeline-panel"
+      class="artifact-panel timeline-panel"
+      aria-label="时间线、裁剪、转场与导出"
       hidden
     ></aside>
     <aside

@@ -517,6 +517,10 @@ def validate_batch_changes(previous: dict[str, dict], state: dict, *, initial: b
             )
             continue
         old = Batch.model_validate(old_raw)
+        if record == old:
+            # A transaction that does not touch the batch (a Job poll, an episode
+            # save, a render commit) must not be read as a batch advance.
+            continue
         if old.status in TERMINAL_BATCH_STATUSES:
             _require(record == old, "终态批次不可改写；恢复必须创建新批次。")
             continue

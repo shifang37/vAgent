@@ -371,6 +371,33 @@ def test_a_second_running_batch_is_refused(store, batch_world):
     assert store.snapshot()["jobs"] == {}
 
 
+def test_an_unrelated_commit_while_a_batch_runs_does_not_advance_it(store, batch_world):
+    registry, _service, _context = batch_world
+    context = batch_run(store)
+    first = build_episode(registry, store, context, "第一集", "m7b-unrelated-0")
+    season = save_season(registry, store, [first])
+    running = Batch(
+        id=str(uuid4()),
+        project_id=PROJECT,
+        season_id=season["seasonId"],
+        season_version=1,
+        episode_ids=(first,),
+        status="running",
+        episodes=(BatchEpisode(episode_id=first, episode_version=1, status="pending", shot_count=12),),
+        fingerprint="2" * 64,
+        created_at="2030-01-01T00:00:00+00:00",
+        updated_at="2030-01-01T00:00:00+00:00",
+        revision=0,
+    )
+    store.transaction(
+        lambda draft: draft["batches"].__setitem__(running.id, running.model_dump(mode="json", by_alias=True))
+    )
+    # A Job poll, episode save or render commit must not be mistaken for a batch advance.
+    store.transaction(lambda draft: draft["projects"][PROJECT].__setitem__("goal", "unrelated"))
+    assert store.snapshot()["projects"][PROJECT]["goal"] == "unrelated"
+    assert store.snapshot()["batches"][running.id]["revision"] == 0
+
+
 def test_store_recovers_a_running_batch_as_interrupted_on_open(tmp_path):
     home = tmp_path / "state"
     with FileStore.open(home) as store:

@@ -8,6 +8,7 @@ import sys
 from langchain_core.messages import AIMessage
 from langgraph.checkpoint.sqlite.aio import AsyncSqliteSaver
 
+from vagent.context import ContextBuilder
 from vagent.runner import AgentRunner
 from vagent.storage import FileStore
 from vagent.tools import create_project_tools
@@ -114,7 +115,14 @@ async def main():
             WaitService.prepare = crash_before_preparing
 
         def runner(_=None):
-            return AgentRunner(store=store, model=model, tools=tools, on_event=event)
+            # M7 rules growth: evaluation fixture budget, not the product default.
+            return AgentRunner(
+                store=store,
+                model=model,
+                tools=tools,
+                on_event=event,
+                context=ContextBuilder(98304),
+            )
 
         pending = await runner().run("coffee", "B3 crash fixture")
         assert pending["status"] == "waiting_external"

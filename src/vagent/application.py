@@ -296,7 +296,76 @@ class ApplicationService:
                 include_digests=False,
             )
             view["render"] = self.renders.episode_summary(state, session_id, view["episodeId"])
+            from vagent.video.timelines import read_timeline
+
+            view["timeline"] = read_timeline({"episodeId": view["episodeId"]}, state, session_id)["timeline"]
         return view
+
+    def timeline(self, session_id, *, episode_id=None, timeline_id=None, version=None):
+        """One episode timeline (current or named version); read-only."""
+        from vagent.video.timelines import read_timeline
+
+        assert_id(session_id)
+        if episode_id is not None:
+            assert_id(episode_id)
+        if timeline_id is not None:
+            assert_id(timeline_id)
+        return read_timeline(
+            {
+                **({"episodeId": episode_id} if episode_id is not None else {}),
+                **({"timelineId": timeline_id} if timeline_id is not None else {}),
+                **({"version": version} if version is not None else {}),
+            },
+            self.store.snapshot(),
+            session_id,
+        )
+
+    def timeline_editor(self, session_id, episode_id):
+        """The workbench source list plus the current timeline (client view)."""
+        from vagent.video.timelines import editor_view
+
+        assert_id(session_id)
+        assert_id(episode_id)
+        return editor_view(self.store.snapshot(), session_id, episode_id)
+
+    def save_timeline(self, session_id, request: dict) -> dict:
+        """Explicit local timeline save; metadata only, never a provider call."""
+        assert_id(session_id)
+        return clients.save_timeline(
+            self.video_jobs,
+            session_id=session_id,
+            client_request_id=request["clientRequestId"],
+            episode_id=request["episodeId"],
+            clips=request["clips"],
+            transitions=request.get("transitions"),
+            subtitle=request.get("subtitle"),
+            audio=request.get("audio"),
+            title_cards=request.get("titleCards"),
+            timeline_id=request.get("timelineId"),
+            expected_revision=request.get("expectedRevision"),
+        )
+
+    def imported_audio(self, project_id):
+        """Client-imported BGM/SFX of one project; read-only metadata."""
+        from vagent.video.audio_import import imported_assets
+
+        assert_id(project_id)
+        return {"audio": imported_assets(self.store.snapshot(), project_id)}
+
+    async def import_audio(self, session_id, request: dict, data: bytes, filename=None):
+        """Explicit local BGM/SFX import; never a model tool or provider call."""
+        assert_id(session_id)
+        return await clients.import_audio(
+            self.video_jobs,
+            session_id=session_id,
+            client_request_id=request["clientRequestId"],
+            data=data,
+            kind=request["kind"],
+            title=request["title"],
+            source_url=request["sourceUrl"],
+            license_text=request["license"],
+            filename=filename,
+        )
 
     def seasons(self, session_id):
         """Season summaries of one project; never another project's records."""
@@ -497,8 +566,9 @@ class ApplicationService:
         storyboard_id: str | None = None,
         episode_id: str | None = None,
         film_id: str | None = None,
+        timeline_id: str | None = None,
     ) -> dict:
-        """Read-only render progress by task, target or film ID."""
+        """Read-only render progress by task, target, film or timeline ID."""
         assert_id(session_id)
         return self.renders.read(
             {
@@ -506,6 +576,7 @@ class ApplicationService:
                 **({"storyboardId": storyboard_id} if storyboard_id is not None else {}),
                 **({"episodeId": episode_id} if episode_id is not None else {}),
                 **({"filmId": film_id} if film_id is not None else {}),
+                **({"timelineId": timeline_id} if timeline_id is not None else {}),
             },
             session_id,
         )

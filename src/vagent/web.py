@@ -2,6 +2,7 @@
 
 import asyncio
 import json
+import re
 import secrets
 from contextlib import asynccontextmanager
 from pathlib import Path
@@ -22,9 +23,11 @@ from vagent.video.media import DownloadRetry, file_io
 from vagent.video.media_response import media_response
 from vagent.video.storyboards import ASSET_EXTENSIONS
 
-# One JSON document, or one bounded image upload plus multipart framing.
+# One JSON document, or one bounded image/audio upload plus multipart framing.
 MAX_JSON_BYTES = 131072
 MAX_UPLOAD_BYTES = IMAGE_MAX_BYTES + 65536
+MAX_AUDIO_UPLOAD_BYTES = 25 * 1024 * 1024 + 65536
+UPLOAD_PATHS = {"/api/assets", "/api/audio/import"}
 
 
 class MessageInput(BaseModel):
@@ -133,12 +136,58 @@ class SeasonGenerateInput(BaseModel):
         return self
 
 
+class TimelineClipInput(BaseModel):
+    model_config = ConfigDict(extra="forbid", strict=True)
+    shotId: Identifier
+    shotVersionId: Identifier
+    storyboardId: Identifier
+    sceneId: Identifier | None = None
+    inMs: int = Field(ge=0, le=90_000)
+    outMs: int = Field(gt=0, le=90_000)
+
+    @model_validator(mode="after")
+    def ordered_window(self):
+        if self.outMs <= self.inMs:
+            raise ValueError("outMs must be later than inMs")
+        return self
+
+
+class TimelineSubtitleInput(BaseModel):
+    model_config = ConfigDict(extra="forbid", strict=True)
+    trackId: Identifier
+    trackVersion: int = Field(ge=1)
+
+
+class TimelineAudioInput(BaseModel):
+    model_config = ConfigDict(extra="forbid", strict=True)
+    audioId: Identifier
+    audioVersion: int = Field(ge=1)
+    kind: Literal["voice", "bgm", "sfx"]
+    gainDb: float = Field(default=0.0, ge=-60, le=12, allow_inf_nan=False)
+    startMs: int = Field(default=0, ge=0, le=90_000)
+
+
+class TimelineSaveInput(BaseModel):
+    model_config = ConfigDict(extra="forbid", strict=True)
+    clientRequestId: str = Field(pattern=r"^[a-zA-Z0-9_-]{1,64}$")
+    episodeId: Identifier
+    timelineId: Identifier | None = None
+    clips: list[TimelineClipInput] = Field(min_length=1, max_length=20)
+    transitions: list[TransitionInput] = Field(default_factory=list, max_length=19)
+    subtitle: TimelineSubtitleInput | None = None
+    audio: list[TimelineAudioInput] = Field(default_factory=list, max_length=64)
+    titleCards: list[TitleCardInput] = Field(default_factory=list, max_length=4)
+    expectedRevision: int | None = Field(default=None, ge=0)
+
+
 class FilmRenderInput(BaseModel):
     model_config = ConfigDict(extra="forbid", strict=True)
     clientRequestId: str = Field(pattern=r"^[a-zA-Z0-9_-]{1,64}$")
-    scope: Literal["storyboard", "episode"]
+    scope: Literal["storyboard", "episode", "timeline"]
     storyboardId: Identifier | None = None
     episodeId: Identifier | None = None
+    timelineId: Identifier | None = None
+    timelineVersion: int | None = Field(default=None, ge=1)
     trackId: Identifier | None = None
     trackVersion: int | None = Field(default=None, ge=1)
     profile: Literal["720p-h264-aac-v1", "1080p-h264-aac-v1"] = "720p-h264-aac-v1"
@@ -178,11 +227,17 @@ def create_app(config, *, port=3210, model=None, policy=None):
             if not secrets.compare_digest(request.headers.get("x-csrf-token", ""), token):
                 return JSONResponse({"error": {"code": "CSRF_DENIED", "message": "请刷新页面后重试。"}}, 403)
             content_type = request.headers.get("content-type", "").split(";")[0].strip()
-            upload = request.method == "POST" and request.url.path == "/api/assets"
+            upload = request.method == "POST" and request.url.path in UPLOAD_PATHS
             expected = "multipart/form-data" if upload else "application/json"
             if content_type != expected:
                 return JSONResponse({"error": {"code": "CONTENT_TYPE", "message": "需要 JSON 请求。"}}, 415)
-            limit = MAX_UPLOAD_BYTES if upload else MAX_JSON_BYTES
+            limit = (
+                MAX_UPLOAD_BYTES
+                if request.url.path == "/api/assets"
+                else MAX_AUDIO_UPLOAD_BYTES
+                if upload
+                else MAX_JSON_BYTES
+            )
             size = 0
             chunks = []
             async for chunk in request.stream():
@@ -207,7 +262,14 @@ def create_app(config, *, port=3210, model=None, policy=None):
         status = (
             404
             if error.code
-            in {"NOT_FOUND", "JOB_NOT_FOUND", "MEDIA_NOT_FOUND", "ASSET_NOT_FOUND", "SEASON_NOT_FOUND"}
+            in {
+                "NOT_FOUND",
+                "JOB_NOT_FOUND",
+                "MEDIA_NOT_FOUND",
+                "ASSET_NOT_FOUND",
+                "SEASON_NOT_FOUND",
+                "TIMELINE_NOT_FOUND",
+            }
             else 410
             if error.code in {"JOB_MEDIA_UNAVAILABLE", "ASSET_UNAVAILABLE"}
             else 409
@@ -229,6 +291,7 @@ def create_app(config, *, port=3210, model=None, policy=None):
                 "SEASON_EPISODE_CONFLICT",
                 "BATCH_CONFLICT",
                 "BATCH_INTERRUPTED",
+                "TIMELINE_VERSION_CONFLICT",
             }
             else 400
         )
@@ -401,6 +464,48 @@ def create_app(config, *, port=3210, model=None, policy=None):
             app.state.service.generate_season, session_id, body.model_dump(exclude_none=True)
         )
 
+    @app.get("/api/episodes/{episode_id}/timeline")
+    async def episode_timeline(episode_id: str, projectId: str):
+        return await file_io(app.state.service.timeline_editor, projectId, episode_id)
+
+    @app.get("/api/timelines/{timeline_id}")
+    async def timeline_detail(timeline_id: str, projectId: str, version: int | None = None):
+        return await file_io(app.state.service.timeline, projectId, timeline_id=timeline_id, version=version)
+
+    @app.post("/api/sessions/{session_id}/timelines/save", status_code=201)
+    async def timelines_save(session_id: str, body: TimelineSaveInput):
+        return await file_io(app.state.service.save_timeline, session_id, body.model_dump(exclude_none=True))
+
+    @app.get("/api/audio")
+    async def imported_audio(projectId: str):
+        return await file_io(app.state.service.imported_audio, projectId)
+
+    @app.post("/api/audio/import", status_code=201)
+    async def import_audio(request: Request):
+        form = await request.form(max_files=1, max_fields=8)
+        upload = form.get("file")
+        project_id = form.get("projectId")
+        if isinstance(upload, str) or upload is None or not isinstance(project_id, str):
+            raise AppError("INVALID_REQUEST", "需要 projectId 与一个音频文件。")
+        assert_id(project_id)
+        request_data = {
+            "clientRequestId": form.get("clientRequestId"),
+            "kind": form.get("kind"),
+            "title": form.get("title"),
+            "sourceUrl": form.get("sourceUrl"),
+            "license": form.get("license"),
+        }
+        if not all(isinstance(value, str) and value for value in request_data.values()):
+            raise AppError("INVALID_REQUEST", "需要 clientRequestId、kind、title、sourceUrl 与 license。")
+        if request_data["kind"] not in {"bgm", "sfx"}:
+            raise AppError("AUDIO_FORMAT_UNSUPPORTED", "kind 必须是 bgm 或 sfx。")
+        if not re.fullmatch(r"[a-zA-Z0-9_-]{1,64}", request_data["clientRequestId"]):
+            raise AppError("INVALID_REQUEST", "clientRequestId 格式不正确。")
+        data = await upload.read()
+        # The import service is async (it may probe an M4A container with FFmpeg), so
+        # it must run on the event loop rather than in the blocking file helper.
+        return await app.state.service.import_audio(project_id, request_data, data, upload.filename)
+
     @app.get("/api/storyboards/{storyboard_id}")
     async def storyboard_detail(storyboard_id: str, projectId: str):
         return app.state.service.storyboard(projectId, storyboard_id)
@@ -444,6 +549,7 @@ def create_app(config, *, port=3210, model=None, policy=None):
         storyboardId: str | None = None,
         episodeId: str | None = None,
         filmId: str | None = None,
+        timelineId: str | None = None,
     ):
         return await file_io(
             app.state.service.render_read,
@@ -452,6 +558,7 @@ def create_app(config, *, port=3210, model=None, policy=None):
             storyboard_id=storyboardId,
             episode_id=episodeId,
             film_id=filmId,
+            timeline_id=timelineId,
         )
 
     @app.get("/api/renders/{render_id}")
@@ -616,6 +723,7 @@ def create_app(config, *, port=3210, model=None, policy=None):
                 "episode-state.js",
                 "season-state.js",
                 "render-state.js",
+                "timeline-state.js",
                 "styles.css",
                 "mark.svg",
             }

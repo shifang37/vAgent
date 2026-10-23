@@ -35,6 +35,8 @@ from vagent.video.providers.mock import MockVideoAdapter
 from vagent.video.providers.wan import WanAdapter
 from vagent.video.seasons import read_season
 from vagent.video.storyboards import find_shot, storyboard_in_state
+from vagent.video.timelines import editor_view as timeline_editor_view
+from vagent.video.timelines import read_timeline
 from vagent.video.tools import register_video_tools
 from vagent.video.usage import summarize_records
 from vagent.video.views import cli_job_view, current_storyboard_view, storyboard_view
@@ -476,6 +478,102 @@ async def local_season_generate(config, store, args) -> int:
     return 0
 
 
+def local_timeline(state, args) -> dict:
+    """Read the workbench source list or one frozen timeline version."""
+    assert_id(args.project)
+    if getattr(args, "episode_id", None):
+        assert_id(args.episode_id)
+    if getattr(args, "timeline_id", None):
+        assert_id(args.timeline_id)
+    if args.action == "sources":
+        if not getattr(args, "episode_id", None):
+            raise AppError("INVALID_ARGUMENTS", "读取可编辑镜头需要 --episode。")
+        return timeline_editor_view(state, args.project, args.episode_id)
+    if args.action == "show":
+        if not getattr(args, "episode_id", None) and not getattr(args, "timeline_id", None):
+            raise AppError("INVALID_ARGUMENTS", "读取时间线需要 --episode 或 --timeline。")
+        version = getattr(args, "version", None)
+        return read_timeline(
+            {
+                **({"episodeId": args.episode_id} if getattr(args, "episode_id", None) else {}),
+                **({"timelineId": args.timeline_id} if getattr(args, "timeline_id", None) else {}),
+                **({"version": version} if version is not None else {}),
+            },
+            state,
+            args.project,
+        )
+    raise AppError("INVALID_ARGUMENTS", "未知的时间线动作。")
+
+
+async def local_timeline_save(config, store, args) -> int:
+    """Save one episode timeline as an explicit local action; metadata only."""
+    assert_id(args.project)
+    assert_id(args.episode_id)
+    store.ensure_session(args.project)
+    if args.timeline_id:
+        assert_id(args.timeline_id)
+    clips = _json_cli_argument(args.clips, "--clips")
+    transitions = _json_cli_argument(args.transitions, "--transitions") if args.transitions else []
+    audio = _json_cli_argument(args.audio, "--audio") if args.audio else []
+    title_cards = _json_cli_argument(args.title_cards, "--title-cards") if args.title_cards else []
+    subtitle = None
+    if args.subtitle_track:
+        assert_id(args.subtitle_track)
+        if args.subtitle_version is None:
+            raise AppError("INVALID_ARGUMENTS", "--subtitle-track 需要同时给出 --subtitle-version。")
+        subtitle = {"trackId": args.subtitle_track, "trackVersion": args.subtitle_version}
+    service = LocalActionHost(
+        store, FilmService(JobService(store, [MockVideoAdapter(store)], config=config)), config
+    )
+    result = clients.save_timeline(
+        service,
+        session_id=args.project,
+        client_request_id=args.request_id or str(uuid4()),
+        episode_id=args.episode_id,
+        clips=clips,
+        transitions=transitions,
+        subtitle=subtitle,
+        audio=audio,
+        title_cards=title_cards,
+        timeline_id=args.timeline_id,
+        expected_revision=args.expected_revision,
+    )
+    print_json(result)
+    return 0
+
+
+async def local_audio(config, store, args) -> int:
+    """Client-side BGM/SFX import and listing; never a model tool or provider call."""
+    from vagent.video.audio_import import imported_assets
+
+    assert_id(args.project)
+    if args.action == "list":
+        print_json({"audio": imported_assets(store.snapshot(), args.project)})
+        return 0
+    store.ensure_session(args.project)
+    if args.kind not in {"bgm", "sfx"}:
+        raise AppError("INVALID_ARGUMENTS", "--kind 必须是 bgm 或 sfx。")
+    if not args.title or not args.source_url or not args.license:
+        raise AppError("AUDIO_LICENSE_MISSING", "导入音频必须提供 --title、--source-url 与 --license。")
+    data = Path(args.path).read_bytes()
+    host = LocalActionHost(
+        store, FilmService(JobService(store, [MockVideoAdapter(store)], config=config)), config
+    )
+    result = await clients.import_audio(
+        host,
+        session_id=args.project,
+        client_request_id=args.request_id or str(uuid4()),
+        data=data,
+        kind=args.kind,
+        title=args.title,
+        source_url=args.source_url,
+        license_text=args.license,
+        filename=Path(args.path).name,
+    )
+    print_json(result)
+    return 0
+
+
 def local_episode_plan(args) -> dict:
     """Deterministic text adaptation only: no Store write, no Job, no model call."""
     plan = plan_episode(_episode_text(args.text), title=args.title)
@@ -598,6 +696,8 @@ class LocalActionHost:
         self.store, self.films, self.config = store, films, config
         self.subtitles = subtitles
         self.renders = renders or films.jobs.renders
+        self.video_jobs = films.jobs
+        self.media = films.jobs.media
 
     def generation_mode(self):
         return self.config.video_mode
@@ -643,7 +743,7 @@ async def local_film(config, store, args) -> int:
         print_json(service.view(args.project, storyboard_id))
         return 0
     if args.action == "renders":
-        for name in ("render_id", "storyboard_id", "episode_id", "film_id"):
+        for name in ("render_id", "storyboard_id", "episode_id", "film_id", "timeline_id"):
             value = getattr(args, name, None)
             if value:
                 assert_id(value)
@@ -654,27 +754,47 @@ async def local_film(config, store, args) -> int:
                     **({"storyboardId": args.storyboard_id} if args.storyboard_id else {}),
                     **({"episodeId": args.episode_id} if args.episode_id else {}),
                     **({"filmId": args.film_id} if args.film_id else {}),
+                    **({"timelineId": args.timeline_id} if args.timeline_id else {}),
                 },
                 args.project,
             )
         )
         return 0
     if args.action == "render":
-        request = {
-            "scope": "storyboard" if args.storyboard_id else "episode",
-            "profile": args.profile,
-            "subtitleMode": args.mode,
-            "confirm": True,
-            **({"storyboardId": args.storyboard_id} if args.storyboard_id else {}),
-            **({"episodeId": args.episode_id} if args.episode_id else {}),
-            **({"trackId": args.track_id} if args.track_id else {}),
-            **({"trackVersion": args.track_version} if args.track_version is not None else {}),
-            **({"expectedRevision": args.expected_revision} if args.expected_revision is not None else {}),
-        }
-        if args.transitions:
-            request["transitions"] = _json_cli_argument(args.transitions, "--transitions")
-        if args.title_cards:
-            request["titleCards"] = _json_cli_argument(args.title_cards, "--title-cards")
+        timeline_id = getattr(args, "timeline_id", None)
+        if timeline_id:
+            if args.storyboard_id or args.episode_id or args.track_id:
+                raise AppError("INVALID_ARGUMENTS", "时间线渲染不能同时指定分镜、分集或字幕轨。")
+            request = {
+                "scope": "timeline",
+                "timelineId": timeline_id,
+                "profile": args.profile,
+                "subtitleMode": args.mode,
+                "confirm": True,
+                **(
+                    {"timelineVersion": args.timeline_version}
+                    if getattr(args, "timeline_version", None) is not None
+                    else {}
+                ),
+            }
+        else:
+            request = {
+                "scope": "storyboard" if args.storyboard_id else "episode",
+                "profile": args.profile,
+                "subtitleMode": args.mode,
+                "confirm": True,
+                **({"storyboardId": args.storyboard_id} if args.storyboard_id else {}),
+                **({"episodeId": args.episode_id} if args.episode_id else {}),
+                **({"trackId": args.track_id} if args.track_id else {}),
+                **({"trackVersion": args.track_version} if args.track_version is not None else {}),
+                **(
+                    {"expectedRevision": args.expected_revision} if args.expected_revision is not None else {}
+                ),
+            }
+            if args.transitions:
+                request["transitions"] = _json_cli_argument(args.transitions, "--transitions")
+            if args.title_cards:
+                request["titleCards"] = _json_cli_argument(args.title_cards, "--title-cards")
         result = await clients.film_render(
             LocalActionHost(store, service, config),
             session_id=args.project,
@@ -1008,6 +1128,8 @@ def parser() -> argparse.ArgumentParser:
     film_render_target = film_render.add_mutually_exclusive_group(required=True)
     film_render_target.add_argument("--storyboard", dest="storyboard_id")
     film_render_target.add_argument("--episode", dest="episode_id")
+    film_render_target.add_argument("--timeline", dest="timeline_id", help="渲染一条冻结的时间线版本")
+    film_render.add_argument("--timeline-version", dest="timeline_version", type=int)
     film_render.add_argument("--track", dest="track_id", help="字幕轨 ID；省略时使用目标的当前字幕轨")
     film_render.add_argument("--track-version", dest="track_version", type=int)
     film_render.add_argument(
@@ -1028,6 +1150,7 @@ def parser() -> argparse.ArgumentParser:
     film_renders.add_argument("--storyboard", dest="storyboard_id")
     film_renders.add_argument("--episode", dest="episode_id")
     film_renders.add_argument("--film", dest="film_id")
+    film_renders.add_argument("--timeline", dest="timeline_id")
     episode = commands.add_parser("episode", help="分集：离线改编、保存、查看与整批登记；不调用模型")
     episode_actions = episode.add_subparsers(dest="action", required=True)
     episode_plan = episode_actions.add_parser("plan", help="离线切分剧本并返回分集草案；不写存储、不登记任务")
@@ -1093,6 +1216,54 @@ def parser() -> argparse.ArgumentParser:
     )
     season_generate_cli.add_argument("--confirm", action="store_true", help="显式确认逐集估算与批量额度")
     season_generate_cli.add_argument("--request-id", dest="request_id", help="同一请求 ID 重放原结果")
+    timeline = commands.add_parser("timeline", help="时间线：保存或读取每集只增不改的剪辑版本；不登记任务")
+    timeline_actions = timeline.add_subparsers(dest="action", required=True)
+    timeline_show = timeline_actions.add_parser("show", help="读取当前或指定时间线版本；只读")
+    timeline_show.add_argument("-s", "--project", default="default")
+    timeline_show.add_argument("--episode", dest="episode_id", help="按分集读取其时间线")
+    timeline_show.add_argument("--timeline", dest="timeline_id", help="直接按时间线 ID 读取")
+    timeline_show.add_argument("--version", type=int, help="指定时间线版本；省略时读当前版本")
+    timeline_sources = timeline_actions.add_parser(
+        "sources", help="列出可编排的镜头、整集字幕轨与已导入音频；只读"
+    )
+    timeline_sources.add_argument("-s", "--project", default="default")
+    timeline_sources.add_argument("--episode", dest="episode_id", required=True)
+    timeline_save_cli = timeline_actions.add_parser(
+        "save", help="保存有序裁剪镜头、转场、字幕轨、音轨与标题卡；不登记任务"
+    )
+    timeline_save_cli.add_argument("-s", "--project", default="default")
+    timeline_save_cli.add_argument("--episode", dest="episode_id", required=True)
+    timeline_save_cli.add_argument("--timeline", dest="timeline_id", help="修改已有时间线；省略时新建")
+    timeline_save_cli.add_argument(
+        "--clips",
+        required=True,
+        help="有序 clip JSON/JSON 文件：shotId/shotVersionId/storyboardId/inMs/outMs",
+    )
+    timeline_save_cli.add_argument("--transitions", help="转场 JSON/JSON 文件：afterShotId/type/durationMs")
+    timeline_save_cli.add_argument("--subtitle-track", dest="subtitle_track", help="整集字幕轨 ID")
+    timeline_save_cli.add_argument("--subtitle-version", dest="subtitle_version", type=int)
+    timeline_save_cli.add_argument(
+        "--audio", help="音轨 JSON/JSON 文件：audioId/audioVersion/kind/gainDb/startMs"
+    )
+    timeline_save_cli.add_argument("--title-cards", dest="title_cards", help="标题卡 JSON/JSON 文件")
+    timeline_save_cli.add_argument(
+        "--expected-revision", dest="expected_revision", type=int, help="修改时必须提供读到的 revision"
+    )
+    timeline_save_cli.add_argument("--request-id", dest="request_id", help="同一请求 ID 重放原结果")
+    audio = commands.add_parser("audio", help="音频：导入本地 BGM/SFX 或列出已导入素材；不调用模型")
+    audio_actions = audio.add_subparsers(dest="action", required=True)
+    audio_list = audio_actions.add_parser("list", help="列出本项目的已导入 BGM/SFX；只读")
+    audio_list.add_argument("-s", "--project", default="default")
+    audio_import_cli = audio_actions.add_parser(
+        "import", help="导入一个 WAV/M4A（≤25 MB、≤60 秒），必须提供许可与来源"
+    )
+    audio_import_cli.add_argument("path", help="本地音频文件")
+    audio_import_cli.add_argument("-s", "--project", default="default")
+    audio_import_cli.add_argument("--kind", choices=["bgm", "sfx"], required=True)
+    audio_import_cli.add_argument("--title", required=True)
+    audio_import_cli.add_argument("--source-url", dest="source_url", required=True)
+    audio_import_cli.add_argument("--license", required=True)
+    audio_import_cli.add_argument("--request-id", dest="request_id", help="同一请求 ID 重放原结果")
     subtitle = commands.add_parser("subtitle", help="字幕：确定性对齐、保存修正与本地软/烧录导出")
     subtitle_actions = subtitle.add_subparsers(dest="action", required=True)
     subtitle_show = subtitle_actions.add_parser("show", help="读取当前字幕轨、版本与逐条 cue")
@@ -1244,6 +1415,15 @@ def main() -> None:
                     raise SystemExit(asyncio.run(local_season_generate(config, store, args)))
                 else:
                     raise SystemExit(local_season_save(config, store, args))
+        elif args.command == "timeline":
+            with FileStore.open(config.home) as store:
+                if args.action in {"show", "sources"}:
+                    print_json(local_timeline(store.snapshot(), args))
+                else:
+                    raise SystemExit(asyncio.run(local_timeline_save(config, store, args)))
+        elif args.command == "audio":
+            with FileStore.open(config.home) as store:
+                raise SystemExit(asyncio.run(local_audio(config, store, args)))
         elif args.command == "usage" and args.project is not None:
             with FileStore.open(config.home) as store:
                 print_json(local_usage(store.snapshot(), args.project))

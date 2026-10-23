@@ -273,10 +273,10 @@ async def test_mock_runner_generates_three_shots_and_waits_as_one_set(store, vid
         return AIMessage(content=f"{len(result['data']['jobs'])} 个镜头任务已完成。")
 
     model = ScriptedModel(respond)
-    runner = AgentRunner(store=store, model=model, tools=registry)
+    runner = agent_runner(store=store, model=model, tools=registry)
     suspended = await runner.run("coffee", "三镜头分镜并生成")
     assert suspended["status"] == "waiting_external", suspended["answer"]
-    assert suspended["toolFeatures"]["video"]["toolsVersion"] == 16
+    assert suspended["toolFeatures"]["video"]["toolsVersion"] == 18
     binding = parse_wait(next(iter(store.snapshot()["waits"].values())))
     assert isinstance(binding, WaitBindingV3) and binding.resource.kind == "jobset"
     assert list(binding.job_ids) == sorted(saved["jobIds"])
@@ -522,7 +522,7 @@ async def test_mock_runner_regenerates_one_shot_without_touching_the_others(stor
         saved["jobIds"] = [item["jobId"] for item in result["data"]["shots"]]
         return AIMessage(content="两个镜头已登记。")
 
-    runner = AgentRunner(store=store, model=ScriptedModel(first_run), tools=registry)
+    runner = agent_runner(store=store, model=ScriptedModel(first_run), tools=registry)
     first = await runner.run("coffee", "两镜头分镜并生成")
     assert first["status"] == "completed", first["answer"]
     assert len(saved["jobIds"]) == 2
@@ -554,7 +554,7 @@ async def test_mock_runner_regenerates_one_shot_without_touching_the_others(stor
         assert not result["data"]["shots"][0]["reused"]
         return AIMessage(content="第二个镜头已重做。")
 
-    redo = AgentRunner(store=store, model=ScriptedModel(redo_run), tools=registry)
+    redo = agent_runner(store=store, model=ScriptedModel(redo_run), tools=registry)
     second = await redo.run("coffee", "只重做第二个镜头")
     assert second["status"] == "completed", second["answer"]
     record = storyboard_record(store, saved["storyboardId"])
@@ -637,3 +637,15 @@ def test_mock_rejects_image_modes_without_a_verified_capability(store, video_clo
     result = service.shot_generate(generation_args(saved), context=shot_context())
     assert result["error"]["code"] == "VIDEO_UNSUPPORTED_MODE"
     assert not store.snapshot()["jobs"]
+
+
+def agent_runner(**kwargs):
+    """An AgentRunner with the evaluation fixture context budget.
+
+    M7 froze a longer rules text; the product default (65536) is unchanged, while
+    these scripted histories need the same 96 KiB headroom as the evaluation suites.
+    """
+    from vagent.context import ContextBuilder
+
+    kwargs.setdefault("context", ContextBuilder(98304))
+    return AgentRunner(**kwargs)

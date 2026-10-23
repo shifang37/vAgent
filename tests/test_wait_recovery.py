@@ -58,7 +58,7 @@ async def test_hard_exit_recovers_production_wait_without_repeating_model_or_sid
         jobs = JobService(store, [adapter])
         tools = register_video_tools(create_project_tools(), jobs)
         model = ScriptedModel(lambda messages, _: AIMessage(content="Recovered persisted simulation."))
-        runner = AgentRunner(store=store, model=model, tools=tools)
+        runner = agent_runner(store=store, model=model, tools=tools)
         coordinator = WaitCoordinator(
             store,
             lambda _: runner,
@@ -137,3 +137,15 @@ async def test_second_wait_survives_hard_exit_without_skipping_first_interrupt(t
         assert all(len(artifact["versions"]) == 1 for artifact in store.snapshot()["artifacts"].values())
         assert harness.adapter.ledger_snapshot()["submitCalls"] == 2
         assert all(binding["status"] == "delivered" for binding in store.snapshot()["waits"].values())
+
+
+def agent_runner(**kwargs):
+    """An AgentRunner with the evaluation fixture context budget.
+
+    M7 froze a longer rules text; the product default (65536) is unchanged, while
+    these scripted histories need the same 96 KiB headroom as the evaluation suites.
+    """
+    from vagent.context import ContextBuilder
+
+    kwargs.setdefault("context", ContextBuilder(98304))
+    return AgentRunner(**kwargs)

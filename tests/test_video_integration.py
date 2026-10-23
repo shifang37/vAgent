@@ -74,7 +74,14 @@ class VideoRegistrationModel:
 
 
 async def test_application_model_discovers_capability_and_creates_one_job(tmp_path):
-    config = load_config({"VAGENT_HOME": str(tmp_path), "VAGENT_VIDEO_MODE": "mock"})
+    config = load_config(
+        {
+            "VAGENT_HOME": str(tmp_path),
+            "VAGENT_VIDEO_MODE": "mock",
+            # M7 rules growth: evaluation fixture budget, not the product default.
+            "VAGENT_CONTEXT_BYTES": "98304",
+        }
+    )
     model = VideoRegistrationModel()
     async with ApplicationService.open(config, model=model) as service:
         await service.start("coffee", "登记模拟视频", "registration")
@@ -82,7 +89,7 @@ async def test_application_model_discovers_capability_and_creates_one_job(tmp_pa
         record = service.run_record(service.active_run_id)
         assert record["status"] == "completed", record["answer"]
         assert record["videoMode"] == "mock" and record["executionVersion"] == 3
-        assert record["toolFeatures"]["video"]["toolsVersion"] == 16
+        assert record["toolFeatures"]["video"]["toolsVersion"] == 18
         assert record["toolFeatures"]["video"]["capabilities"] == [
             item.model_dump(mode="json", by_alias=True) for item in service.video_jobs.capabilities("mock")
         ]
@@ -280,7 +287,7 @@ async def test_mock_resume_requires_original_mode_capabilities_rules_and_tools(s
     def fail(*_):
         raise RuntimeError("offline model failure")
 
-    original = await AgentRunner(store=store, model=ScriptedModel(fail), tools=registry).run(
+    original = await agent_runner(store=store, model=ScriptedModel(fail), tools=registry).run(
         "coffee", "查询能力"
     )
     assert original["resumable"]
@@ -295,7 +302,7 @@ async def test_mock_resume_requires_original_mode_capabilities_rules_and_tools(s
         if change == "rules":
             # Patch the rules text the current registry actually publishes; the
             # frozen earlier constants are no longer the live instructions.
-            monkeypatch.setattr("vagent.video.tools.VIDEO_RULES_V16", "Changed simulation rules")
+            monkeypatch.setattr("vagent.video.tools.VIDEO_RULES_V18", "Changed simulation rules")
         changed = register_video_tools(
             create_project_tools(),
             JobService(
@@ -307,7 +314,7 @@ async def test_mock_resume_requires_original_mode_capabilities_rules_and_tools(s
     model = ScriptedModel(lambda *_: AIMessage(content="must not run"))
     before = store.snapshot()
     with pytest.raises(AppError) as error:
-        await AgentRunner(store=store, model=model, tools=changed).resume(original["id"])
+        await agent_runner(store=store, model=model, tools=changed).resume(original["id"])
     assert error.value.code == "RESUME_CONFIG_CHANGED"
     assert not model.calls and store.snapshot() == before
 
@@ -332,14 +339,14 @@ async def test_mock_batch_replay_keeps_original_context_job_and_tool_budget(stor
         if event["type"] == "tool.started" and event["callId"] == "after-generation":
             cancelled.set()
 
-    first = await AgentRunner(store=store, model=ScriptedModel(respond), tools=registry, on_event=cancel).run(
-        "coffee", "登记视频", cancelled=cancelled
-    )
+    first = await agent_runner(
+        store=store, model=ScriptedModel(respond), tools=registry, on_event=cancel
+    ).run("coffee", "登记视频", cancelled=cancelled)
     assert first["status"] == "cancelled" and first["resumable"]
     jobs = store.snapshot()["jobs"]
     assert len(jobs) == 1 and first["toolCalls"] == first["modelSteps"] == 2
     model = ScriptedModel(lambda *_: AIMessage(content="已登记模拟任务"))
-    final = await AgentRunner(store=store, model=model, tools=registry).resume(first["id"])
+    final = await agent_runner(store=store, model=model, tools=registry).resume(first["id"])
     assert final["status"] == "completed" and final["modelSteps"] == final["toolCalls"] == 3
     assert final["policy"] == first["policy"] and store.snapshot()["jobs"] == jobs
     assert adapter.ledger_snapshot()["submitCalls"] == 0 and model.calls == 1
@@ -370,7 +377,7 @@ async def test_deferred_boundary_stops_batch_without_false_success_or_next_model
         )
     )
     events = []
-    runner = AgentRunner(
+    runner = agent_runner(
         store=store, model=model, tools=registry, on_event=events.append, execution_version=1
     )
     result = await runner.run("coffee", "保存然后等待")
@@ -402,7 +409,7 @@ async def test_runner_deferred_contract_does_not_depend_on_video_provider(store)
         ToolDefinition("report", "deferred report", Arguments, "read", context_execute=defer)
     )
     model = ScriptedModel(lambda *_: tool_call("report", call_id="original-call"))
-    result = await AgentRunner(store=store, model=model, tools=registry).run("coffee", "report")
+    result = await agent_runner(store=store, model=model, tools=registry).run("coffee", "report")
     assert result["errorCode"] == "EXTERNAL_WAIT_UNAVAILABLE" and model.calls == 1
     assert observed[0].run_id == result["id"] and observed[0].tool_call_id == "original-call"
     assert result["videoMode"] == "off" and not store.snapshot()["jobs"]
@@ -433,3 +440,15 @@ async def test_mock_video_tools_compose_with_real_local_read_only_mcp(tmp_path):
         result = await service.runner(read_only=True).run("coffee", "读取视频能力与帧数")
         assert result["status"] == "completed" and result["toolCalls"] == 2
         assert not service.store.snapshot()["jobs"]
+
+
+def agent_runner(**kwargs):
+    """An AgentRunner with the evaluation fixture context budget.
+
+    M7 froze a longer rules text; the product default (65536) is unchanged, while
+    these scripted histories need the same 96 KiB headroom as the evaluation suites.
+    """
+    from vagent.context import ContextBuilder
+
+    kwargs.setdefault("context", ContextBuilder(98304))
+    return AgentRunner(**kwargs)

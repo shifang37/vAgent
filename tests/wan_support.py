@@ -67,6 +67,9 @@ def live_config(home, **changes):
             "home": home,
             "api_key": None,
             "video_mode": "live",
+            # M7 rules growth enlarged the frozen instructions; the fixture keeps a
+            # little more room than the product default (VAGENT_CONTEXT_BYTES=65536).
+            "context_bytes": 98304,
             "video_api_key": "video-test-secret",
             "video_workspace_id": "test-workspace",
             **changes,

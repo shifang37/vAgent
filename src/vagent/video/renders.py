@@ -98,9 +98,11 @@ class RenderTitleCardArg(Contract):
 
 
 class FilmRenderArgs(Contract):
-    scope: Literal["storyboard", "episode"]
+    scope: Literal["storyboard", "episode", "timeline"]
     storyboard_id: Identifier | None = None
     episode_id: Identifier | None = None
+    timeline_id: Identifier | None = None
+    timeline_version: int | None = Field(default=None, ge=1)
     track_id: Identifier | None = None
     track_version: int | None = Field(default=None, ge=1)
     profile: Literal["720p-h264-aac-v1", "1080p-h264-aac-v1"] = "720p-h264-aac-v1"
@@ -112,12 +114,24 @@ class FilmRenderArgs(Contract):
 
     @model_validator(mode="after")
     def coherent_target(self):
-        if self.scope == "storyboard":
-            if self.storyboard_id is None or self.episode_id is not None:
-                raise ValueError("A storyboard render names only its storyboard")
-        elif self.episode_id is None or self.storyboard_id is not None:
-            raise ValueError("An episode render names only its episode")
-        if self.subtitle_mode != "soft" and self.track_id is None:
+        if self.scope == "timeline":
+            # The frozen timeline owns clips, transitions, title cards, subtitle and
+            # audio; a render call cannot add a second edit on top of it.
+            if self.timeline_id is None or self.episode_id is not None or self.storyboard_id is not None:
+                raise ValueError("A timeline render names only its timeline")
+            if self.track_id is not None or self.transitions or self.title_cards:
+                raise ValueError("A timeline render takes its bindings from the frozen timeline")
+        else:
+            if self.timeline_id is not None or self.timeline_version is not None:
+                raise ValueError("Only a timeline render names a timeline")
+            if self.scope == "storyboard":
+                if self.storyboard_id is None or self.episode_id is not None:
+                    raise ValueError("A storyboard render names only its storyboard")
+            elif self.episode_id is None or self.storyboard_id is not None:
+                raise ValueError("An episode render names only its episode")
+        if self.timeline_version is not None and self.timeline_id is None:
+            raise ValueError("timelineVersion requires timelineId")
+        if self.subtitle_mode != "soft" and self.scope != "timeline" and self.track_id is None:
             raise ValueError("burn and both exports require a subtitle track")
         if self.track_version is not None and self.track_id is None:
             raise ValueError("trackVersion requires trackId")
@@ -132,11 +146,12 @@ class RenderReadArgs(Contract):
     episode_id: Identifier | None = None
     storyboard_id: Identifier | None = None
     film_id: Identifier | None = None
+    timeline_id: Identifier | None = None
 
     @model_validator(mode="after")
     def at_least_one_target(self):
-        if not any((self.render_id, self.episode_id, self.storyboard_id, self.film_id)):
-            raise ValueError("render_read needs renderId, episodeId, storyboardId or filmId")
+        if not any((self.render_id, self.episode_id, self.storyboard_id, self.film_id, self.timeline_id)):
+            raise ValueError("render_read needs renderId, episodeId, storyboardId, filmId or timelineId")
         return self
 
 
@@ -164,9 +179,11 @@ class RenderSceneProgress(Contract):
 class RenderTask(Contract):
     id: Identifier
     project_id: Identifier
-    scope: Literal["storyboard", "episode"]
+    scope: Literal["storyboard", "episode", "timeline"]
     storyboard_id: Identifier | None = None
     episode_id: Identifier | None = None
+    timeline_id: Identifier | None = None
+    timeline_version: int | None = Field(default=None, ge=1)
     track_id: Identifier | None = None
     track_version: int | None = Field(default=None, ge=1)
     profile_name: Literal["720p-h264-aac-v1", "1080p-h264-aac-v1"]
@@ -191,6 +208,11 @@ class RenderTask(Contract):
             raise ValueError("A storyboard task names its storyboard")
         if self.scope == "episode" and self.episode_id is None:
             raise ValueError("An episode task names its episode")
+        if self.scope == "timeline":
+            if self.episode_id is None or self.timeline_id is None or self.timeline_version is None:
+                raise ValueError("A timeline task names its episode, timeline and version")
+        elif self.timeline_id is not None or self.timeline_version is not None:
+            raise ValueError("Only a timeline task names a timeline")
         if self.status == "succeeded":
             if self.film_id is None or self.film_version is None:
                 raise ValueError("A succeeded task names the film version it committed")
@@ -372,6 +394,54 @@ def remap_cues(cues, entries: list[ShotEntry], effective: list[EffectiveEntry]):
     return result
 
 
+def remap_timeline_cues(cues, track_timeline, clips, effective: list[EffectiveEntry]):
+    """``timeline-subtitle-remap-v1``: map frozen episode cues onto the edit.
+
+    Cue times are frozen on the episode source timeline, while ``inMs/outMs`` are
+    shot-local. The frozen subtitle timeline is the bridge: the cue's offset inside
+    its shot is ``cue.start - entry.start``; the clip then keeps only the
+    ``[inMs, outMs]`` part of that offset. A cue whose shot is not in the timeline is
+    dropped (never an error), and staying outside a clip's window clamps to its edge.
+    """
+    positions = {clip.shot_id: index for index, clip in enumerate(clips)}
+    track_start = {entry.shot_id: entry.start.total_microseconds() for entry in track_timeline}
+    total_end_us = round(effective_duration(effective) * 1_000_000)
+    result = []
+    previous_end = 0
+    for cue in cues:
+        if cue.shot_id is None:
+            continue
+        index = positions.get(cue.shot_id)
+        source_low = track_start.get(cue.shot_id)
+        if index is None or source_low is None:
+            continue
+        clip = clips[index]
+        target = effective[index]
+        in_us = clip.in_ms * 1000
+        low, high = target.start, target.start + target.duration
+        source_start = Fraction(cue.start.total_microseconds() - source_low, 1_000_000)
+        source_end = Fraction(cue.end.total_microseconds() - source_low, 1_000_000)
+        start = target.start + (source_start - Fraction(in_us, 1_000_000))
+        end = target.start + (source_end - Fraction(in_us, 1_000_000))
+        start = min(max(start, low), high)
+        end = min(max(end, low), high)
+        start_us, end_us = round(start * 1_000_000), round(end * 1_000_000)
+        start_us = max(start_us, previous_end)
+        end_us = min(end_us, total_end_us)
+        if end_us - start_us < 1_000:
+            continue
+        previous_end = end_us
+        result.append(
+            cue.model_copy(
+                update={
+                    "start": Rational.microseconds(start_us),
+                    "end": Rational.microseconds(end_us),
+                }
+            )
+        )
+    return result
+
+
 def validate_title_cards(cards: tuple[RenderTitleCardArg, ...], total_seconds: Fraction) -> list[tuple]:
     if len(cards) > TITLE_CARD_LIMIT:
         raise RenderError("TITLE_CARD_LIMIT", "（超过 4 条）", stage="source")
@@ -433,6 +503,8 @@ def render_task_view(state: dict, task: RenderTask) -> dict:
         "scope": task.scope,
         "storyboardId": task.storyboard_id,
         "episodeId": task.episode_id,
+        "timelineId": task.timeline_id,
+        "timelineVersion": task.timeline_version,
         "trackId": task.track_id,
         "trackVersion": task.track_version,
         "profile": task.profile_name,
@@ -464,6 +536,7 @@ def latest_render_task(
     episode_id: str | None = None,
     storyboard_id: str | None = None,
     film_id: str | None = None,
+    timeline_id: str | None = None,
 ) -> RenderTask | None:
     candidates = []
     for raw in state.get("renders", {}).values():
@@ -474,6 +547,8 @@ def latest_render_task(
         if storyboard_id is not None and raw.get("storyboardId") != storyboard_id:
             continue
         if film_id is not None and raw.get("filmId") != film_id:
+            continue
+        if timeline_id is not None and raw.get("timelineId") != timeline_id:
             continue
         candidates.append(RenderTask.model_validate(raw))
     if not candidates:
@@ -489,6 +564,19 @@ def rendered_cues(state: dict, film: Film, version):
     if render is None or render.subtitle is None:
         return None
     _track, frozen = track_version(state, render.subtitle.track_id, render.subtitle.track_version)
+    if render.sources.timeline is not None:
+        # A timeline render re-derives the sidecar with the same remap it encoded.
+        from vagent.video.timelines import Timeline, effective_timeline, timeline_version
+
+        raw = state.get("timelines", {}).get(render.sources.timeline.timeline_id)
+        if raw is None:
+            raise AppError("TIMELINE_NOT_FOUND", "这个渲染引用的时间线不存在。")
+        record = Timeline.model_validate(raw)
+        frozen_timeline = timeline_version(record, render.sources.timeline.timeline_version)
+        _entries, _active, effective, _total = effective_timeline(
+            frozen_timeline.clips, frozen_timeline.transitions
+        )
+        return remap_timeline_cues(list(frozen.cues), frozen.timeline, frozen_timeline.clips, effective)
     cues = list(frozen.cues)
     if not render.subtitle.retimed:
         return cues
@@ -606,6 +694,8 @@ def build_task(
         scope=args.scope,
         storyboard_id=args.storyboard_id,
         episode_id=args.episode_id,
+        timeline_id=args.timeline_id,
+        timeline_version=args.timeline_version,
         track_id=args.track_id,
         track_version=args.track_version,
         profile_name=args.profile,

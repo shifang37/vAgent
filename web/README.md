@@ -33,6 +33,7 @@ $env:VAGENT_HOME = Join-Path $PWD '.vagent/web'
 - 整片渲染区（成片区，M6 E3）：显示最新渲染任务状态、逐场状态/时长/失败阶段与旁挂 SRT；「整片渲染」按当前分镜与字幕轨发起 `film_render`（720P、soft/burn/both，服务端默认无转场/标题卡），成功后刷新成片与进度。请求带 `clientRequestId`，同指纹重放原成片；错误按 `TRANSITION_INVALID`/`TITLE_CARD_LIMIT`/`RENDER_*`/`LOUDNESS_OUT_OF_RANGE` 给出说明。
 - 字幕区（分镜面板成片下方，M6 E1）：显示当前字幕版本、cue 数、冻结时间线来源（成片/分镜）与逐版本 SRT/ASS 下载；「生成字幕 / 按当前台词重新生成」调用 `subtitle_save`（省略 cues，服务端确定性对齐），「导出软字幕 / 导出烧录字幕」把某一确定字幕版本追加为新的成片版本并刷新播放器。请求都带 `clientRequestId`，同一 ID 重放原结果；错误按 `SUBTITLE_CUE_CONFLICT`/`SUBTITLE_OVERFLOW`/`SUBTITLE_TRACK_MISSING`/`RENDER_TIMELINE_MISMATCH`/`FONT_MISSING`/`RENDER_*` 给出可操作说明。人工逐条修正走 `vagent subtitle save --cues`。
 - 季面板（左栏「季」，M7 E1/E2）：列出本项目的季并显示当前版本/revision/成员数；选择季按需读取详情，新建季只需标题与 1–4 个有序分集（勾选顺序即季内顺序），属于其他季当前版本的分集禁用并提示先在原季移除。保存走 `/api/sessions/{id}/seasons/save`，相同内容复用版本、修改追加新版本。`批量生成` 区块在已保存季上勾选 1–3 集，先请求只读 `GET /api/seasons/{id}/estimate` 预览逐集镜头数/新任务/估算，再经确认对话框调用 `/api/sessions/{id}/seasons/generate`；批次卡片显示逐集登记状态、Job 数、复用数、交付/失败/待定计数与错误码，`partial/failed` 时提供「恢复失败集（n 集）」，恢复同样先预览再显式确认。面板只读写季与批次元数据，不提交供应商，视频模式 off 下保存季仍可用。
+- 时间线工作台（左栏「时间线」或分集面板「打开时间线工作台」，M7 E3）：按分集读取 `GET /api/episodes/{id}/timeline` 的镜头源、整集字幕轨与已有音频，展示可编排镜头（源时长、交付状态）与当前 `timeline-zh-v1` 版本。每张镜头卡可上移/下移/移除、输入入点/出点毫秒，并在除最后一条外的边界选择硬切/淡出淡入/叠化与时长；顶部实时显示裁剪后有效时长与转场占用。字幕下拉引用本集整集字幕轨，音轨列表可勾选配音（按重映射 cue 定位）与已导入 BGM/SFX（可调增益与起点）；标题卡最多 4 条，可直接编辑文字/开始/时长。`顺序预览` 按裁剪窗口在客户端顺序播放源镜头（不合成字幕与混音），`保存为新版本` 调用 `/api/sessions/{id}/timelines/save`（相同内容复用版本，修改需 `expectedRevision`），`导出成片` 调用 `film_render` 的 `scope=timeline` 并写本地成片。导入 BGM/SFX 走 `POST /api/audio/import`（multipart，必须填标题/来源 URL/许可，≤25 MB、≤60 秒，按 SHA-256 去重），`GET /api/audio` 列出已导入素材。面板只写季/时间线元数据与本地音频；保存不登记任务，导出不调用供应商，视频模式 off 下仍可用。
 - 批量生成确认对话框：先请求只读估算，逐镜头列出模式/时长/估算与合计，并显示本 Run 已用与剩余额度；确认后整批登记，超出上限时服务端整批拒绝。
 - 序列连播：客户端按顺序播放各镜头本地 MP4（不做服务端拼接），可暂停、下一个或停止；尚无本地媒体的镜头在面板上明确标注并被跳过。
 - 用量面板（左栏「用量统计」）：按项目聚合任务计数与状态、登记估算与账单状态（未取得账单保持未知）、分镜与镜头版本数、素材数、模型 Token 覆盖率与按日记录；只读本地数据，不做外部调用。
@@ -75,8 +76,12 @@ live Job 视图包含 `lastProviderStatus`、`queryPauseReason`、冻结费用�
 | `POST /api/sessions/{id}/subtitles/save` | CSRF + JSON `{clientRequestId, scope, storyboardId|episodeId, cues?, trackId?, expectedRevision?}`，201 保存/追加字幕版本；省略 `cues` 时按冻结台词确定性生成，相同 cues 重放同版本，过期 revision 409 |
 | `POST /api/sessions/{id}/subtitles/export` | CSRF + JSON `{clientRequestId, trackId, mode: soft|burn|both, profile?, trackVersion?}`，202 返回含新 `render` 版本的成片视图；本地 FFmpeg、不登记 Job；同指纹幂等，1080P/整集返回 400 |
 | `GET /api/subtitles/{trackId}/{version}/srt|ass` | 该不可变字幕版本的确定性 SRT/ASS 附件；版本不存在 400 `SUBTITLE_TRACK_MISSING` |
-| `POST /api/sessions/{id}/films/render` | CSRF + JSON `{clientRequestId, scope, storyboardId|episodeId, trackId?, profile?, subtitleMode?, transitions?, titleCards?, expectedRevision?}`，202 返回成片与渲染任务视图；本地 FFmpeg、不登记 Job；同指纹幂等 |
-| `GET /api/renders?projectId=...&renderId|storyboardId|episodeId|filmId=...` | 只读渲染任务/成片进度、逐场状态、失败阶段与测量 |
+| `POST /api/sessions/{id}/films/render` | CSRF + JSON `{clientRequestId, scope, storyboardId|episodeId|timelineId, timelineVersion?, trackId?, profile?, subtitleMode?, transitions?, titleCards?, expectedRevision?}`，202 返回成片与渲染任务视图；`scope=timeline` 的剪辑/转场/字幕/音轨全部取自冻结版本；本地 FFmpeg、不登记 Job；同指纹幂等 |
+| `GET /api/renders?projectId=...&renderId|storyboardId|episodeId|timelineId|filmId=...` | 只读渲染任务/成片进度、逐场状态、失败阶段与测量 |
+| `GET /api/episodes/{id}/timeline?projectId=` | 时间线工作台源视图：当前时间线、可编排镜头（源时长/交付状态）、整集字幕轨与配音/已导入音频；只读 |
+| `GET /api/timelines/{id}?projectId=&version=` | 当前或指定 `timeline-zh-v1` 版本、逐条裁剪与交付状态、指纹、`stale`；跨项目 `TIMELINE_NOT_FOUND` 404 |
+| `POST /api/sessions/{id}/timelines/save` | CSRF + JSON `{clientRequestId, episodeId, clips[], transitions[], subtitle?, audio[], titleCards[], timelineId?, expectedRevision?}`，201 返回新版本；相同内容 `replayed=true`，修改必须匹配 `revision`（409 `TIMELINE_VERSION_CONFLICT`）；不登记 Job、不调用模型 |
+| `GET /api/audio?projectId=`、`POST /api/audio/import` | 列出本项目已导入 BGM/SFX / multipart 导入（`projectId, clientRequestId, kind=bgm|sfx, title, sourceUrl, license, file`，≤25 MB、≤60 秒、按 SHA-256 去重）；不受视频模式限制，不调用供应商 |
 | `GET /api/seasons?projectId=`、`GET /api/seasons/{id}?projectId=` | 季摘要列表 / 完整视图（当前版本、`revision`、有序 `episodeIds`、成员集摘要；E1 `batch` 恒为 null）；跨项目 `SEASON_NOT_FOUND` 404 |
 | `POST /api/sessions/{id}/seasons/save` | CSRF + JSON `{clientRequestId, title, episodeIds[], seasonId?, expectedRevision?}`，201 返回季版本；相同内容 `replayed=true`，修改必须匹配 `revision`（409），未知字段/超 4 集 422；不登记 Job、不调用模型 |
 | `GET /api/films/{filmId}/versions/{version}/subtitles.srt|ass` | 渲染版本按转场夹取后的旁挂字幕；E1 无转场版本仍可从 `/api/subtitles/...` 读取 |

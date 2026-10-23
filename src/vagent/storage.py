@@ -27,6 +27,7 @@ from vagent.video.renders import RenderTask
 from vagent.video.seasons import Season, validate_season_changes
 from vagent.video.storyboards import Asset, Storyboard
 from vagent.video.subtitles import SubtitleTrack, validate_subtitle_changes
+from vagent.video.timelines import validate_timeline_changes
 from vagent.waiting import WAIT_EXECUTION_VERSIONS, StoredWait, WaitBinding, parse_wait
 
 T = TypeVar("T")
@@ -396,6 +397,7 @@ class FileStore:
                     validate_render_changes(checked["renders"], checked)
                     validate_season_changes(checked.get("seasons", {}), checked)
                     validate_batch_changes(checked.get("batches", {}), checked, initial=True)
+                    validate_timeline_changes(checked.get("timelines", {}), checked)
                 except (ValueError, TypeError, KeyError, AppError):
                     raise AppError(
                         "INVALID_STORE", "本地状态损坏或版本不支持，已保留原文件，未重置数据。"
@@ -522,6 +524,7 @@ class FileStore:
             validate_render_changes(self._state.get("renders", {}), draft)
             validate_season_changes(self._state.get("seasons", {}), draft)
             validate_batch_changes(self._state.get("batches", {}), draft)
+            validate_timeline_changes(self._state.get("timelines", {}), draft)
             atomic_write_json(self.home / "state.json", draft)
             self._state = draft
             return copy.deepcopy(value)
