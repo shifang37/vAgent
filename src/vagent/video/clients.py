@@ -31,6 +31,7 @@ CLIENT_PROMPTS = {
     "episode_generate": "本地界面发起的分集整批登记（不调用模型）。",
     "subtitle_save": "本地界面发起的字幕保存（不调用模型）。",
     "subtitle_export": "本地界面发起的字幕导出（不调用模型）。",
+    "film_render": "本地界面发起的整片渲染（不调用模型）。",
 }
 CLIENT_GROUPS = (
     "shot_generate",
@@ -39,6 +40,7 @@ CLIENT_GROUPS = (
     "episode_generate",
     "subtitle_save",
     "subtitle_export",
+    "film_render",
 )
 
 
@@ -374,6 +376,50 @@ def save_subtitles(
         "subtitle_save",
         args,
         lambda draft: save_subtitles(args, draft, session_id),
+    )
+    if not result.get("ok"):
+        raise AppError(result["error"]["code"], result["error"]["message"])
+    data = result["data"]
+    return _result(service, data, context.run_id, data.get("storyboardId"))
+
+
+async def film_render(
+    service,
+    *,
+    session_id: str,
+    client_request_id: str,
+    request: dict,
+) -> dict:
+    """Render delivered shots as one explicit local action; no provider or Job."""
+    from vagent.video.renders import FilmRenderArgs
+
+    args = {key: value for key, value in request.items() if key != "clientRequestId"}
+    args["confirm"] = True
+    model = FilmRenderArgs.model_validate(args)
+    args = model.model_dump(mode="json", by_alias=True)
+    replayed = _replay_or_conflict(service, session_id, client_request_id, "film_render", args)
+    if replayed is not None:
+        return replayed
+    if model.scope == "storyboard":
+        target = service.store.snapshot()["storyboards"].get(model.storyboard_id)
+        if target is None or target["projectId"] != session_id:
+            raise AppError("NOT_FOUND", "当前项目中没有这个分镜。")
+    else:
+        target = service.store.snapshot()["episodes"].get(model.episode_id)
+        if target is None or target["projectId"] != session_id:
+            raise AppError("EPISODE_NOT_FOUND", "当前项目中没有这个分集。")
+    context = client_context(
+        service,
+        session_id=session_id,
+        client_request_id=client_request_id,
+        group="film_render",
+        require_mode_config=False,
+    )
+    result = await service.renders.render(
+        args,
+        project_id=session_id,
+        operation_key=_operation_key(context.run_id, "film_render"),
+        args=args,
     )
     if not result.get("ok"):
         raise AppError(result["error"]["code"], result["error"]["message"])

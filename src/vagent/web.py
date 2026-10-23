@@ -94,6 +94,37 @@ class SubtitleExportInput(BaseModel):
     trackVersion: int | None = Field(default=None, ge=1)
 
 
+class TransitionInput(BaseModel):
+    model_config = ConfigDict(extra="forbid", strict=True)
+    afterShotId: Identifier
+    type: Literal["cut", "fade", "crossfade"] = "cut"
+    durationMs: int = Field(default=0, ge=0, le=1000)
+
+
+class TitleCardInput(BaseModel):
+    model_config = ConfigDict(extra="forbid", strict=True)
+    text: str = Field(min_length=1, max_length=120)
+    startMs: int = Field(ge=0)
+    durationMs: int = Field(gt=0)
+    styleProfile: Literal["title-zh-v1"] = "title-zh-v1"
+
+
+class FilmRenderInput(BaseModel):
+    model_config = ConfigDict(extra="forbid", strict=True)
+    clientRequestId: str = Field(pattern=r"^[a-zA-Z0-9_-]{1,64}$")
+    scope: Literal["storyboard", "episode"]
+    storyboardId: Identifier | None = None
+    episodeId: Identifier | None = None
+    trackId: Identifier | None = None
+    trackVersion: int | None = Field(default=None, ge=1)
+    profile: Literal["720p-h264-aac-v1", "1080p-h264-aac-v1"] = "720p-h264-aac-v1"
+    subtitleMode: Literal["soft", "burn", "both"] = "soft"
+    transitions: list[TransitionInput] = Field(default_factory=list, max_length=63)
+    titleCards: list[TitleCardInput] = Field(default_factory=list, max_length=4)
+    expectedRevision: int | None = Field(default=None, ge=0)
+    confirm: bool = True
+
+
 def create_app(config, *, port=3210, model=None, policy=None):
     token = secrets.token_urlsafe(32)
     allowed_hosts = {f"127.0.0.1:{port}", f"localhost:{port}"}
@@ -342,6 +373,49 @@ def create_app(config, *, port=3210, model=None, policy=None):
     async def films_assemble(session_id: str, body: FilmAssembleInput):
         return await app.state.service.assemble_film(session_id, body.model_dump())
 
+    @app.post("/api/sessions/{session_id}/films/render", status_code=202)
+    async def films_render(session_id: str, body: FilmRenderInput):
+        return await app.state.service.film_render(session_id, body.model_dump(exclude_none=True))
+
+    @app.get("/api/renders")
+    async def renders(
+        projectId: str,
+        renderId: str | None = None,
+        storyboardId: str | None = None,
+        episodeId: str | None = None,
+        filmId: str | None = None,
+    ):
+        return await file_io(
+            app.state.service.render_read,
+            projectId,
+            render_id=renderId,
+            storyboard_id=storyboardId,
+            episode_id=episodeId,
+            film_id=filmId,
+        )
+
+    @app.get("/api/renders/{render_id}")
+    async def render_detail(render_id: str, projectId: str):
+        return await file_io(app.state.service.render_read, projectId, render_id=render_id)
+
+    @app.get("/api/films/{film_id}/versions/{version}/subtitles.srt")
+    async def film_subtitle_srt(film_id: str, version: int):
+        text, filename = await file_io(app.state.service.render_sidecar, film_id, version, kind="srt")
+        return Response(
+            content=text.encode("utf-8"),
+            media_type="application/x-subrip; charset=utf-8",
+            headers={"Content-Disposition": f'attachment; filename="{filename}"'},
+        )
+
+    @app.get("/api/films/{film_id}/versions/{version}/subtitles.ass")
+    async def film_subtitle_ass(film_id: str, version: int):
+        text, filename = await file_io(app.state.service.render_sidecar, film_id, version, kind="ass")
+        return Response(
+            content=text.encode("utf-8"),
+            media_type="text/x-ssa; charset=utf-8",
+            headers={"Content-Disposition": f'attachment; filename="{filename}"'},
+        )
+
     @app.get("/api/subtitles")
     async def subtitle(
         projectId: str,
@@ -480,6 +554,7 @@ def create_app(config, *, port=3210, model=None, policy=None):
                 "film-state.js",
                 "subtitle-state.js",
                 "episode-state.js",
+                "render-state.js",
                 "styles.css",
                 "mark.svg",
             }

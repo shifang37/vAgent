@@ -276,7 +276,7 @@ async def test_mock_runner_generates_three_shots_and_waits_as_one_set(store, vid
     runner = AgentRunner(store=store, model=model, tools=registry)
     suspended = await runner.run("coffee", "三镜头分镜并生成")
     assert suspended["status"] == "waiting_external", suspended["answer"]
-    assert suspended["toolFeatures"]["video"]["toolsVersion"] == 11
+    assert suspended["toolFeatures"]["video"]["toolsVersion"] == 13
     binding = parse_wait(next(iter(store.snapshot()["waits"].values())))
     assert isinstance(binding, WaitBindingV3) and binding.resource.kind == "jobset"
     assert list(binding.job_ids) == sorted(saved["jobIds"])

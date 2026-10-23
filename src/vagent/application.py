@@ -83,6 +83,7 @@ class ApplicationService:
         self.media_worker = None
         self.films = None
         self.subtitles = None
+        self.renders = None
         self._event_loop = None
         self._job_revisions = {key: job["revision"] for key, job in store.snapshot()["jobs"].items()}
         self.on_event = on_event
@@ -146,6 +147,7 @@ class ApplicationService:
             service.media = video_jobs.media
             service.films = video_jobs.films
             service.subtitles = video_jobs.subtitles
+            service.renders = video_jobs.renders
             service._event_loop = asyncio.get_running_loop()
             video_jobs.on_change = service._job_event
             service.job_worker = JobWorker(video_jobs)
@@ -292,6 +294,7 @@ class ApplicationService:
                 include_cues=False,
                 include_digests=False,
             )
+            view["render"] = self.renders.episode_summary(state, session_id, view["episodeId"])
         return view
 
     def assets(self, project_id=None):
@@ -421,6 +424,52 @@ class ApplicationService:
             profile=request.get("profile") or "720p-h264-aac-v1",
             track_version=request.get("trackVersion"),
         )
+
+    async def film_render(self, session_id, request: dict) -> dict:
+        """Explicit local full render from the CLI/Web; zero provider calls."""
+        assert_id(session_id)
+        return await clients.film_render(
+            self.video_jobs,
+            session_id=session_id,
+            client_request_id=request["clientRequestId"],
+            request=request,
+        )
+
+    def render_read(
+        self,
+        session_id: str,
+        *,
+        render_id: str | None = None,
+        storyboard_id: str | None = None,
+        episode_id: str | None = None,
+        film_id: str | None = None,
+    ) -> dict:
+        """Read-only render progress by task, target or film ID."""
+        assert_id(session_id)
+        return self.renders.read(
+            {
+                **({"renderId": render_id} if render_id is not None else {}),
+                **({"storyboardId": storyboard_id} if storyboard_id is not None else {}),
+                **({"episodeId": episode_id} if episode_id is not None else {}),
+                **({"filmId": film_id} if film_id is not None else {}),
+            },
+            session_id,
+        )
+
+    def render_sidecar(self, film_id: str, version: int, *, kind: str = "srt") -> tuple[str, str]:
+        """SRT/ASS for a rendered version, re-derived with the same cue remap."""
+        from vagent.video.films import Film
+        from vagent.video.renders import render_sidecar_text
+
+        state = self.store.snapshot()
+        raw = state["films"].get(film_id)
+        if raw is None:
+            raise AppError("FILM_NOT_FOUND", "当前数据目录中没有这个成片。")
+        film = Film.model_validate(raw)
+        frozen_version = next((item for item in film.versions if item.version == version), None)
+        if frozen_version is None or frozen_version.render is None:
+            raise AppError("FILM_NOT_FOUND", "这个成片版本没有渲染记录。")
+        return render_sidecar_text(state, film, frozen_version, kind=kind)
 
     def subtitle_sidecar(self, track_id: str, version: int, *, kind: str = "srt") -> tuple[str, str]:
         """Deterministic SRT/ASS bytes of one immutable subtitle version."""

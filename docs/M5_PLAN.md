@@ -121,9 +121,9 @@
 
 ## 8. 新对话启动方式
 
-M5 已全部完成（E0–E4）并随 **v0.4.0** 发布；**M6 E0 契约已冻结（2026-10-22）**，**E1 字幕与 E2 音频已交付（2026-10-22）**，下一步是 **M6 E3 转场/片头尾/导出/整集**。启动 E3 时先读 [M6 契约](./M6_CONTRACTS.md) §5/§10、[E1 验收](./M6_E1_ACCEPTANCE.md)、[E2 验收](./M6_E2_ACCEPTANCE.md)、`docs/M6_E0_BASELINE.json` 与 [M5 契约](./M5_CONTRACTS.md)：
+M5 已全部完成（E0–E4）并随 **v0.4.0** 发布；**M6 E0 契约已冻结（2026-10-22）**，**E1 字幕、E2 音频与 E3 转场/片头尾/导出/整集已交付（2026-10-23）**，下一步是 **M6 E4 整集成片验收**。启动 E4 时先读 [M6 契约](./M6_CONTRACTS.md) §5/§10、[E1 验收](./M6_E1_ACCEPTANCE.md)、[E2 验收](./M6_E2_ACCEPTANCE.md)、[E3 验收](./M6_E3_ACCEPTANCE.md)、`docs/M6_E0_BASELINE.json` 与 [M5 契约](./M5_CONTRACTS.md)：
 
-> 基于 `master`（E2 交付后；schema 7、tools/rules 11/11、冻结 10/10…1/1），按 `docs/M6_CONTRACTS.md` 执行 E3：`film_render`/`render_read`、`cut/fade/crossfade`、标题卡、跨场整集渲染、720p/1080p profile 与旁挂 SRT，工具面升到 13/13（冻结 11/11）。不要做 9:16 竖屏；渲染全程本地、零供应商费用，真实付费样本单独授权。
+> 基于 `master`（E3 交付后；schema 8、tools/rules 13/13、冻结 11/11…1/1），按 `docs/M6_CONTRACTS.md` 执行 E4：60–90 秒整集成片（复用真实镜头 + 离线套件）、浏览器播放与字幕开关、响度与字幕检查、安装态与 CI、验收文档。不要做 9:16 竖屏；真实付费样本单独授权。
 
 M6 决策点已按 [M6 契约](./M6_CONTRACTS.md) §1 冻结：TTS 用百炼 CosyVoice（复用视频 Key）、音乐仅 CC0/用户导入、默认软字幕 + 可选烧录、1080P 仅参数化上采样、接受水印、包内 OFL 字体、整集成片纳入 E3。
 

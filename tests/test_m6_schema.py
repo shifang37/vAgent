@@ -11,7 +11,7 @@ from shot_support import mock_tools, shot
 from subtitle_support import plan, save_episode
 
 from vagent.errors import AppError
-from vagent.storage import DatabaseV7, FileStore
+from vagent.storage import DatabaseV8, FileStore
 from vagent.video.audio import AudioAsset, AudioAssetVersion, AudioMedia, ProviderAudioSource
 from vagent.video.films import parse_media
 from vagent.video.jobs import JobService
@@ -29,13 +29,17 @@ CONTRACT_MODULES = (
     "vagent.video.audio",
     "vagent.video.subtitles",
 )
-# Adding the optional FilmVersion.render field also changes the schemas that embed
-# FilmVersion; these four entries are the whole declared drift.
+# E3 extends the frozen render records (episode scope, optional subtitle, render-native
+# assembly); these entries are the whole declared drift against the E0 baseline.
 ALLOWED_CHANGED = {
     ("vagent.video.films", "FilmVersion"),
     ("vagent.video.films", "Film"),
+    ("vagent.video.films", "FilmAssembly"),
+    ("vagent.video.films", "RenderSources"),
+    ("vagent.video.films", "RenderSubtitle"),
     ("vagent.storage", "DatabaseV5"),
     ("vagent.storage", "Database"),
+    ("vagent.storage", "DatabaseV7"),
 }
 
 
@@ -90,24 +94,25 @@ def dump_v6(state: dict) -> bytes:
     legacy["schemaVersion"] = 6
     legacy.pop("audio", None)
     legacy.pop("subtitleTracks", None)
+    legacy.pop("renders", None)
     return json.dumps(legacy, ensure_ascii=False, indent=2, allow_nan=False).encode("utf-8")
 
 
-async def test_fresh_store_is_schema_seven_with_two_empty_collections(store):
+async def test_fresh_store_is_schema_eight_with_three_empty_collections(store):
     state = store.snapshot()
-    assert state["schemaVersion"] == 7
-    assert state["audio"] == {} and state["subtitleTracks"] == {}
-    DatabaseV7.model_validate(state)
+    assert state["schemaVersion"] == 8
+    assert state["audio"] == {} and state["subtitleTracks"] == {} and state["renders"] == {}
+    DatabaseV8.model_validate(state)
     assert (store.home / "state.json").is_file()
 
 
-def test_v6_state_migrates_to_v7_with_an_exact_backup(tmp_path):
+def test_v6_state_migrates_to_v8_with_an_exact_backup(tmp_path):
     with FileStore.open(tmp_path / "source") as source:
         seed_v7_state(source)
         seeded = source.snapshot()
     raw = dump_v6(seeded)
     legacy = json.loads(raw)
-    assert "audio" not in legacy and "subtitleTracks" not in legacy
+    assert "audio" not in legacy and "subtitleTracks" not in legacy and "renders" not in legacy
     home = tmp_path / "migrated"
     home.mkdir()
     (home / "state.json").write_bytes(raw)
@@ -116,19 +121,42 @@ def test_v6_state_migrates_to_v7_with_an_exact_backup(tmp_path):
     (home / "checkpoints.sqlite").write_bytes(sentinel)
     with FileStore.open(home) as store:
         migrated = store.snapshot()
-    assert migrated["schemaVersion"] == 7
-    assert migrated["audio"] == {} and migrated["subtitleTracks"] == {}
+    assert migrated["schemaVersion"] == 8
+    assert migrated["audio"] == {} and migrated["subtitleTracks"] == {} and migrated["renders"] == {}
     for key, value in legacy.items():
         if key == "schemaVersion":
             continue
         assert migrated[key] == value, key
-    DatabaseV7.model_validate(migrated)
+    DatabaseV8.model_validate(migrated)
     backups = list(home.glob("state-v6-*.json"))
     assert len(backups) == 1 and backups[0].read_bytes() == raw
     assert (home / "checkpoints.sqlite").read_bytes() == sentinel
     with FileStore.open(home) as reopened:
         assert reopened.snapshot() == migrated
     assert len(list(home.glob("state-v*.json"))) == 1
+
+
+def test_v7_state_migrates_to_v8_with_an_exact_backup(tmp_path):
+    with FileStore.open(tmp_path / "source") as source:
+        seed_v7_state(source)
+        seeded = source.snapshot()
+    legacy = json.loads(json.dumps(seeded))
+    legacy["schemaVersion"] = 7
+    legacy.pop("renders")
+    raw = json.dumps(legacy, ensure_ascii=False, indent=2, allow_nan=False).encode("utf-8")
+    home = tmp_path / "migrated"
+    home.mkdir()
+    (home / "state.json").write_bytes(raw)
+    with FileStore.open(home) as store:
+        migrated = store.snapshot()
+    assert migrated["schemaVersion"] == 8
+    assert migrated["renders"] == {}
+    for key, value in legacy.items():
+        if key != "schemaVersion":
+            assert migrated[key] == value, key
+    DatabaseV8.model_validate(migrated)
+    backups = list(home.glob("state-v7-*.json"))
+    assert len(backups) == 1 and backups[0].read_bytes() == raw
 
 
 def test_audio_media_branch_round_trips_and_is_not_a_video(store):
@@ -289,14 +317,14 @@ def test_e1_keeps_every_baseline_schema_hash_except_the_declared_change():
                 continue
             assert current[module_name][name] == digest, f"{module_name}.{name} changed"
     # Only additive models appear in the new schema surface.
-    assert "DatabaseV7" in current["vagent.storage"]
+    assert {"DatabaseV7", "DatabaseV8"} <= set(current["vagent.storage"])
     assert {"FilmRender", "ExportProfile", "RenderMeasurements"} <= set(current["vagent.video.films"])
     assert {"AudioAsset", "AudioAssetVersion", "AudioMedia"} <= set(current["vagent.video.audio"])
     assert {"SubtitleTrack", "SubtitleTrackVersion", "SubtitleCue"} <= set(current["vagent.video.subtitles"])
     # Frozen limits and tool groups stay byte-identical; only the storage version moves.
     limits = BASELINE["limits"]
     assert limits["storageSchemaVersion"] == 6
-    from vagent.storage import DatabaseV7 as _DatabaseV7  # noqa: F401
+    from vagent.storage import DatabaseV8 as _DatabaseV8  # noqa: F401
     from vagent.video import assembler, contracts, episodes, films, tools
 
     assert contracts.EPISODE_TOOLS_VERSION == limits["episode"]["toolsVersion"]

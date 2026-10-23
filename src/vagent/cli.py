@@ -537,9 +537,10 @@ async def local_redo(config, store, args) -> int:
 class LocalActionHost:
     """The ApplicationService surface a local client action needs, without Workers."""
 
-    def __init__(self, store, films, config, subtitles=None):
+    def __init__(self, store, films, config, subtitles=None, renders=None):
         self.store, self.films, self.config = store, films, config
         self.subtitles = subtitles
+        self.renders = renders or films.jobs.renders
 
     def generation_mode(self):
         return self.config.video_mode
@@ -552,6 +553,22 @@ class LocalActionHost:
         except AppError:
             # A purely local film action records provenance without a provider.
             return []
+
+
+def _json_cli_argument(value: str, label: str):
+    """Read a JSON array from a file path or an inline literal."""
+    path = Path(value)
+    try:
+        text = path.read_text(encoding="utf-8") if path.is_file() else value
+    except OSError:
+        raise AppError("INVALID_ARGUMENTS", f"{label} 必须是 JSON 数组或 JSON 文件路径。") from None
+    try:
+        parsed = json.loads(text)
+    except ValueError:
+        raise AppError("INVALID_ARGUMENTS", f"{label} 必须是合法 JSON。") from None
+    if not isinstance(parsed, list):
+        raise AppError("INVALID_ARGUMENTS", f"{label} 必须是 JSON 数组。")
+    return parsed
 
 
 async def local_film(config, store, args) -> int:
@@ -567,6 +584,47 @@ async def local_film(config, store, args) -> int:
             storyboard_id = view["storyboardId"]
         assert_id(storyboard_id)
         print_json(service.view(args.project, storyboard_id))
+        return 0
+    if args.action == "renders":
+        for name in ("render_id", "storyboard_id", "episode_id", "film_id"):
+            value = getattr(args, name, None)
+            if value:
+                assert_id(value)
+        print_json(
+            service.jobs.renders.read(
+                {
+                    **({"renderId": args.render_id} if args.render_id else {}),
+                    **({"storyboardId": args.storyboard_id} if args.storyboard_id else {}),
+                    **({"episodeId": args.episode_id} if args.episode_id else {}),
+                    **({"filmId": args.film_id} if args.film_id else {}),
+                },
+                args.project,
+            )
+        )
+        return 0
+    if args.action == "render":
+        request = {
+            "scope": "storyboard" if args.storyboard_id else "episode",
+            "profile": args.profile,
+            "subtitleMode": args.mode,
+            "confirm": True,
+            **({"storyboardId": args.storyboard_id} if args.storyboard_id else {}),
+            **({"episodeId": args.episode_id} if args.episode_id else {}),
+            **({"trackId": args.track_id} if args.track_id else {}),
+            **({"trackVersion": args.track_version} if args.track_version is not None else {}),
+            **({"expectedRevision": args.expected_revision} if args.expected_revision is not None else {}),
+        }
+        if args.transitions:
+            request["transitions"] = _json_cli_argument(args.transitions, "--transitions")
+        if args.title_cards:
+            request["titleCards"] = _json_cli_argument(args.title_cards, "--title-cards")
+        result = await clients.film_render(
+            LocalActionHost(store, service, config),
+            session_id=args.project,
+            client_request_id=args.request_id or str(uuid4()),
+            request=request,
+        )
+        print_json(result)
         return 0
     if not storyboard_id:
         raise AppError("INVALID_ARGUMENTS", "缺少 --storyboard，未拼接成片。")
@@ -886,6 +944,33 @@ def parser() -> argparse.ArgumentParser:
     film_show = film_actions.add_parser("show", help="读取当前成片、历史版本与受控媒体地址")
     film_show.add_argument("-s", "--project", default="default")
     film_show.add_argument("--storyboard", dest="storyboard_id", help="指定分镜；省略时读取最新分镜")
+    film_render = film_actions.add_parser(
+        "render", help="本地整片渲染：转场、标题卡、字幕与音频混音；不调用供应商"
+    )
+    film_render.add_argument("-s", "--project", default="default")
+    film_render_target = film_render.add_mutually_exclusive_group(required=True)
+    film_render_target.add_argument("--storyboard", dest="storyboard_id")
+    film_render_target.add_argument("--episode", dest="episode_id")
+    film_render.add_argument("--track", dest="track_id", help="字幕轨 ID；省略时使用目标的当前字幕轨")
+    film_render.add_argument("--track-version", dest="track_version", type=int)
+    film_render.add_argument(
+        "--profile",
+        default="720p-h264-aac-v1",
+        choices=["720p-h264-aac-v1", "1080p-h264-aac-v1"],
+        help="导出档位；1080P 仅参数化上采样",
+    )
+    film_render.add_argument("--mode", default="soft", choices=["soft", "burn", "both"])
+    film_render.add_argument("--transitions", help="转场 JSON/JSON 文件：afterShotId/type/durationMs")
+    film_render.add_argument("--title-cards", dest="title_cards", help="标题卡 JSON/JSON 文件")
+    film_render.add_argument("--expected-revision", dest="expected_revision", type=int)
+    film_render.add_argument("--confirm", action="store_true", help="显式确认本地渲染")
+    film_render.add_argument("--request-id", dest="request_id", help="同一请求 ID 重放原结果")
+    film_renders = film_actions.add_parser("renders", help="只读渲染进度：逐场状态、失败阶段与成片测量")
+    film_renders.add_argument("-s", "--project", default="default")
+    film_renders.add_argument("--render-id", dest="render_id")
+    film_renders.add_argument("--storyboard", dest="storyboard_id")
+    film_renders.add_argument("--episode", dest="episode_id")
+    film_renders.add_argument("--film", dest="film_id")
     episode = commands.add_parser("episode", help="分集：离线改编、保存、查看与整批登记；不调用模型")
     episode_actions = episode.add_subparsers(dest="action", required=True)
     episode_plan = episode_actions.add_parser("plan", help="离线切分剧本并返回分集草案；不写存储、不登记任务")

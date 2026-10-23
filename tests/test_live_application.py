@@ -283,8 +283,8 @@ async def test_live_application_model_tools_replay_http_views_and_client_closure
             and record["executionVersion"] == 3
             and record["contextVersion"] == 2
         )
-        assert record["toolFeatures"]["video"]["toolsVersion"] == 11
-        assert record["toolFeatures"]["video"]["rulesVersion"] == 11
+        assert record["toolFeatures"]["video"]["toolsVersion"] == 13
+        assert record["toolFeatures"]["video"]["rulesVersion"] == 13
         await eventually(lambda: service.job(remembered["jobId"])["status"] == "downloading")
         job = service.job(remembered["jobId"])
         assert job["providerTaskId"] == "wan-original" and job["submitAttempts"] == 1

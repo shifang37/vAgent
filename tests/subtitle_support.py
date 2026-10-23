@@ -156,4 +156,5 @@ def dump_v6_state(state: dict) -> str:
     legacy["schemaVersion"] = 6
     legacy.pop("audio", None)
     legacy.pop("subtitleTracks", None)
+    legacy.pop("renders", None)
     return json.dumps(legacy, ensure_ascii=False, indent=2, allow_nan=False)

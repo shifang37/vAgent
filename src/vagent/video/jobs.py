@@ -578,6 +578,10 @@ class JobService:
 
         # M6 E2 TTS writes audio assets/media; it never registers a video Job.
         self.audio = AudioService(self)
+        from vagent.video.render_service import RenderService
+
+        # M6 E3 full render is local FFmpeg; no provider request and no video Job.
+        self.renders = RenderService(self)
         self._adapters = {}
         self._capabilities = {}
         self._published = []

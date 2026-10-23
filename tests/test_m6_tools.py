@@ -1,4 +1,4 @@
-"""M6 E2: tools/rules 11/11, the frozen 10/10 surface and audio_generate registration."""
+"""M6 E3: tools/rules 13/13, the frozen 11/11 surface and the render tools."""
 
 from shot_support import mock_tools, shot
 from subtitle_support import plan, save_episode
@@ -16,26 +16,47 @@ def names(registry):
     return {spec["function"]["name"] for spec in registry.specs()}
 
 
-def test_tool_versions_are_eleven_and_ten_is_frozen():
-    assert (VIDEO_TOOLS_VERSION, VIDEO_RULES_VERSION) == (11, 11)
-    assert (LIVE_VIDEO_TOOLS_VERSION, LIVE_VIDEO_RULES_VERSION) == (11, 11)
+def test_tool_versions_are_thirteen_and_eleven_is_frozen():
+    assert (VIDEO_TOOLS_VERSION, VIDEO_RULES_VERSION) == (13, 13)
+    assert (LIVE_VIDEO_TOOLS_VERSION, LIVE_VIDEO_RULES_VERSION) == (13, 13)
     assert video_tools.M6_TOOL_NAMES == ("subtitle_save", "audio_generate", "film_render", "render_read")
     assert video_tools.M6_E1_TOOL_NAMES == ("subtitle_save",)
     assert video_tools.M6_E2_TOOL_NAMES == ("audio_generate",)
+    assert video_tools.M6_E3_TOOL_NAMES == ("film_render", "render_read")
 
 
-def test_new_runs_publish_eleven_and_the_frozen_ten_hides_the_audio_tool(store):
+def test_new_runs_publish_thirteen_and_the_frozen_eleven_hides_the_render_tools(store):
     registry, _service, _adapter, _context = mock_tools(store)
     features = registry.features["video"]
-    assert (features["toolsVersion"], features["rulesVersion"]) == (11, 11)
+    assert (features["toolsVersion"], features["rulesVersion"]) == (13, 13)
     assert features["tts"][0]["provider"] == "local"
     current = names(registry)
-    assert {"subtitle_save", "audio_generate", "film_assemble", "episode_generate"} <= current
+    assert {
+        "subtitle_save",
+        "audio_generate",
+        "film_render",
+        "render_read",
+        "film_assemble",
+        "episode_generate",
+    } <= current
     assert "subtitle-align-zh-v1" in registry.instructions
     assert "audio_generate" in registry.instructions
     assert "tts-providers-v1" in registry.instructions
+    assert "film_render" in registry.instructions
 
-    ten_features = {key: value for key, value in features.items() if key != "tts"} | {
+    eleven_features = {key: value for key, value in features.items() if key != "tts"} | {
+        "toolsVersion": 11,
+        "rulesVersion": 11,
+    }
+    eleven = registry.for_record_features({"video": eleven_features})
+    assert eleven is not None
+    assert eleven.features == {"video": eleven_features}
+    assert "audio_generate" in names(eleven)
+    assert "film_render" not in names(eleven)
+    assert "render_read" not in names(eleven)
+    assert "film_render" not in eleven.instructions
+
+    ten_features = {key: value for key, value in eleven_features.items()} | {
         "toolsVersion": 10,
         "rulesVersion": 10,
     }
@@ -74,7 +95,8 @@ def test_read_only_view_has_no_post_production_writers(store):
     read_only = registry.read_only()
     assert "subtitle_save" not in names(read_only)
     assert "audio_generate" not in names(read_only)
-    assert {"storyboard_read", "episode_read", "film_read"} <= names(read_only)
+    assert "film_render" not in names(read_only)
+    assert {"storyboard_read", "episode_read", "film_read", "render_read"} <= names(read_only)
 
 
 def test_audio_generate_is_declared_as_an_async_write_tool(store):
@@ -178,3 +200,4 @@ def test_episode_read_includes_subtitle_and_audio_summaries(store):
     assert read["data"]["audio"]["provider"]["provider"] == "local"
     assert read["data"]["audio"]["usage"]["requests"] == 0
     assert read["data"]["audio"]["provider"]["voices"][0]["voiceId"] == "local-narrator"
+    assert read["data"]["render"] is None

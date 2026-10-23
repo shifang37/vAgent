@@ -24,6 +24,18 @@
 > - **错误码**：§7 的 18 个码保持不变；E2 新增 `AUDIO_FORMAT_UNSUPPORTED`、`TTS_KEY_MISSING`、`TTS_EMPTY_EPISODE`、`PROVIDER_RESULT_UNTRUSTED` 与供应商传输码（`PROVIDER_*`），用于本地上传校验与受控 TTS 错误映射。
 > - **工具面**：新 Run 发布 tools/rules **11/11**，`audio_generate` 为 `write`、无 Job；冻结 10/10（隐藏 `audio_generate`、保留 E1 规则字节）与 9/9…1/1 继续按 `toolFeatures` 恢复。`episode_read` 只追加 `audio` 投影（音色表、额度、绑定、资产），不改变既有字段。
 > - **范围**：E2 只做配音生成、资产/媒体与本地混音服务；整集渲染、转场、标题卡、1080P、CLI/Web 音频面板与浏览器验收仍属 E3/E4，`film_render`/`render_read` 未注册。
+>
+> **E3 已实施（2026-10-23）**：`film_render`/`render_read`、`cut/fade/crossfade`、标题卡、720P/1080P、跨场整集渲染、旁挂 SRT、CLI/HTTP/Web 与验收见 [E3 验收](./M6_E3_ACCEPTANCE.md)。实现中对本文件的细化（不改冻结语义）：
+>
+> - **存储**：E1 的 schema 7 保持不变；E3 新增 schema **8**，只加一个 `renders` 渲染任务集合（`RenderTask`/`RenderSceneProgress`），v7→v8 逐字节备份、v1–v7 全部可读。`Film` 现在恰好属于一个分镜或分集，`FilmVersion` 用 `storyboardVersion` 或 `episodeVersion` 记录来源；逐场成片继续保留。
+> - **成片装配**：E3 从已交付镜头直接渲染，新增 `ffmpeg-render-native-v1` 装配记录；E1 的 `subtitle_service` 仍只在已拼接成片上追加字幕版本。`RenderSources.subtitleTrack` 在 `soft` 无字幕时为可选；`RenderSubtitle.retimed` 标记 cue 是否按转场夹取。
+> - **有效时间线**：`fade`/`crossfade` 以 `xfade` overlap 只裁掉出镜镜头尾部；总时长 = 镜头时长之和 − 转场时长之和。跨场转场只在 `scope=episode` 允许，场边界必须在时间线中。源字幕轨仍冻结在源时间线；渲染把 cue 夹入有效镜头窗口并写旁挂 SRT，`GET /api/films/{filmId}/versions/{version}/subtitles.srt` 重算同样的 cue。E1 的无转场导出保持原严格“时间线逐段相等”。
+> - **标题卡**：最多 4 条，`start/duration` 以毫秒输入、以有理数记录，必须落在有效时间线内且互不重叠；用包内 OFL 字体 `drawtext` 居中渲染，`styleProfile=title-zh-v1`。
+> - **逐场与失败隔离**：每场先归一化为 profile 基准的无声中间文件，再跨场组装；单场失败只标记该场并继续其他场，最终不提交整集成片，已交付的逐场成片、媒体与 Job 不删除、不降级。
+> - **音频放置**：voice 资产用该集冻结台词在字幕 cue 流中的字符位置定位起点（不重读原文、不猜台词）；BGM/SFX 从 0 开始；`mix-zh-v1` 的两遍 `loudnorm` 与 EBU R128 复测写入 `render.audio.loudness`。稀疏对白的交付漂移允许一次动态 loudnorm 重试与按 EBU 实测的增益/limiter 修正，仍超差返回 `LOUDNESS_OUT_OF_RANGE`。
+> - **1080P**：作为参数化上采样 profile，逐场直接归一到 1920×1080/30fps，记录 `upscaled=true`；不做超分或画质承诺。
+> - **工具面**：新 Run tools/rules **13/13**；`film_render` 为 `write`、锁外执行、无 Job、无供应商费用；`render_read` 只读。冻结 **11/11**（隐藏 `film_render`/`render_read`）与 10/10…1/1 继续按 `toolFeatures` 恢复。`episode_read` 只追加 `render` 投影。
+> - **错误码**：§7 的 18 个码保持不变；E3 额外使用 `RENDER_ENCODE_FAILED`/`RENDER_VALIDATION_FAILED`（E1 已用于本地导出）与 `CONFIRMATION_REQUIRED`，并新增 `RENDER_NOT_FOUND`/`RENDER_CONFLICT` 表示任务读取与任务历史。
 
 ## 1. 决策与版本
 
@@ -178,7 +190,7 @@ E0 前的 7 个决策点已确认，冻结如下：
 |---|---|---|
 | E1 字幕 | **已交付（2026-10-22）**：schema v7（两个空集合 + media kind=audio）、`subtitle_save`、`subtitle-align-zh-v1`、SRT/ASS 生成、软字幕与旁挂、烧录 profile 与包内字体；tools/rules **10/10**（冻结 9/9）。见 [E1 验收](./M6_E1_ACCEPTANCE.md) | 60 秒样例字幕零漂移；中文渲染正确；人工修正可重渲染；重叠/越界/缺轨全部拒绝；submit=0、模型调用=0 |
 | E2 音频 | **已交付（2026-10-22）**：`audio_generate`、`tts-providers-v1`、`local-tts-v1` 与 CosyVoice 适配器、音色绑定、音频资产/媒体读写、`mix-zh-v1` 混音/ducking、两遍响度测量；tools/rules **11/11**（冻结 10/10）。见 [E2 验收](./M6_E2_ACCEPTANCE.md) | 人声清晰无削波；响度测量在容差内；来源与许可可追溯；字符/次数/金额额度超限整批拒绝；离线全链路零真实请求 |
-| E3 转场/片头尾/导出/整集 | `cut/fade/crossfade`、标题卡、跨场整集渲染、`720p`/`1080p` profile、旁挂 SRT；tools/rules **13/13**（冻结 11/11） | 转场无黑帧、音画同步；时长与时间线一致；整集 60–90 秒成片；单场失败隔离；同指纹幂等 |
+| E3 转场/片头尾/导出/整集 | **已交付（2026-10-23）**：`film_render`/`render_read`、`cut/fade/crossfade`、标题卡、跨场整集渲染、`720p`/`1080p` profile、旁挂 SRT、schema 8 渲染任务；tools/rules **13/13**（冻结 11/11）。见 [E3 验收](./M6_E3_ACCEPTANCE.md) | 转场无黑帧、音画同步；时长与时间线一致；整集 60–90 秒成片（验收 89.3 秒）；单场失败隔离；同指纹幂等 |
 | E4 验收 | 60–90 秒整集成片（复用真实镜头 + 离线套件）、浏览器播放与字幕开关、响度与字幕检查、安装态与 CI、验收文档 | 一条完整短剧成片可播放、字幕可开关、音频测量达标；失败保留；CI 通过；真实付费样本需单独授权 |
 
 ## 11. 明确不做

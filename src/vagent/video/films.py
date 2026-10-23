@@ -46,6 +46,9 @@ FILM_MEDIA_CONTRACT_VERSION = 2
 MEDIA_VALIDATION_VERSION = "mp4-avc-v1"
 
 RENDER_VERSION = "ffmpeg-render-v1"
+# E3 renders from the delivered shots, so the version records a render-native
+# assembly instead of pretending a copy/normalize concat produced it.
+RENDER_NATIVE_ASSEMBLY = "ffmpeg-render-native-v1"
 PROFILE_720P = "720p-h264-aac-v1"
 PROFILE_1080P = "1080p-h264-aac-v1"
 EXPORT_PROFILES = (PROFILE_720P, PROFILE_1080P)
@@ -166,6 +169,10 @@ class RenderSubtitle(Contract):
     mode: Literal["soft", "burn", "both"]
     font_ref: FontRef
     sidecar_sha256: Fingerprint | None = None
+    # E3 transitions shorten the effective timeline; cues are clamped to the frozen
+    # shot windows after the overlap is removed. The frozen track stays untouched and
+    # the rendered sidecar is derived from it, so the flag tells readers which URL to use.
+    retimed: bool = False
 
 
 class RenderAudioTrack(Contract):
@@ -254,16 +261,23 @@ class RenderSubtitleSource(Contract):
 
 class RenderSources(Contract):
     episode_id: Identifier | None = None
-    storyboard_version: int = Field(ge=1)
+    # A storyboard render freezes its storyboard version; an episode render freezes
+    # the episode version and spans every bound scene.
+    storyboard_version: int | None = Field(default=None, ge=1)
+    episode_version: int | None = Field(default=None, ge=1)
     shot_version_ids: JsonTuple[Identifier] = Field(min_length=1, max_length=64)
     audio_assets: JsonTuple[Identifier] = Field(default=(), max_length=MAX_RENDER_AUDIO_TRACKS)
-    subtitle_track: RenderSubtitleSource
+    subtitle_track: RenderSubtitleSource | None = None
     font: FontRef
 
     @model_validator(mode="after")
     def unique_shots(self):
         if len(set(self.shot_version_ids)) != len(self.shot_version_ids):
             raise ValueError("Rendered shot versions must be distinct")
+        if (self.storyboard_version is None) == (self.episode_version is None):
+            raise ValueError("A render names exactly one storyboard or episode version")
+        if self.episode_id is not None and self.episode_version is None:
+            raise ValueError("An episode render must freeze the episode version")
         return self
 
 
@@ -273,7 +287,8 @@ class FilmRender(Contract):
     render_version: Literal["ffmpeg-render-v1"] = RENDER_VERSION
     export_profile: ExportProfile
     engine: RenderEngine
-    subtitle: RenderSubtitle
+    # A soft export may omit subtitles entirely; burn/both always carry the track.
+    subtitle: RenderSubtitle | None = None
     audio: RenderAudio = Field(default_factory=RenderAudio)
     transitions: JsonTuple[RenderTransition] = Field(default=(), max_length=63)
     title_cards: JsonTuple[RenderTitleCard] = Field(default=(), max_length=TITLE_CARD_LIMIT)
@@ -285,19 +300,22 @@ class FilmRender(Contract):
 
     @model_validator(mode="after")
     def coherent_render(self):
-        if self.subtitle.mode != self.export_profile.subtitle_mode:
-            raise ValueError("The subtitle mode must match the export profile")
+        if self.subtitle is None:
+            if self.export_profile.subtitle_mode != "soft":
+                raise ValueError("burn and both exports require a subtitle track")
+        else:
+            if self.subtitle.mode != self.export_profile.subtitle_mode:
+                raise ValueError("The subtitle mode must match the export profile")
+            if self.subtitle.sidecar_sha256 is None and self.subtitle.mode in {"soft", "both"}:
+                raise ValueError("soft and both exports carry a sidecar subtitle digest")
         if (self.measurements.video.width, self.measurements.video.height) != (
             self.export_profile.width,
             self.export_profile.height,
         ):
             raise ValueError("Rendered dimensions must match the export profile")
-        if self.subtitle.mode in {"burn", "both"} and (
-            abs(self.measurements.video.fps - self.export_profile.fps) > 0.01
-        ):
-            raise ValueError("A re-encoded render must use the profile frame rate")
-        if self.subtitle.sidecar_sha256 is None and self.subtitle.mode in {"soft", "both"}:
-            raise ValueError("soft and both exports carry a sidecar subtitle digest")
+        if self.subtitle is None or self.subtitle.mode != "soft" or self.subtitle.retimed:
+            if abs(self.measurements.video.fps - self.export_profile.fps) > 0.01:
+                raise ValueError("A full render must use the profile frame rate")
         if self.failure_stage is not None:
             raise ValueError("Only successful renders are committed as a film version")
         return self
@@ -356,6 +374,7 @@ class FilmAssembly(Contract):
         "ffmpeg-concat-normalize-v2",
         "ffmpeg-concat-normalize-v3",
         "ffmpeg-concat-normalize-v4",
+        "ffmpeg-render-native-v1",
     ] = ASSEMBLY_VERSION
     compatibility_version: Literal["mp4-copy-signature-v1"] = COMPATIBILITY_VERSION
     engine: FilmEngine
@@ -366,7 +385,7 @@ class FilmAssembly(Contract):
 
     @model_validator(mode="after")
     def coherent_version(self):
-        normalized = self.assembly_version != ASSEMBLY_VERSION
+        normalized = self.assembly_version.startswith("ffmpeg-concat-normalize-")
         if (self.normalization is not None) != normalized:
             raise ValueError("Normalization metadata must match the assembly version")
         if self.normalization is not None and self.normalization.version != self.assembly_version:
@@ -376,7 +395,8 @@ class FilmAssembly(Contract):
 
 class FilmVersion(Contract):
     version: int = Field(ge=1)
-    storyboard_version: int = Field(ge=1)
+    storyboard_version: int | None = Field(default=None, ge=1)
+    episode_version: int | None = Field(default=None, ge=1)
     storyboard_revision: int = Field(ge=0)
     inputs: JsonTuple[FilmInput] = Field(min_length=1, max_length=FILM_INPUT_LIMIT)
     output_media_id: MediaId
@@ -391,6 +411,8 @@ class FilmVersion(Contract):
 
     @model_validator(mode="after")
     def ordered_timeline(self):
+        if (self.storyboard_version is None) == (self.episode_version is None):
+            raise ValueError("A film version names exactly one storyboard or episode version")
         if len(self.assembly.timeline) != len(self.inputs):
             raise ValueError("Every input needs exactly one timeline segment")
         if [segment.shot_id for segment in self.assembly.timeline] != [item.shot_id for item in self.inputs]:
@@ -401,9 +423,12 @@ class FilmVersion(Contract):
 
 
 class Film(Contract):
+    """One append-only film history per storyboard, or per whole episode (E3)."""
+
     id: Identifier
     project_id: Identifier
-    storyboard_id: Identifier
+    storyboard_id: Identifier | None = None
+    episode_id: Identifier | None = None
     current_version: int = Field(ge=1)
     versions: JsonTuple[FilmVersion] = Field(min_length=1, max_length=FILM_VERSION_LIMIT)
     revision: int = Field(ge=0)
@@ -411,6 +436,8 @@ class Film(Contract):
 
     @model_validator(mode="after")
     def append_only_history(self):
+        if (self.storyboard_id is None) == (self.episode_id is None):
+            raise ValueError("A film belongs to exactly one storyboard or episode")
         if [version.version for version in self.versions] != list(range(1, len(self.versions) + 1)):
             raise ValueError("Film versions must be the continuous 1..N sequence")
         if self.current_version != len(self.versions):
@@ -582,7 +609,14 @@ def latest_shot_version_for(record: Storyboard, storyboard_version: int, shot_id
 
 def find_film(state: dict, project_id: str, storyboard_id: str) -> Film | None:
     for raw in state["films"].values():
-        if raw["projectId"] == project_id and raw["storyboardId"] == storyboard_id:
+        if raw["projectId"] == project_id and raw.get("storyboardId") == storyboard_id:
+            return Film.model_validate(raw)
+    return None
+
+
+def find_episode_film(state: dict, project_id: str, episode_id: str) -> Film | None:
+    for raw in state["films"].values():
+        if raw["projectId"] == project_id and raw.get("episodeId") == episode_id:
             return Film.model_validate(raw)
     return None
 
@@ -612,24 +646,33 @@ def verify_film_media(state: dict, media: FilmMedia) -> None:
         raise AppError("FILM_MEDIA_INVALID", "成片媒体与对应的成片版本不一致。")
 
 
-def render_view(render: FilmRender | None) -> dict | None:
+def render_view(
+    render: FilmRender | None, *, film_id: str | None = None, film_version: int | None = None
+) -> dict | None:
     """Bounded projection of a rendered version: no path, only controlled URLs."""
     if render is None:
         return None
     subtitle = render.subtitle
-    sidecar = (
-        f"/api/subtitles/{subtitle.track_id}/{subtitle.track_version}/srt"
-        if subtitle.mode in {"soft", "both"}
-        else None
-    )
+    if subtitle is None:
+        subtitle_view = None
+    else:
+        if subtitle.mode in {"soft", "both"}:
+            sidecar = (
+                f"/api/films/{film_id}/versions/{film_version}/subtitles.srt"
+                if subtitle.retimed and film_id is not None
+                else f"/api/subtitles/{subtitle.track_id}/{subtitle.track_version}/srt"
+            )
+        else:
+            sidecar = None
+        subtitle_view = {
+            **subtitle.model_dump(mode="json", by_alias=True),
+            "sidecarUrl": sidecar,
+        }
     return {
         "renderVersion": render.render_version,
         "exportProfile": render.export_profile.model_dump(mode="json", by_alias=True),
         "engine": render.engine.model_dump(mode="json", by_alias=True),
-        "subtitle": {
-            **subtitle.model_dump(mode="json", by_alias=True),
-            "sidecarUrl": sidecar,
-        },
+        "subtitle": subtitle_view,
         "audio": render.audio.model_dump(mode="json", by_alias=True),
         "transitions": [item.model_dump(mode="json", by_alias=True) for item in render.transitions],
         "titleCards": [item.model_dump(mode="json", by_alias=True) for item in render.title_cards],
@@ -642,33 +685,41 @@ def render_view(render: FilmRender | None) -> dict | None:
 
 
 def verify_film_render(state: dict, film: Film, version: FilmVersion) -> None:
-    """A rendered version only appends to one assembled source version."""
+    """A rendered version appends to one assembled source version, or is render-native."""
     render = version.render
     if render is None:
         return
     if [item.shot_version_id for item in version.inputs] != list(render.sources.shot_version_ids):
         raise AppError("FILM_MEDIA_INVALID", "渲染记录的镜头来源与成片版本不一致。")
-    raw = state.get("subtitleTracks", {}).get(render.subtitle.track_id)
-    track_version = None
-    if raw is not None:
-        track_version = next(
-            (item for item in raw["versions"] if item["version"] == render.subtitle.track_version), None
-        )
-    if track_version is None:
-        raise AppError("SUBTITLE_TRACK_MISSING", "渲染记录引用的字幕版本不存在。")
-    from vagent.video.subtitles import SubtitleTrackVersion, track_version_sha256
+    if film.episode_id is not None and render.sources.episode_id != film.episode_id:
+        raise AppError("FILM_MEDIA_INVALID", "整集渲染记录的来源与成片版本不一致。")
+    if render.subtitle is not None:
+        raw = state.get("subtitleTracks", {}).get(render.subtitle.track_id)
+        track_version = None
+        if raw is not None:
+            track_version = next(
+                (item for item in raw["versions"] if item["version"] == render.subtitle.track_version), None
+            )
+        if track_version is None:
+            raise AppError("SUBTITLE_TRACK_MISSING", "渲染记录引用的字幕版本不存在。")
+        from vagent.video.subtitles import SubtitleTrackVersion, track_version_sha256
 
-    frozen = SubtitleTrackVersion.model_validate(track_version)
-    if track_version_sha256(frozen) != render.subtitle.track_sha256:
-        raise AppError("FILM_MEDIA_INVALID", "渲染引用的字幕版本与登记的指纹不一致。")
+        frozen = SubtitleTrackVersion.model_validate(track_version)
+        if track_version_sha256(frozen) != render.subtitle.track_sha256:
+            raise AppError("FILM_MEDIA_INVALID", "渲染引用的字幕版本与登记的指纹不一致。")
     if (render.measurements.size_bytes, render.measurements.sha256) != (version.size_bytes, version.sha256):
         raise AppError("FILM_MEDIA_INVALID", "渲染测量值与成片版本不一致。")
+    if version.assembly.assembly_version == RENDER_NATIVE_ASSEMBLY:
+        # E3 full renders start a film history from the delivered shots; no earlier
+        # assembled copy has to exist (episode renders never have one).
+        return
     earlier = [item for item in film.versions if item.version < version.version]
     source = next((item for item in reversed(earlier) if item.render is None), None)
     if source is None or (
         source.inputs != version.inputs
         or source.assembly != version.assembly
         or source.storyboard_version != version.storyboard_version
+        or source.episode_version != version.episode_version
         or source.storyboard_revision != version.storyboard_revision
     ):
         raise AppError("FILM_IMMUTABLE", "渲染版本必须追加在一个未渲染的拼接版本之后，且时间线不变。")
@@ -679,16 +730,22 @@ def validate_film_changes(previous: dict[str, dict], state: dict) -> None:
     films = state.get("films", {})
     if previous.keys() - films.keys():
         raise AppError("FILM_IMMUTABLE", "已保存的成片不能删除。")
-    owned: set[tuple[str, str]] = set()
+    owned: set[tuple[str, str, str]] = set()
     for key, raw in films.items():
         film = Film.model_validate(raw)
         if film.id != key or film.project_id not in state["projects"]:
             raise AppError("FILM_CONFLICT", "成片 ID 或所属项目不匹配。")
-        if state["storyboards"].get(film.storyboard_id, {}).get("projectId") != film.project_id:
-            raise AppError("FILM_CONFLICT", "成片必须引用本项目分镜。")
-        if (film.project_id, film.storyboard_id) in owned:
-            raise AppError("FILM_CONFLICT", "同一项目的同一分镜至多一个成片。")
-        owned.add((film.project_id, film.storyboard_id))
+        if film.storyboard_id is not None:
+            target = ("storyboard", film.storyboard_id)
+            if state["storyboards"].get(film.storyboard_id, {}).get("projectId") != film.project_id:
+                raise AppError("FILM_CONFLICT", "成片必须引用本项目分镜。")
+        else:
+            target = ("episode", film.episode_id)
+            if state["episodes"].get(film.episode_id, {}).get("projectId") != film.project_id:
+                raise AppError("FILM_CONFLICT", "整集成片必须引用本项目分集。")
+        if (film.project_id, *target) in owned:
+            raise AppError("FILM_CONFLICT", "同一项目的同一分镜或分集至多一个成片。")
+        owned.add((film.project_id, *target))
         for version in film.versions:
             media = film_media(state, version.output_media_id)
             if media is None:
@@ -706,6 +763,7 @@ def validate_film_changes(previous: dict[str, dict], state: dict) -> None:
         if (
             film.project_id != old.project_id
             or film.storyboard_id != old.storyboard_id
+            or film.episode_id != old.episode_id
             or film.created_at != old.created_at
             or film.revision != old.revision + 1
             or len(film.versions) != len(old.versions) + 1
@@ -760,6 +818,7 @@ def film_view(state: dict, film: Film) -> dict:
             {
                 "version": version.version,
                 "storyboardVersion": version.storyboard_version,
+                "episodeVersion": version.episode_version,
                 "storyboardRevision": version.storyboard_revision,
                 "outputMediaId": version.output_media_id,
                 "sizeBytes": version.size_bytes,
@@ -796,7 +855,7 @@ def film_view(state: dict, film: Film) -> dict:
                     if version.assembly.normalization is not None
                     else None
                 ),
-                "render": render_view(version.render),
+                "render": render_view(version.render, film_id=film.id, film_version=version.version),
                 "fingerprint": version.assembly.fingerprint,
             }
         )
@@ -805,6 +864,7 @@ def film_view(state: dict, film: Film) -> dict:
         "filmId": film.id,
         "projectId": film.project_id,
         "storyboardId": film.storyboard_id,
+        "episodeId": film.episode_id,
         "revision": film.revision,
         "currentVersion": film.current_version,
         "versionCount": len(versions),

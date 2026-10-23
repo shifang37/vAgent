@@ -32,6 +32,15 @@ import {
   subtitleSummary,
   subtitleVersions,
 } from "./subtitle-state.js";
+import {
+  renderErrorLabel,
+  renderRequestBody,
+  renderRequestPath,
+  renderSceneRows,
+  renderSidecarUrl,
+  renderStatusLabel,
+  renderSummary,
+} from "./render-state.js";
 
 import {
   episodeBudget,
@@ -822,6 +831,9 @@ let filmState = null;
 let filmLoadedKey = null;
 let filmBusy = false;
 let filmError = null;
+let renderState = null;
+let renderBusy = false;
+let renderError = null;
 
 async function loadFilm(board) {
   const path = filmRequestPath(board, activeId);
@@ -833,7 +845,20 @@ async function loadFilm(board) {
   } catch (error) {
     filmError = { code: error.code, message: error.message };
   }
+  await loadRender(board);
   if (panelMode === "storyboard") renderStoryboardPanel();
+}
+
+async function loadRender(board) {
+  const path = renderRequestPath(activeId, board);
+  if (!path) return;
+  try {
+    const result = await api(path);
+    renderState = result.render || null;
+    renderError = null;
+  } catch (error) {
+    renderError = { code: error.code, message: error.message };
+  }
 }
 
 function filmSection(board) {
@@ -852,16 +877,57 @@ function filmSection(board) {
   const player = playback.url
     ? `<video id="film-video" class="film-video" src="${escapeHTML(playback.url)}" controls preload="metadata" playsinline aria-label="成片播放"></video>`
     : `<p class="meta">${hasFilm(film) ? "成片文件当前不可用；可以重新拼接生成新版本。" : "还没有成片。所有镜头交付后，可以在这里本地拼接为单一 MP4。"}</p>`;
+  const canRender = Boolean(renderRequestBody(board, subtitleState, "probe"));
+  const renderRows = renderSceneRows(renderState)
+    .map(
+      (row) =>
+        `<li><span>${escapeHTML(row.label)}</span><span class="job-state ${escapeHTML(row.tone)}">${escapeHTML(row.status)}</span><span class="meta">${escapeHTML(row.detail)}</span></li>`,
+    )
+    .join("");
+  const sidecar = renderSidecarUrl(renderState);
   return `<section class="film-section" aria-label="成片">
     <div class="film-head"><strong>成片</strong><span class="meta">${escapeHTML(filmSummary(film))}</span></div>
     ${player}
     ${rows ? `<ul class="film-versions">${rows}</ul>` : ""}
     <div class="film-actions">
       <button class="primary" data-action="assemble-film" ${filmBusy || !canAssemble ? "disabled" : ""}>${filmBusy ? "正在本地拼接…" : hasFilm(film) ? "重新拼接成片" : "拼接成片"}</button>
-      <button class="secondary" data-action="refresh-film" ${filmBusy ? "disabled" : ""}>刷新成片</button>
+      <button class="secondary" data-action="render-film" ${renderBusy || !canRender ? "disabled" : ""}>${renderBusy ? "正在整片渲染…" : "整片渲染（转场/字幕/音频）"}</button>
+      <button class="secondary" data-action="refresh-film" ${filmBusy || renderBusy ? "disabled" : ""}>刷新成片</button>
+    </div>
+    <div class="render-status">
+      <p class="meta">${escapeHTML(renderSummary(renderState))}</p>
+      ${renderRows ? `<ul class="film-versions">${renderRows}</ul>` : ""}
+      ${sidecar ? `<a class="secondary" href="${escapeHTML(sidecar)}" download="film-${escapeHTML(renderState?.filmId || "render")}.srt">下载旁挂 SRT</a>` : ""}
     </div>
     ${filmError ? `<p class="meta film-error">${escapeHTML(filmErrorLabel(filmError))}</p>` : ""}
+    ${renderError ? `<p class="meta film-error">${escapeHTML(renderErrorLabel(renderError))}</p>` : ""}
   </section>`;
+}
+
+async function renderFilm() {
+  const board = storyboard();
+  const body = renderRequestBody(board, subtitleState, crypto.randomUUID());
+  if (!body) {
+    toast("需要先保存分镜与字幕轨。");
+    return;
+  }
+  if (renderBusy) return;
+  renderBusy = true;
+  renderError = null;
+  renderStoryboardPanel();
+  try {
+    const result = await post(`/api/sessions/${encodeURIComponent(activeId)}/films/render`, body);
+    filmState = result.film || filmState;
+    renderBusy = false;
+    await loadRender(board);
+    toast(`整片渲染完成：v${result.filmVersion}。`);
+  } catch (error) {
+    renderError = { code: error.code, message: error.message };
+    toast(renderErrorLabel(renderError));
+  } finally {
+    renderBusy = false;
+    if (panelMode === "storyboard") renderStoryboardPanel();
+  }
 }
 
 async function assembleFilm() {
@@ -1778,6 +1844,7 @@ document.addEventListener("click", async (event) => {
       await refreshSession(activeId).catch((error) => toast(error.message));
     if (action === "toggle-all-shots") toggleAllShots();
     if (action === "assemble-film") await assembleFilm();
+    if (action === "render-film") await renderFilm();
     if (action === "save-subtitle") await saveSubtitle();
     if (action === "export-subtitle")
       await exportSubtitle(event.target.closest("[data-mode]")?.dataset.mode || "soft");
@@ -1791,6 +1858,8 @@ document.addEventListener("click", async (event) => {
       filmLoadedKey = null;
       filmState = null;
       filmError = null;
+      renderState = null;
+      renderError = null;
       if (panelMode === "storyboard") renderStoryboardPanel();
     }
     if (action === "batch-selected") await confirmBatch();

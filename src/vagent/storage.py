@@ -22,6 +22,7 @@ from vagent.video.audio import AudioAsset, AudioMedia, validate_audio_changes
 from vagent.video.contracts import Job, MediaAsset, StoredJob
 from vagent.video.episodes import Character, Episode, Scene, Style
 from vagent.video.films import Film, FilmMedia
+from vagent.video.renders import RenderTask
 from vagent.video.storyboards import Asset, Storyboard
 from vagent.video.subtitles import SubtitleTrack, validate_subtitle_changes
 from vagent.waiting import WAIT_EXECUTION_VERSIONS, StoredWait, WaitBinding, parse_wait
@@ -251,10 +252,17 @@ class DatabaseV7(Database):
     subtitle_tracks: dict[str, SubtitleTrack]
 
 
+class DatabaseV8(DatabaseV7):
+    """Schema 8 adds the E3 render task collection; film/media shapes stay a union."""
+
+    schema_version: Literal[8]
+    renders: dict[str, RenderTask]
+
+
 def migrated_state(state: dict) -> dict:
     """Mechanical envelope upgrade; never re-encode historical domain objects."""
     version = state["schemaVersion"]
-    if type(version) is not int or version not in {1, 2, 3, 4, 5, 6, 7}:
+    if type(version) is not int or version not in {1, 2, 3, 4, 5, 6, 7, 8}:
         raise ValueError("Unsupported schema version")
     upgraded = copy.deepcopy(state)
     if version == 1:
@@ -269,6 +277,8 @@ def migrated_state(state: dict) -> dict:
         upgraded.update(schemaVersion=6, episodes={}, scenes={}, characters={}, styles={})
     if version < 7:
         upgraded.update(schemaVersion=7, audio={}, subtitleTracks={})
+    if version < 8:
+        upgraded.update(schemaVersion=8, renders={})
     return upgraded
 
 
@@ -297,7 +307,7 @@ class FileStore:
                 raw = (home / "state.json").read_bytes()
             except FileNotFoundError:
                 state = {
-                    "schemaVersion": 7,
+                    "schemaVersion": 8,
                     "projects": {},
                     "sessions": {},
                     "artifacts": {},
@@ -315,12 +325,13 @@ class FileStore:
                     "styles": {},
                     "audio": {},
                     "subtitleTracks": {},
+                    "renders": {},
                 }
             else:
                 try:
                     state = json.loads(raw)
                     version = state["schemaVersion"]
-                    if type(version) is not int or version not in {1, 2, 3, 4, 5, 6, 7}:
+                    if type(version) is not int or version not in {1, 2, 3, 4, 5, 6, 7, 8}:
                         raise ValueError("Unsupported schema version")
                     {
                         1: DatabaseV1,
@@ -330,6 +341,7 @@ class FileStore:
                         5: DatabaseV5,
                         6: Database,
                         7: DatabaseV7,
+                        8: DatabaseV8,
                     }[version].model_validate(state)
                     for collection in (state["sessions"], state["runs"]):
                         for item in collection.values():
@@ -342,12 +354,13 @@ class FileStore:
                     )
                     from vagent.video.films import validate_film_changes
                     from vagent.video.jobs import validate_job_changes
+                    from vagent.video.renders import validate_render_changes
                     from vagent.video.storyboards import (
                         validate_asset_changes,
                         validate_storyboard_changes,
                     )
 
-                    checked = migrated_state(state) if version < 7 else state
+                    checked = migrated_state(state) if version < 8 else state
                     validate_job_changes(checked["jobs"], checked)
                     validate_storyboard_changes(checked["storyboards"], checked)
                     validate_asset_changes(checked["assets"], checked)
@@ -358,15 +371,16 @@ class FileStore:
                     validate_style_changes(checked["styles"], checked)
                     validate_audio_changes(checked["audio"], checked)
                     validate_subtitle_changes(checked["subtitleTracks"], checked)
+                    validate_render_changes(checked["renders"], checked)
                 except (ValueError, TypeError, KeyError, AppError):
                     raise AppError(
                         "INVALID_STORE", "本地状态损坏或版本不支持，已保留原文件，未重置数据。"
                     ) from None
-                if version < 7:
+                if version < 8:
                     # Keep the exact pre-migration bytes, including legacy message encoding.
                     atomic_write_bytes(home / f"state-v{version}-{uuid4()}.json", raw)
                     state = migrated_state(state)
-                    DatabaseV7.model_validate(state)
+                    DatabaseV8.model_validate(state)
                     # Migration and runtime recovery are distinct commits. In particular,
                     # no fingerprints/default fields or SQLite checkpoints are rewritten.
                     atomic_write_json(home / "state.json", state)
@@ -375,6 +389,19 @@ class FileStore:
             def recover(draft: dict) -> None:
                 from vagent.video.jobs import recover_interrupted_jobs
 
+                for task in draft.get("renders", {}).values():
+                    if task.get("status") == "running":
+                        task["status"] = "failed"
+                        task["errorCode"] = "RENDER_INTERRUPTED"
+                        task["updatedAt"] = now()
+                        task["revision"] = task.get("revision", 0) + 1
+                        for scene in task.get("scenes", []):
+                            if scene.get("status") in {"pending", "running"}:
+                                scene.update(
+                                    status="failed",
+                                    failureStage="source",
+                                    errorCode="RENDER_INTERRUPTED",
+                                )
                 for run in draft["runs"].values():
                     if run["status"] == "running":
                         run.update(status="interrupted", updatedAt=now())
@@ -449,12 +476,13 @@ class FileStore:
         )
         from vagent.video.films import validate_film_changes
         from vagent.video.jobs import validate_job_changes, validate_media_changes
+        from vagent.video.renders import validate_render_changes
         from vagent.video.storyboards import validate_asset_changes, validate_storyboard_changes
 
         with self.locked():
             draft = copy.deepcopy(self._state)
             value = mutate(draft)
-            DatabaseV7.model_validate(draft)
+            DatabaseV8.model_validate(draft)
             validate_job_changes(self._state["jobs"], draft)
             validate_media_changes(self._state["media"], draft)
             validate_storyboard_changes(self._state["storyboards"], draft)
@@ -466,6 +494,7 @@ class FileStore:
             validate_style_changes(self._state["styles"], draft)
             validate_audio_changes(self._state["audio"], draft)
             validate_subtitle_changes(self._state["subtitleTracks"], draft)
+            validate_render_changes(self._state.get("renders", {}), draft)
             atomic_write_json(self.home / "state.json", draft)
             self._state = draft
             return copy.deepcopy(value)

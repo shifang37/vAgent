@@ -7,7 +7,7 @@ from pathlib import Path
 import pytest
 
 from vagent.errors import AppError
-from vagent.storage import DatabaseV3, DatabaseV7, FileStore
+from vagent.storage import DatabaseV3, DatabaseV8, FileStore
 from vagent.video.contracts import canonical_fingerprint
 
 FIXTURES = Path(__file__).parent / "fixtures" / "m2"
@@ -30,7 +30,7 @@ def test_frozen_m2_v3_fixtures_migrate_to_v6_with_exact_backup(tmp_path, entry):
         (tmp_path / name).write_bytes(content)
     with FileStore.open(tmp_path) as store:
         state = store.snapshot()
-        assert state["schemaVersion"] == 7
+        assert state["schemaVersion"] == 8
         assert state["storyboards"] == {} and state["assets"] == {} and state["films"] == {}
         # M5 E0 adds four empty collections; no other value may appear.
         assert state["episodes"] == state["scenes"] == state["characters"] == state["styles"] == {}
@@ -43,11 +43,12 @@ def test_frozen_m2_v3_fixtures_migrate_to_v6_with_exact_backup(tmp_path, entry):
             "styles",
             "audio",
             "subtitleTracks",
+            "renders",
         }
         v4_projection = {key: value for key, value in state.items() if key not in added}
         v4_projection["schemaVersion"] = 4
         assert canonical_fingerprint(v4_projection) == entry["expectedV4CanonicalSha256"]
-        DatabaseV7.model_validate(state)
+        DatabaseV8.model_validate(state)
         for collection, digest in entry["preservedCollectionsSha256"].items():
             assert canonical_fingerprint(state[collection]) == digest
             assert state[collection] == original[collection]
@@ -92,14 +93,14 @@ def test_v3_migration_failure_preserves_original_and_releases_lock(tmp_path, mon
         assert backups[0].read_bytes() == raw
     monkeypatch.undo()
     with FileStore.open(tmp_path) as store:
-        assert store.snapshot()["schemaVersion"] == 7
+        assert store.snapshot()["schemaVersion"] == 8
 
 
 def test_current_store_reopens_without_creating_backups(tmp_path):
     with FileStore.open(tmp_path) as store:
-        assert store.snapshot()["schemaVersion"] == 7
+        assert store.snapshot()["schemaVersion"] == 8
     with FileStore.open(tmp_path) as reopened:
-        assert reopened.snapshot()["schemaVersion"] == 7
+        assert reopened.snapshot()["schemaVersion"] == 8
     assert not list(tmp_path.glob("state-v*.json"))
 
 

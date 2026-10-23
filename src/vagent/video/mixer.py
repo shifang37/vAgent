@@ -6,12 +6,16 @@ version can freeze them. Gain defaults are the M6 contract: voice 0 dB, BGM
 -18 dB with ducking, SFX -6 dB; ``amix`` always uses ``normalize=0`` so those
 gains are not silently divided by the input count. The two loudnorm passes are
 measure-then-apply; a third read-only pass verifies the delivered file and
-returns ``LOUDNESS_OUT_OF_RANGE`` instead of accepting a drifted mix.
+returns ``LOUDNESS_OUT_OF_RANGE`` instead of accepting a drifted mix. If a sparse
+dialogue mix drifts at delivery, one dynamic retry plus an EBU-measured gain/limiter
+correction is applied before the file is refused; the delivered measurement remains the
+gate.
 """
 
 import asyncio
 import hashlib
 import json
+import os
 import re
 import shutil
 import tempfile
@@ -233,14 +237,16 @@ def loudness_in_tolerance(measurement: dict) -> bool:
     return true_peak <= TARGET_TRUE_PEAK_DB + 1e-6
 
 
-def _loudnorm_stage(measured: dict | None) -> str:
+def _loudnorm_stage(measured: dict | None, *, linear: bool = True) -> str:
     stage = f"loudnorm=I={TARGET_LUFS:g}:TP={TARGET_TRUE_PEAK_DB:g}:LRA={TARGET_LRA:g}"
     if measured is not None:
         stage += (
             f":measured_I={measured['input_i']}:measured_TP={measured['input_tp']}"
             f":measured_LRA={measured['input_lra']}:measured_thresh={measured['input_thresh']}"
-            f":offset={measured.get('target_offset', '0')}:linear=true"
+            f":offset={measured.get('target_offset', '0')}"
         )
+        if linear:
+            stage += ":linear=true"
     return stage + ":print_format=json"
 
 
@@ -302,7 +308,59 @@ async def mix_tracks(
             )
             verification = parse_ebur128(verification_text)
             if verification is None or not loudness_in_tolerance(verification):
-                raise MixError("LOUDNESS_OUT_OF_RANGE", "", stage="validate")
+                # Sparse dialogue can make the linear second pass drift at delivery.
+                # Retry with dynamic normalization (and a sample-peak limiter) before
+                # refusing the file; the delivered measurement remains the gate.
+                retry = await _run(
+                    engine,
+                    tracks,
+                    f"{graph};[{premix}]{_loudnorm_stage(None, linear=False)},"
+                    f"alimiter=limit=0.85:level=0[out]",
+                    output,
+                    cancelled=cancelled,
+                    deadline=deadline,
+                )
+                applied = parse_loudnorm(retry) or applied
+                verification_text = await _run(
+                    engine,
+                    [],
+                    None,
+                    None,
+                    cancelled=cancelled,
+                    deadline=deadline,
+                    input_path=output,
+                    verify=True,
+                )
+                verification = parse_ebur128(verification_text)
+            for _attempt in range(2):
+                if verification is not None and loudness_in_tolerance(verification):
+                    break
+                if verification is None:
+                    break
+                correction = TARGET_LUFS - float(verification["integratedLufs"])
+                fixed = output.with_name("fixed.wav")
+                await _transform(
+                    engine,
+                    output,
+                    fixed,
+                    f"volume={correction:.3f}dB,alimiter=limit=0.80:level=0",
+                    deadline=deadline,
+                    cancelled=cancelled,
+                )
+                os.replace(fixed, output)
+                verification_text = await _run(
+                    engine,
+                    [],
+                    None,
+                    None,
+                    cancelled=cancelled,
+                    deadline=deadline,
+                    input_path=output,
+                    verify=True,
+                )
+                verification = parse_ebur128(verification_text)
+            if verification is None or not loudness_in_tolerance(verification):
+                raise MixError("LOUDNESS_OUT_OF_RANGE", f"（{verification}）", stage="validate")
             facts = inspect_wav(output.read_bytes())
             expected_samples = round(float(duration_seconds) * MIX_SAMPLE_RATE)
             actual_samples = round(facts.duration_seconds * MIX_SAMPLE_RATE)
@@ -413,6 +471,66 @@ async def _run(
     return text
 
 
+async def _transform(
+    engine: Engine,
+    input_path: Path,
+    output: Path,
+    filter_text: str,
+    *,
+    deadline: float,
+    cancelled,
+) -> str:
+    """Apply one corrective audio filter to an already mixed file."""
+    command = [
+        str(engine.path),
+        "-hide_banner",
+        "-nostdin",
+        "-loglevel",
+        "info",
+        "-nostats",
+        "-i",
+        str(input_path),
+        "-af",
+        filter_text,
+        "-ar",
+        str(MIX_SAMPLE_RATE),
+        "-ac",
+        str(MIX_CHANNELS),
+        "-c:a",
+        "pcm_s16le",
+        "-f",
+        "wav",
+        "-y",
+        str(output),
+    ]
+    try:
+        process = await asyncio.create_subprocess_exec(
+            *command,
+            stdin=asyncio.subprocess.DEVNULL,
+            stdout=asyncio.subprocess.PIPE,
+            stderr=asyncio.subprocess.PIPE,
+        )
+    except OSError:
+        raise MixError("RENDER_ENCODE_FAILED", "（无法启动本地编码器）", stage="encode") from None
+    loop = asyncio.get_running_loop()
+    limit = min(deadline, loop.time() + RENDER_TIMEOUT_SECONDS)
+    watcher = asyncio.ensure_future(_watch(process, cancelled, limit))
+    try:
+        _, stderr = await process.communicate()
+    except asyncio.CancelledError:
+        await _terminate(process)
+        raise
+    finally:
+        watcher.cancel()
+        await asyncio.gather(watcher, return_exceptions=True)
+    text = (stderr or b"").decode("utf-8", "replace")
+    if loop.time() >= limit:
+        raise MixError("RENDER_TIMEOUT", "", stage="encode")
+    if process.returncode != 0:
+        raise MixError("RENDER_ENCODE_FAILED", f"（{_first_error(text)}）", stage="encode")
+    return text
+
+
 async def _watch(process, cancelled, deadline: float) -> None:
     loop = asyncio.get_running_loop()
     while process.returncode is None:
@@ -435,11 +553,15 @@ async def _terminate(process) -> None:
 
 
 def _first_error(text: str) -> str:
-    for line in text.splitlines():
-        stripped = line.strip()
-        if stripped and not stripped.startswith("{"):
-            return stripped[:300]
-    return "本地编码失败"
+    lines = [line.strip() for line in text.splitlines() if line.strip() and not line.strip().startswith("{")]
+    for line in reversed(lines):
+        lowered = line.lower()
+        if any(
+            marker in lowered
+            for marker in ("error", "invalid", "failed", "unable", "no such", "cannot", "unrecognized")
+        ):
+            return line[:300]
+    return lines[-1][:300] if lines else "本地编码失败"
 
 
 def default_gain(kind: str) -> float:

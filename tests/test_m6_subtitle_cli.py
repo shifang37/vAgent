@@ -108,7 +108,7 @@ def test_cli_subtitle_show_save_export(tmp_path):
     assert track["currentVersion"] == 1 and track["latest"]["cueCount"] > 0
     track_id = track["trackId"]
     state = json.loads((home / "state.json").read_bytes())
-    assert state["schemaVersion"] == 7
+    assert state["schemaVersion"] == 8
     assert len(state["subtitleTracks"]) == 1
     assert len(state["jobs"]) == len(before["jobs"])  # no video Job was registered
     reread = command(tmp_path, home, "subtitle", "show", "-s", "coffee", "--storyboard", storyboard_id)
