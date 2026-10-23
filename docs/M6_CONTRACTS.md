@@ -217,4 +217,4 @@ E0 前的 7 个决策点已确认，冻结如下：
 2. 计价口径、货币、是否与 Wan 共用 Key：[cosyvoice-v2 模型页](https://help.aliyun.com/zh/model-studio/cosyvoice-v2) 为 **2 元/万字符**（CNY、按字符）；复用 `VAGENT_DASHSCOPE_KEY`，可不填业务空间（共享域名），填写后走业务空间专属域名。
 3. 返回格式/采样率/时长/URL 有效期：请求 `format=wav`、`sample_rate=48000` 后返回 16 位 PCM WAV；结果 URL 24 小时；下载后由 `inspect_wav` 校验 RIFF/PCM 与时长，仅信任 `*.aliyuncs.com` 的 HTTP(S) 地址。
 4. 字体已在 E1 交付（包内 OFL 子集与许可证），E2 未新增字体。
-5. CC0 素材清单与许可格式已由 `ImportedAudioSource`（`title/sourceUrl/license` 必填）冻结；E2 未接入素材导入工具，导入路径留待 E4/M7。
+5. CC0 素材清单与许可格式已由 `ImportedAudioSource`（`title/sourceUrl/license` 必填）冻结；E2 未接入素材导入工具，导入路径由 M7 E3 以**客户端受控上传**（Web/CLI，不是模型工具）实现，见 [M7 契约](./M7_CONTRACTS.md) §2.3/§6。

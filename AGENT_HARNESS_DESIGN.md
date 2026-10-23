@@ -316,9 +316,9 @@ E3 headless 复用 ApplicationService/Runner/Store 与原等待/恢复机制：�
 
 **E3 实现状态（2026-10-21）**：`vagent headless PROMPT` 以收窄后的分镜工具视图运行普通 Agent Runner（保留 `storyboard_save`/读取工具，移除 `shot_generate`、`video_generate`、`film_assemble`），计划冻结有序规范请求、provider/model/profile、能力/价格版本与逐桶估算并作为 Run 的可选 `headless` 字段持久化，不新增 schema。第二次命令以 Run ID、计划指纹、`--confirm` 与逐桶 `--max-cost`/`--max-units`/`--max-jobs` 授权固定集合；授权本身不登记，登记事务内再核对计划、当前分镜 revision、请求指纹与所有预算桶，任一不符整批不写。等待复用 Job/Media Worker 与既有终态判定，交付复用 `FilmService` 与本地拼接；`--resume` 只从持久状态继续，不增额度、不重新提交。`--json` 固定字段与退出码 0/2/3/4/5/6/130，无 TTY 不交互。用户 skills 默认按「内置根 → `VAGENT_HOME/skills`」合并，内置名优先、坏文件只诊断；显式 `VAGENT_SKILLS_DIR` 仍整体替换，新增/修改 skill 改变签名并以 `RESUME_CONFIG_CHANGED` 拒绝旧 Run。全部证据为受控 HTTP 与本地测试媒体，视频 submit=0。
 
-### 8.7 M6 成片后期（E0 冻结，E1 字幕与 E2 音频已实施）
+### 8.7 M6 成片后期（E0 冻结，E1–E4 已实施）
 
-M6 契约见 [M6 契约](./docs/M6_CONTRACTS.md)，E0 基线与 FFmpeg 能力见 [E0 验收](./docs/M6_E0_ACCEPTANCE.md)；**E1（字幕）与 E2（音频）已于 2026-10-22 实施**，证据见 [E1 验收](./docs/M6_E1_ACCEPTANCE.md) 与 [E2 验收](./docs/M6_E2_ACCEPTANCE.md)，视频 submit=0、模型调用=0、TTS 真实请求=0。
+M6 契约见 [M6 契约](./docs/M6_CONTRACTS.md)，E0 基线与 FFmpeg 能力见 [E0 验收](./docs/M6_E0_ACCEPTANCE.md)；**E1（字幕）与 E2（音频）已于 2026-10-22 实施，E3（转场/标题卡/整集/导出）与 E4（整集成片验收）已于 2026-10-23 实施**，证据见 [E1 验收](./docs/M6_E1_ACCEPTANCE.md)、[E2 验收](./docs/M6_E2_ACCEPTANCE.md)、[E3 验收](./docs/M6_E3_ACCEPTANCE.md) 与 [E4 验收](./docs/M6_E4_ACCEPTANCE.md)，视频 submit=0、模型调用=0、TTS 真实请求=0。
 
 E1 的边界选择：
 
@@ -333,6 +333,20 @@ E2（音频）的边界选择：
 - **TTS 与额度**：`tts-providers-v1` 按模式发布 live（CosyVoice v2）或 mock（`local-tts-v1`）；`audio_generate` 必须显式 `confirm`，在锁内从 `audio` 集合重算单条 500 字符/每集 2000 字符/40 次请求与 0.10/0.40 CNY 上限，超限整批拒绝；TTS 调用在锁外，全部成功后才把 `AudioMedia` + `AudioAsset` + Operation 一次提交。同集同 speaker 首次生成冻结 provider/model/voiceId/speed（`VOICE_CONFLICT`），相同台词与音色重放复用原资产。
 - **工具面**：`audio_generate` 是 `async_write_execute`（无 Job、无等待），tools/rules 11/11，冻结 10/10 与更早变体；`episode_read` 只追加 `audio` 投影。headless 规划排除该付费写工具。
 - **混音**：`mix-zh-v1` 以 `amix normalize=0` 保留 voice 0 dB/BGM −18 dB/SFX −6 dB，BGM 用 `sidechaincompress`（−20 dB 线性 0.1、8、20 ms、400 ms）ducking；两遍 `loudnorm`（−16 LUFS/−1 dBTP/LRA 11）后用 EBU R128 复测成品，超差即 `LOUDNESS_OUT_OF_RANGE` 并删除产物。E2 只交付本地混音服务，`film_render` 集成留给 E3。
+
+### 8.8 M7 多集与工作台（E0 冻结）
+
+M7 契约见 [M7 契约](./docs/M7_CONTRACTS.md)，E0 基线与本地裁剪探针见 [E0 验收](./docs/M7_E0_ACCEPTANCE.md) 与 `docs/M7_E0_BASELINE.json`。**E0 只冻结要求与基线，不改产品代码：视频 submit=0、模型调用=0、TTS 请求=0。** 实现从 E1 开始。
+
+E1 的边界选择：
+
+- **存储**：schema 9 只加 `seasons`/`batches`/`timelines` 三个空集合；`v8→v9` 机械迁移 + 逐字节备份；E1 只新增 v9 模型，既有 165 个契约哈希与冻结上限逐字节不变。E3 才允许给 `FilmAssembly` 追加 `ffmpeg-render-timeline-v1` 字面量、给 `RenderSources`/`RenderTask` 追加可选时间线字段、给 `film_render`/`render_read` 追加时间线输入 schema，并在 E3 验收中逐项列出嵌套哈希变化。
+- **季**：`Season`/`SeasonVersion` 只保存标题与有序 Episode ID；角色/风格仍是项目级共享圣经；一集至多属于一个季的当前版本，历史版本保留但不作为当前归属依据。
+- **批量**：每次 `season_generate` 落一条 `Batch`，逐集原子登记（复用 `episode_generate` 语义），单集失败只标记该集；恢复必须显式 `resumeBatchId` 并创建新批次（`resumeOf`），只重试未成功集；不确定提交不重投。每季至多一个 `running` 批次，批量上限 1–3 集/60 Job/180.00 CNY。批次不新增等待绑定，调用方按集分段 `await_job`（每段 ≤20 个 Job，沿用 20 成员/600 秒上限）。
+- **时间线**：每集一条 `Timeline`，版本只增不改；一条版本冻结有序 clip（`shotId/shotVersionId/storyboardId/sceneId/inMs/outMs`）、转场点、整集字幕轨、音轨与标题卡；`timeline-zh-v1` 指纹不含版本/时间。分集版本变化后旧时间线 `stale=true`，渲染返回 `TIMELINE_SOURCE_MISSING`。
+- **渲染**：`film_render` 增加 `scope=timeline`；复用 M4 归一化与 M6 `ffmpeg-render-v1` 管线，新增装配字面量 `ffmpeg-render-timeline-v1`；裁剪吸附 30 fps，输出时长与有效时间线允许 ±1 帧；字幕按 `timeline-subtitle-remap-v1` 夹取/平移，voice 跟随重映射 cue，BGM/SFX 按 start；同指纹幂等，旧成片版本保留。
+- **工具面**：`season_save`/`season_read`（15/15）→ `season_generate`（16/16）→ `timeline_save`/`timeline_read`（18/18）；13/13 与更早变体、15/15、16/16 全部按 `toolFeatures` 冻结。headless 仍只编排分镜，不加入季批量或时间线渲染。
+- **工作台**：Web 优先的季面板与时间线编辑器；预览是客户端按 clip 顺序播放并应用裁剪偏移，不做服务端合成；导出才是交付口径。BGM/SFX 由客户端受控上传（许可/来源必填），不作为模型工具；不实现多轨混音工作站、关键帧/变速/特效或后台批处理守护进程。
 
 ## 9. 首版规模边界与演进条件
 
