@@ -82,7 +82,7 @@ async def test_application_model_discovers_capability_and_creates_one_job(tmp_pa
         record = service.run_record(service.active_run_id)
         assert record["status"] == "completed", record["answer"]
         assert record["videoMode"] == "mock" and record["executionVersion"] == 3
-        assert record["toolFeatures"]["video"]["toolsVersion"] == 15
+        assert record["toolFeatures"]["video"]["toolsVersion"] == 16
         assert record["toolFeatures"]["video"]["capabilities"] == [
             item.model_dump(mode="json", by_alias=True) for item in service.video_jobs.capabilities("mock")
         ]
@@ -295,7 +295,7 @@ async def test_mock_resume_requires_original_mode_capabilities_rules_and_tools(s
         if change == "rules":
             # Patch the rules text the current registry actually publishes; the
             # frozen earlier constants are no longer the live instructions.
-            monkeypatch.setattr("vagent.video.tools.VIDEO_RULES_V15", "Changed simulation rules")
+            monkeypatch.setattr("vagent.video.tools.VIDEO_RULES_V16", "Changed simulation rules")
         changed = register_video_tools(
             create_project_tools(),
             JobService(

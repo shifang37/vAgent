@@ -666,6 +666,31 @@ class EpisodeGenerationArgs(Contract):
     confirm: bool = False
 
 
+class SeasonGenerationArgs(Contract):
+    """One confirmed season batch: 1-3 current members or one old batch to resume.
+
+    ``episodeIds`` and ``resumeBatchId`` are mutually exclusive; an empty selection
+    defaults to every current member, which is then rejected by ``BATCH_LIMIT`` when
+    the season holds four episodes.
+    """
+
+    season_id: Identifier
+    episode_ids: JsonTuple[Identifier] | None = None
+    resume_batch_id: Identifier | None = None
+    confirm: bool = False
+
+    @model_validator(mode="after")
+    def coherent_selection(self):
+        if self.episode_ids is not None:
+            if not 1 <= len(self.episode_ids) <= 3:
+                raise ValueError("A season batch selects one to three episodes")
+            if len(set(self.episode_ids)) != len(self.episode_ids):
+                raise ValueError("Season batch episode IDs must be unique")
+        if self.episode_ids is not None and self.resume_batch_id is not None:
+            raise ValueError("episodeIds and resumeBatchId are mutually exclusive")
+        return self
+
+
 class ShotRedoToolArgs(Contract):
     """A model-turn redo: the target shot plus the storyboard revision the model read.
 

@@ -117,13 +117,28 @@ def read_season(args: dict, state: dict, project_id: str) -> dict:
     """The current season view shared by the tool, the CLI and the Web panel."""
     summaries = season_summaries(state, project_id)
     season_id = args.get("seasonId")
+    batch_id = args.get("batchId")
+    if season_id is None and batch_id is not None:
+        # Reading one batch by ID does not require the caller to know its season;
+        # a cross-project or unknown batch is still a hard BATCH_CONFLICT.
+        raw_batch = state["batches"].get(batch_id)
+        if raw_batch is None or raw_batch["projectId"] != project_id:
+            raise AppError("BATCH_CONFLICT", "当前项目中没有这个批次。")
+        season_id = raw_batch["seasonId"]
     if season_id is not None:
         raw = state["seasons"].get(season_id)
         if raw is None or raw["projectId"] != project_id:
             raise AppError("SEASON_NOT_FOUND", "当前项目中没有这个季。")
         season = Season.model_validate(raw)
     elif not summaries:
-        return {"seasonId": None, "season": None, "episodes": [], "seasons": [], "batch": None}
+        return {
+            "seasonId": None,
+            "season": None,
+            "episodes": [],
+            "seasons": [],
+            "batch": None,
+            "batches": [],
+        }
     else:
         # Newest season by creation, not by title: renaming never moves the default.
         season = Season.model_validate(state["seasons"][summaries[-1]["seasonId"]])
@@ -146,6 +161,11 @@ def read_season(args: dict, state: dict, project_id: str) -> dict:
                 "seasonVersion": season.current_version,
             }
         )
+    # E2: the latest batch (or exactly the requested one) joins the season view; the
+    # batch projection is read-only and never registers, submits or retries.
+    from vagent.video.batches import batch_summaries, read_batch
+
+    batch = read_batch({"seasonId": season.id, "batchId": args.get("batchId")}, state, project_id)
     return {
         "seasonId": season.id,
         "season": {
@@ -158,8 +178,8 @@ def read_season(args: dict, state: dict, project_id: str) -> dict:
         },
         "episodes": episodes,
         "seasons": summaries,
-        # E1 stores no batch yet; E2 fills this from the latest Batch record.
-        "batch": None,
+        "batch": batch,
+        "batches": batch_summaries(state, project_id, season.id),
     }
 
 

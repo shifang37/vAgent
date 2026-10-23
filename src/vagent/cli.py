@@ -425,7 +425,11 @@ def local_season_read(state, args) -> dict:
     assert_id(args.project)
     if args.season_id:
         assert_id(args.season_id)
-    return read_season({"seasonId": args.season_id}, state, args.project)
+    if getattr(args, "batch_id", None):
+        assert_id(args.batch_id)
+    return read_season(
+        {"seasonId": args.season_id, "batchId": getattr(args, "batch_id", None)}, state, args.project
+    )
 
 
 def local_season_save(config, store, args) -> int:
@@ -442,6 +446,32 @@ def local_season_save(config, store, args) -> int:
         season_id=args.season_id,
         expected_revision=args.expected_revision,
     )
+    print_json(result)
+    return 0
+
+
+async def local_season_generate(config, store, args) -> int:
+    """Register one season batch as an explicit local action; submits nothing."""
+    assert_id(args.project)
+    assert_id(args.season_id)
+    if not args.confirm:
+        raise AppError("CONFIRMATION_REQUIRED", "季批量登记需要显式 --confirm。")
+    for episode_id in args.episodes or ():
+        assert_id(episode_id)
+    if args.resume_batch:
+        assert_id(args.resume_batch)
+    async with AsyncExitStack() as stack:
+        adapters = await live_adapters(config, store, stack)
+        service = JobService(store, adapters, config=config)
+        result = clients.generate_season(
+            service,
+            session_id=args.project,
+            client_request_id=args.request_id or str(uuid4()),
+            season_id=args.season_id,
+            episode_ids=args.episodes or None,
+            resume_batch_id=args.resume_batch,
+            confirm=True,
+        )
     print_json(result)
     return 0
 
@@ -1028,9 +1058,10 @@ def parser() -> argparse.ArgumentParser:
     episode_generate.add_argument("--request-id", dest="request_id", help="同一请求 ID 重放原结果")
     season = commands.add_parser("season", help="季：保存有序分集成员、查看季与成员摘要；不登记任务")
     season_actions = season.add_subparsers(dest="action", required=True)
-    season_show = season_actions.add_parser("show", help="读取季、成员集摘要与全部季；只读")
+    season_show = season_actions.add_parser("show", help="读取季、成员集摘要、最近批次与全部季；只读")
     season_show.add_argument("-s", "--project", default="default")
     season_show.add_argument("--season", dest="season_id", help="指定季；省略时读取本项目最新创建的季")
+    season_show.add_argument("--batch", dest="batch_id", help="读取指定批次；省略时读取该季最近批次")
     season_save_cli = season_actions.add_parser("save", help="保存季标题与 1–4 个有序分集 ID；不登记任务")
     season_save_cli.add_argument("-s", "--project", default="default")
     season_save_cli.add_argument("--season", dest="season_id", help="修改已有季；省略时新建")
@@ -1049,6 +1080,19 @@ def parser() -> argparse.ArgumentParser:
         help="修改时必须提供 season show 返回的 revision",
     )
     season_save_cli.add_argument("--request-id", dest="request_id", help="同一请求 ID 重放原结果")
+    season_generate_cli = season_actions.add_parser(
+        "generate", help="为季的 1–3 集登记任务；只登记，不提交上游"
+    )
+    season_generate_cli.add_argument("-s", "--project", default="default")
+    season_generate_cli.add_argument("--season", dest="season_id", required=True)
+    season_generate_cli.add_argument(
+        "--episode", dest="episodes", action="append", help="有序分集 ID，可选 1–3 个；省略时用全部成员"
+    )
+    season_generate_cli.add_argument(
+        "--resume", dest="resume_batch", help="显式恢复旧批次中非 succeeded 的集；与 --episode 互斥"
+    )
+    season_generate_cli.add_argument("--confirm", action="store_true", help="显式确认逐集估算与批量额度")
+    season_generate_cli.add_argument("--request-id", dest="request_id", help="同一请求 ID 重放原结果")
     subtitle = commands.add_parser("subtitle", help="字幕：确定性对齐、保存修正与本地软/烧录导出")
     subtitle_actions = subtitle.add_subparsers(dest="action", required=True)
     subtitle_show = subtitle_actions.add_parser("show", help="读取当前字幕轨、版本与逐条 cue")
@@ -1196,6 +1240,8 @@ def main() -> None:
             with FileStore.open(config.home) as store:
                 if args.action == "show":
                     print_json(local_season_read(store.snapshot(), args))
+                elif args.action == "generate":
+                    raise SystemExit(asyncio.run(local_season_generate(config, store, args)))
                 else:
                     raise SystemExit(local_season_save(config, store, args))
         elif args.command == "usage" and args.project is not None:

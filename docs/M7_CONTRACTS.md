@@ -10,6 +10,13 @@
 > - **季保存的幂等**：相同标题与相同有序成员返回当前 `SeasonVersion` 并标记 `replayed=true`，不追加空版本；内容变化必须带 `expectedRevision`。不带 `seasonId` 的相同内容在项目内定位到同一季并重放，避免重复季争抢成员。
 > - **本地元数据 Run**：CLI/Web 的季保存走 metadata-only 客户端 Run（`videoMode=off`、`toolFeatures={}`），因此视频模式 off 的纯文本项目也能组织季；它不登记 Job、不调用模型或供应商。
 > - **工具面**：13/13 是首个带 `tts` 能力的默认版本，冻结变体保留完整 configuration（含 `tts`），真实 M6 E3 记录可按 `toolFeatures` 恢复。
+>
+> **E2 已实施（2026-10-23）**：`Batch`/`BatchEpisode`、`season_generate`、逐集原子登记与失败隔离、显式恢复、Store 崩溃恢复、Web 批量确认/恢复，tools/rules **16/16**（冻结 15/15）。实现中对本文件的细化（不改冻结语义）：
+>
+> - **批次身份与重放**：`Batch.id` 由调用身份（项目 + 操作键）确定性生成，同一调用重放返回原批次；普通生成调用若与一个已终态批次指纹完全一致，也直接重放该批次（`replayed=true`），不重复登记。恢复不复用旧批次，必须显式 `resumeBatchId`。
+> - **创建前预览**：新增只读 `GET /api/seasons/{id}/estimate`（Web 客户端动作，不是模型工具），用与登记相同的推导回显逐集镜头数、逐集/合计估算与批量余量；模型侧仍由 `season_read` 与 `season_generate` 的结果回显。
+> - **`season_read`**：额外返回该季的 `batches` 摘要列表（最新在前）；`batch` 字段为最近批次或 `batchId` 指定的批次。
+> - **打开时校验**：Store 打开对 `batches` 只做结构、成员归属与 Job 引用校验（`initial=True`），不做“新批次必须 running/revision 0”与逐次推进校验；这两条只在提交事务中执行。
 
 ## 1. 决策与版本
 
@@ -234,7 +241,7 @@ M6 的 18 个错误码全部保留；M7 新增：
 | 包 | 交付 | 验收 |
 |---|---|---|
 | E1 季与 schema 9 | **已交付（2026-10-23）**：schema v9（`seasons`/`batches`/`timelines` 三个空集合）、`Season`/`SeasonVersion`、`season_save`/`season_read`、v8→v9 逐字节备份、CLI/Web 季面板；tools/rules **15/15**（冻结 13/13）。见 [E1 验收](./M7_E1_ACCEPTANCE.md) | 旧 v1–v8 数据可读；季成员唯一、顺序只增不改；无 Job、无模型、submit=0 |
-| E2 批量队列 | **待实施**：`Batch`/`BatchEpisode`、`season_generate`（1–3 集、逐集原子、失败隔离、显式恢复、60 Job/180 CNY）、Store 崩溃恢复、Web 批量确认与恢复；tools/rules **16/16**（冻结 15/15） | 3 集批次中单集失败不阻塞其他集；单集交付失败可由 `shot_redo` 修复且不影响其他集；恢复不重复提交；不确定提交不重投；受控/离线 submit=0 |
+| E2 批量队列 | **已交付（2026-10-23）**：`Batch`/`BatchEpisode`、`season_generate`（1–3 集、逐集原子、失败隔离、显式恢复、60 Job/180 CNY 预检）、Store 崩溃恢复（`BATCH_INTERRUPTED`）、`season_read` 批次交付计数、CLI/Web 批量确认与恢复；tools/rules **16/16**（冻结 15/15）。见 [E2 验收](./M7_E2_ACCEPTANCE.md) | 3 集批次中单集失败不阻塞其他集；单集交付失败可由 `shot_redo` 修复且不影响其他集；恢复不重复提交；不确定提交不重投；受控/离线 submit=0 |
 | E3 时间线工作台 | **待实施**：`Timeline`/`TimelineVersion`、`timeline_save`/`timeline_read`、`film_render` 的 `timeline` scope、`ffmpeg-render-timeline-v1`、字幕/音频重映射、客户端 BGM/SFX 导入、Web 裁剪/排序/转场/预览/导出；tools/rules **18/18**（冻结 16/16） | 重排/裁剪/转场后成片可播放且时长正确；字幕不漂移；旧版本保留；同指纹幂等；失败不提交 |
 | E4 验收 | **待实施**：`scripts/evaluate_m7.py` 默认离线、3 集批次/失败隔离/恢复、时间线 v1→v2 重拼、浏览器工作台、安装态与 CI；复用已有本地媒体 | 3 集批量中单集失败不阻塞；恢复不重复提交；时间线编辑后重拼版本只增不改；浏览器可编辑/预览/导出；真实付费样本需单独授权 |
 

@@ -1989,3 +1989,18 @@ footer {
   gap: 8px;
   margin: 12px 0;
 }
+.season-batch-episodes {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  margin: 10px 0;
+}
+.season-batch-row {
+  display: flex;
+  gap: 10px;
+  align-items: flex-start;
+  padding: 8px 10px;
+  border: 1px solid #e3eaf3;
+  border-radius: 10px;
+  background: #f8fafd;
+}

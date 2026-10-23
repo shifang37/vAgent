@@ -76,6 +76,9 @@ def test_every_e0_baseline_schema_hash_is_unchanged():
     assert {"DatabaseV9"} <= set(current["vagent.storage"])
     seasons = importlib.import_module("vagent.video.seasons")
     assert {"Season", "SeasonVersion"} <= {name for name in vars(seasons) if name[0].isupper()}
+    # E2 appends the batch domain without touching any frozen baseline model.
+    batches = importlib.import_module("vagent.video.batches")
+    assert {"Batch", "BatchEpisode", "BatchEstimate"} <= {name for name in vars(batches) if name[0].isupper()}
 
 
 def test_database_v9_adds_exactly_the_three_empty_collections():
@@ -114,8 +117,8 @@ def test_frozen_stage_limits_and_tool_groups():
     limits = BASELINE["limits"]
     assert limits["storageSchemaVersion"] == 8
     assert limits["tools"]["videoToolsVersion"] == 13
-    assert (tools.VIDEO_TOOLS_VERSION, tools.VIDEO_RULES_VERSION) == (15, 15)
-    assert (tools.LIVE_VIDEO_TOOLS_VERSION, tools.LIVE_VIDEO_RULES_VERSION) == (15, 15)
+    assert (tools.VIDEO_TOOLS_VERSION, tools.VIDEO_RULES_VERSION) == (16, 16)
+    assert (tools.LIVE_VIDEO_TOOLS_VERSION, tools.LIVE_VIDEO_RULES_VERSION) == (16, 16)
     groups = {
         "M2": tools.M2_TOOL_NAMES,
         "M3": tools.M3_TOOL_NAMES,
@@ -128,9 +131,11 @@ def test_frozen_stage_limits_and_tool_groups():
     }
     for group, names in limits["toolGroups"].items():
         assert list(groups[group]) == names
-    # E1 appends exactly the season group and leaves every earlier group intact.
+    # E1 appends exactly the season group and leaves every earlier group intact;
+    # E2 appends only the season batch tool.
     assert tools.M7_E1_TOOL_NAMES == ("season_save", "season_read")
-    assert tools.M7_TOOL_NAMES == tools.M7_E1_TOOL_NAMES
+    assert tools.M7_E2_TOOL_NAMES == ("season_generate",)
+    assert tools.M7_TOOL_NAMES == (*tools.M7_E1_TOOL_NAMES, *tools.M7_E2_TOOL_NAMES)
     assert tools.WAIT_SET_LIMIT == limits["wait"]["setLimit"] == 20
     assert tools.WAIT_TIMEOUT_SECONDS == limits["wait"]["timeoutSeconds"] == 600
     # M7 freezes the season limits named in the contract.

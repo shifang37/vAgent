@@ -334,9 +334,9 @@ E2（音频）的边界选择：
 - **工具面**：`audio_generate` 是 `async_write_execute`（无 Job、无等待），tools/rules 11/11，冻结 10/10 与更早变体；`episode_read` 只追加 `audio` 投影。headless 规划排除该付费写工具。
 - **混音**：`mix-zh-v1` 以 `amix normalize=0` 保留 voice 0 dB/BGM −18 dB/SFX −6 dB，BGM 用 `sidechaincompress`（−20 dB 线性 0.1、8、20 ms、400 ms）ducking；两遍 `loudnorm`（−16 LUFS/−1 dBTP/LRA 11）后用 EBU R128 复测成品，超差即 `LOUDNESS_OUT_OF_RANGE` 并删除产物。E2 只交付本地混音服务，`film_render` 集成留给 E3。
 
-### 8.8 M7 多集与工作台（E0 冻结，E1 已交付）
+### 8.8 M7 多集与工作台（E0 冻结，E1/E2 已交付）
 
-M7 契约见 [M7 契约](./docs/M7_CONTRACTS.md)，E0 基线与本地裁剪探针见 [E0 验收](./docs/M7_E0_ACCEPTANCE.md) 与 `docs/M7_E0_BASELINE.json`。**E0 只冻结要求与基线，不改产品代码：视频 submit=0、模型调用=0、TTS 请求=0。** E1 已交付（见 [E1 验收](./docs/M7_E1_ACCEPTANCE.md)）：schema 9 三个空集合与 v8→v9 逐字节备份、`Season`/`SeasonVersion`、`season_save`/`season_read`、tools/rules 15/15（冻结 13/13）、CLI/Web 季面板；既有 165 个契约模型哈希不变，视频 submit=0、模型调用=0、TTS 请求=0。
+M7 契约见 [M7 契约](./docs/M7_CONTRACTS.md)，E0 基线与本地裁剪探针见 [E0 验收](./docs/M7_E0_ACCEPTANCE.md) 与 `docs/M7_E0_BASELINE.json`。**E0 只冻结要求与基线，不改产品代码：视频 submit=0、模型调用=0、TTS 请求=0。** E1 已交付（见 [E1 验收](./docs/M7_E1_ACCEPTANCE.md)）：schema 9 三个空集合与 v8→v9 逐字节备份、`Season`/`SeasonVersion`、`season_save`/`season_read`、tools/rules 15/15（冻结 13/13）、CLI/Web 季面板。E2 已交付（见 [E2 验收](./docs/M7_E2_ACCEPTANCE.md)）：`Batch`/`BatchEpisode`、`season_generate`、逐集独立事务与失败隔离、显式 `resumeBatchId` 恢复、Store 崩溃恢复、CLI/Web 批量确认与恢复，tools/rules 16/16（冻结 15/15）。既有 165 个契约模型哈希不变，视频 submit=0、模型调用=0、TTS 请求=0。
 
 E1 的实现边界：
 
@@ -345,6 +345,15 @@ E1 的实现边界：
 - **幂等与并发**：`season_save` 以完整内容（标题 + 有序成员）判等，相同内容返回当前版本并标记 `replayed=true`，不追加空版本；内容变化必须带 `expectedRevision`，否则 `SEASON_VERSION_CONFLICT`。
 - **零费用路径**：季保存不登记 Job、不调用模型或供应商；CLI/Web 的本地保存走 metadata-only 客户端 Run（`videoMode=off`、`toolFeatures={}`），因此文本项目在视频模式 off 下也能组织季。
 - **工具面**：E1 追加 `season_save`/`season_read`（15/15），13/13 与更早变体按 `toolFeatures` 冻结；headless 仍只编排分镜，不加入季批量或时间线渲染。
+
+E2 的实现边界：
+
+- **批次域**：`Batch`/`BatchEpisode` 严格契约；`status` 只由成员推导（`running`/`succeeded`/`partial`/`failed`）；目标、成员、指纹与 `createdAt` 冻结，终态不可改写，每项目 ≤64 条；`validate_batch_changes` 在每次提交复核状态机与 `revision +1`，打开 Store 时用 `initial=True` 只做结构与引用校验。
+- **逐集原子**：`season_generate` 为每集建独立 Store 键 `batch:<batchId>:<episodeId>`，在各自事务内调用既有整集登记；Job 的 `operationKey` 指向该集操作，因此 `validate_job_changes` 仍能证明“Job 与成功结果一起保存”。单集异常只写该集 `failed`/错误码，其他集继续。
+- **预算**：每集沿用 `_episode_limits`（20 Job / 60.00 CNY，不换汇）；批次级预检 3 集 / 60 新 Job / 180.00 CNY，超限整批拒绝。复用请求不计新 Job，但仍记录 `reusedCount`。
+- **恢复与崩溃**：`resumeBatchId` 与 `episodeIds` 互斥，只为非成功集创建 `resumeOf` 新批次并按当前版本重新冻结；打开 Store 时 `recover_interrupted_batches` 把残留 `running` 收为 `partial`/`failed`，`pending/running` 成员写 `BATCH_INTERRUPTED`，不自动重跑。
+- **幂等**：批次 ID 由（项目 + 操作键）uuid5 派生；普通生成对相同指纹的已终态批次直接重放，恢复不复用旧批次。
+- **工具面**：E2 追加 `season_generate`（16/16），15/15 与更早变体按 `toolFeatures` 冻结；`season_read` 增加 `batchId` 与批次交付计数，headless 继续排除该写工具。
 
 后续阶段的边界选择：
 

@@ -19,6 +19,7 @@ from pydantic.alias_generators import to_camel
 from vagent.config import assert_id
 from vagent.errors import AppError, failure
 from vagent.video.audio import AudioAsset, AudioMedia, validate_audio_changes
+from vagent.video.batches import recover_interrupted_batches, validate_batch_changes
 from vagent.video.contracts import Job, MediaAsset, StoredJob
 from vagent.video.episodes import Character, Episode, Scene, Style
 from vagent.video.films import Film, FilmMedia
@@ -394,6 +395,7 @@ class FileStore:
                     validate_subtitle_changes(checked["subtitleTracks"], checked)
                     validate_render_changes(checked["renders"], checked)
                     validate_season_changes(checked.get("seasons", {}), checked)
+                    validate_batch_changes(checked.get("batches", {}), checked, initial=True)
                 except (ValueError, TypeError, KeyError, AppError):
                     raise AppError(
                         "INVALID_STORE", "本地状态损坏或版本不支持，已保留原文件，未重置数据。"
@@ -467,6 +469,7 @@ class FileStore:
                                         run.get("externalWaitStartedAt") or binding.started_at
                                     )
                 recover_interrupted_jobs(draft, now())
+                recover_interrupted_batches(draft, now())
 
             store.transaction(recover)
             from vagent.video.films import cleanup_stale_parts
@@ -518,6 +521,7 @@ class FileStore:
             validate_subtitle_changes(self._state["subtitleTracks"], draft)
             validate_render_changes(self._state.get("renders", {}), draft)
             validate_season_changes(self._state.get("seasons", {}), draft)
+            validate_batch_changes(self._state.get("batches", {}), draft)
             atomic_write_json(self.home / "state.json", draft)
             self._state = draft
             return copy.deepcopy(value)

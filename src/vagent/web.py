@@ -10,7 +10,7 @@ from typing import Literal
 from fastapi import FastAPI, Request
 from fastapi.exceptions import RequestValidationError
 from fastapi.responses import FileResponse, JSONResponse, Response, StreamingResponse
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 from vagent import __version__
 from vagent.application import ApplicationService
@@ -118,6 +118,21 @@ class SeasonSaveInput(BaseModel):
     expectedRevision: int | None = Field(default=None, ge=0)
 
 
+class SeasonGenerateInput(BaseModel):
+    model_config = ConfigDict(extra="forbid", strict=True)
+    clientRequestId: str = Field(pattern=r"^[a-zA-Z0-9_-]{1,64}$")
+    seasonId: Identifier
+    episodeIds: list[Identifier] | None = Field(default=None, min_length=1, max_length=3)
+    resumeBatchId: Identifier | None = None
+    confirm: bool = True
+
+    @model_validator(mode="after")
+    def exclusive_targets(self):
+        if self.episodeIds is not None and self.resumeBatchId is not None:
+            raise ValueError("episodeIds and resumeBatchId are mutually exclusive")
+        return self
+
+
 class FilmRenderInput(BaseModel):
     model_config = ConfigDict(extra="forbid", strict=True)
     clientRequestId: str = Field(pattern=r"^[a-zA-Z0-9_-]{1,64}$")
@@ -212,6 +227,8 @@ def create_app(config, *, port=3210, model=None, policy=None):
                 "VERSION_CONFLICT",
                 "SEASON_VERSION_CONFLICT",
                 "SEASON_EPISODE_CONFLICT",
+                "BATCH_CONFLICT",
+                "BATCH_INTERRUPTED",
             }
             else 400
         )
@@ -358,12 +375,31 @@ def create_app(config, *, port=3210, model=None, policy=None):
         return await file_io(app.state.service.seasons, projectId)
 
     @app.get("/api/seasons/{season_id}")
-    async def season_detail(season_id: str, projectId: str):
-        return await file_io(app.state.service.season, projectId, season_id)
+    async def season_detail(season_id: str, projectId: str, batchId: str | None = None):
+        return await file_io(app.state.service.season, projectId, season_id, batchId)
 
     @app.post("/api/sessions/{session_id}/seasons/save", status_code=201)
     async def seasons_save(session_id: str, body: SeasonSaveInput):
         return await file_io(app.state.service.save_season, session_id, body.model_dump(exclude_none=True))
+
+    @app.get("/api/seasons/{season_id}/estimate")
+    async def season_estimate(
+        season_id: str, projectId: str, episodeIds: str | None = None, resumeBatchId: str | None = None
+    ):
+        ids = [item for item in (episodeIds or "").split(",") if item]
+        return await file_io(
+            app.state.service.preview_season,
+            projectId,
+            season_id,
+            episode_ids=ids or None,
+            resume_batch_id=resumeBatchId,
+        )
+
+    @app.post("/api/sessions/{session_id}/seasons/generate", status_code=202)
+    async def seasons_generate(session_id: str, body: SeasonGenerateInput):
+        return await file_io(
+            app.state.service.generate_season, session_id, body.model_dump(exclude_none=True)
+        )
 
     @app.get("/api/storyboards/{storyboard_id}")
     async def storyboard_detail(storyboard_id: str, projectId: str):

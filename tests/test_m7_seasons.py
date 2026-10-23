@@ -227,7 +227,14 @@ def test_season_read_without_saved_seasons_is_empty(store):
     registry, _service, _adapter, _context = mock_tools(store)
     result = read(registry, store, {}, "m7-empty-read")
     assert result["ok"], result
-    assert result["data"] == {"seasonId": None, "season": None, "episodes": [], "seasons": [], "batch": None}
+    assert result["data"] == {
+        "seasonId": None,
+        "season": None,
+        "episodes": [],
+        "seasons": [],
+        "batch": None,
+        "batches": [],
+    }
     assert season_summaries(store.snapshot(), "coffee") == []
 
 

@@ -2,14 +2,24 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 
 import {
+  SEASON_BATCH_EPISODE_LIMIT,
   SEASON_EPISODE_LIMIT,
+  batchEpisodeRows,
+  batchMeta,
+  batchMetaText,
+  batchStatusText,
+  resumeBatchTarget,
   seasonEpisodeRows,
+  seasonGenerateBody,
+  seasonGenerateSelection,
+  seasonGenerateValidation,
   seasonMeta,
   seasonMetaText,
   seasonMembers,
   seasonPickerOptions,
   seasonSaveBody,
   seasonValidation,
+  toggleBatchEpisode,
 } from "../web/season-state.js";
 
 const FIRST = "11111111-1111-4111-8111-111111111111";
@@ -165,6 +175,165 @@ test("seasonSaveBody trims the title and only sends a revision when editing", ()
       episodeIds: [FIRST, SECOND],
       seasonId: FIRST,
       expectedRevision: 3,
+    },
+  );
+});
+
+const BATCH_VIEW = {
+  ...VIEW,
+  batch: {
+    batchId: FOURTH,
+    seasonId: FIRST,
+    seasonVersion: 2,
+    status: "partial",
+    resumeOf: null,
+    revision: 4,
+    createdAt: "2030-01-02T00:00:00+00:00",
+    episodeIds: [SECOND, FIRST],
+    newJobCount: 12,
+    totalEstimate: null,
+    episodes: [
+      {
+        episodeId: SECOND,
+        title: "第二集",
+        episodeVersion: 1,
+        status: "succeeded",
+        shotCount: 12,
+        jobCount: 12,
+        reusedCount: 0,
+        deliveredShots: 3,
+        failedShots: 1,
+        pendingShots: 8,
+        errorCode: null,
+        estimate: null,
+        stale: false,
+      },
+      {
+        episodeId: FIRST,
+        title: "第一集",
+        episodeVersion: 2,
+        status: "failed",
+        shotCount: 0,
+        jobCount: 0,
+        reusedCount: 0,
+        deliveredShots: 0,
+        failedShots: 0,
+        pendingShots: 0,
+        errorCode: "BATCH_EMPTY",
+        estimate: null,
+        stale: true,
+      },
+    ],
+  },
+};
+
+test("batchMeta projects the latest batch status and estimate", () => {
+  const meta = batchMeta(BATCH_VIEW);
+  assert.equal(meta.batchId, FOURTH);
+  assert.equal(meta.status, "partial");
+  assert.equal(meta.statusText, "部分成功");
+  assert.equal(meta.revision, 4);
+  assert.equal(meta.newJobCount, 12);
+  assert.equal(
+    batchMetaText(meta),
+    "部分成功 · 2 集 · 12 个新任务 · revision 4",
+  );
+  assert.equal(batchMetaText({ ...meta, resumeOf: "abcdef12-0000-4000-8000-000000000000" }).includes("恢复自 abcdef12"), true);
+  assert.equal(batchMetaText({ ...meta, totalEstimate: { currency: "CNY", amount: "36.00" } }).includes("36.00 CNY"), true);
+  assert.equal(batchMetaText(null), "这个季还没有批次");
+  assert.equal(batchStatusText("succeeded"), "全部成功");
+  assert.equal(batchStatusText("nope"), "未知");
+});
+
+test("batchEpisodeRows keeps registration and delivery status separate", () => {
+  const rows = batchEpisodeRows(BATCH_VIEW);
+  assert.deepEqual(
+    rows.map((row) => [row.order, row.title, row.statusText, row.errorCode, row.stale]),
+    [
+      [1, "第二集", "全部成功", null, false],
+      [2, "第一集", "全部失败", "BATCH_EMPTY", true],
+    ],
+  );
+  assert.deepEqual(
+    [rows[0].deliveredShots, rows[0].failedShots, rows[0].pendingShots],
+    [3, 1, 8],
+  );
+  assert.deepEqual(batchEpisodeRows({ batch: null }), []);
+});
+
+test("resumeBatchTarget only offers the non-succeeded members of a terminal batch", () => {
+  assert.deepEqual(resumeBatchTarget(BATCH_VIEW), {
+    batchId: FOURTH,
+    episodeIds: [FIRST],
+    count: 1,
+  });
+  const succeeded = {
+    batch: { ...BATCH_VIEW.batch, status: "succeeded" },
+  };
+  assert.equal(resumeBatchTarget(succeeded), null);
+  const running = { batch: { ...BATCH_VIEW.batch, status: "running" } };
+  assert.equal(resumeBatchTarget(running), null);
+  assert.equal(resumeBatchTarget({ batch: null }), null);
+});
+
+test("seasonGenerateSelection defaults to all saved members only up to three", () => {
+  assert.deepEqual(seasonGenerateSelection(VIEW), [SECOND, FIRST]);
+  const four = {
+    episodes: [
+      { episodeId: FIRST },
+      { episodeId: SECOND },
+      { episodeId: THIRD },
+      { episodeId: FOURTH },
+    ],
+  };
+  assert.deepEqual(seasonGenerateSelection(four), []);
+  assert.equal(SEASON_BATCH_EPISODE_LIMIT, 3);
+});
+
+test("toggleBatchEpisode enforces the three-episode batch limit", () => {
+  assert.deepEqual(toggleBatchEpisode([], FIRST), { selection: [FIRST], error: null });
+  assert.deepEqual(toggleBatchEpisode([FIRST], FIRST), { selection: [], error: null });
+  const full = toggleBatchEpisode([FIRST, SECOND, THIRD], FOURTH);
+  assert.deepEqual(full.selection, [FIRST, SECOND, THIRD]);
+  assert.match(full.error, /最多 3 集/);
+});
+
+test("seasonGenerateValidation accepts one to three unique episodes", () => {
+  assert.deepEqual(seasonGenerateValidation([FIRST]), {
+    ok: true,
+    error: null,
+    episodeIds: [FIRST],
+  });
+  assert.equal(seasonGenerateValidation([]).ok, false);
+  assert.equal(seasonGenerateValidation([FIRST, SECOND, THIRD, FOURTH]).ok, false);
+  assert.equal(seasonGenerateValidation([FIRST, FIRST]).ok, false);
+});
+
+test("seasonGenerateBody sends either the selection or one resume target, always confirm", () => {
+  assert.deepEqual(
+    seasonGenerateBody({
+      clientRequestId: "batch-1",
+      seasonId: FIRST,
+      episodeIds: [SECOND, FIRST],
+    }),
+    {
+      clientRequestId: "batch-1",
+      seasonId: FIRST,
+      confirm: true,
+      episodeIds: [SECOND, FIRST],
+    },
+  );
+  assert.deepEqual(
+    seasonGenerateBody({
+      clientRequestId: "batch-2",
+      seasonId: FIRST,
+      resumeBatchId: FOURTH,
+    }),
+    {
+      clientRequestId: "batch-2",
+      seasonId: FIRST,
+      confirm: true,
+      resumeBatchId: FOURTH,
     },
   );
 });

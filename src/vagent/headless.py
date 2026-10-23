@@ -36,6 +36,7 @@ PLANNING_EXCLUDED_TOOLS = (
     "video_generate",
     "film_assemble",
     "episode_generate",
+    "season_generate",
     "shot_redo",
     "audio_generate",
     "film_render",

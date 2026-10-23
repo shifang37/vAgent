@@ -12,6 +12,23 @@ from pydantic import ValidationError
 
 from vagent.errors import AppError, failure
 from vagent.video.assets import AssetService, verified_reference_data
+from vagent.video.batches import (
+    BATCH_AMOUNT_LIMIT,
+    BATCH_EPISODE_LIMIT,
+    BATCH_JOB_LIMIT,
+    Batch,
+    BatchEpisode,
+    BatchEstimate,
+    batch_fingerprint,
+    batch_id_for,
+    batch_view,
+    complete_member,
+    fail_member,
+    mark_running,
+    new_batch,
+    resume_target,
+    running_batch,
+)
 from vagent.video.consistency import cast_names, compose_shot_prompt, style_for_storyboard
 from vagent.video.contracts import (
     EPISODE_JOB_CAP,
@@ -55,6 +72,7 @@ from vagent.video.contracts import (
     ProviderPrice,
     RunLimitsSnapshot,
     RunLimitsSnapshotV2,
+    SeasonGenerationArgs,
     ShotGenerationArgs,
     ShotMediaInput,
     ShotRedoArgs,
@@ -93,6 +111,7 @@ from vagent.video.episodes import (
     episode_for_storyboard,
     episode_shot_plan,
 )
+from vagent.video.seasons import Season
 from vagent.video.storyboards import (
     Asset,
     ShotVersion,
@@ -1035,6 +1054,394 @@ class JobService:
             return result
         except AppError as error:
             return failure(error.code, str(error))
+
+    def season_generate(self, args: dict, *, context: ToolExecutionContext) -> dict:
+        """Register one to three season members as isolated, explicitly confirmed batches.
+
+        Each episode is planned and committed on its own, so one unbound, over-budget
+        or version-changed episode fails alone while the rest continue. Nothing here
+        submits, waits or retries: the existing Job Worker owns every provider call.
+        """
+        parsed = self._generation_args(SeasonGenerationArgs, args)
+        if isinstance(parsed, dict):
+            return parsed
+        try:
+            if not parsed.confirm:
+                raise AppError(
+                    "CONFIRMATION_REQUIRED",
+                    "季批量登记需要显式确认：先展示逐集镜头数、估算与批量额度，再提交。",
+                )
+            with self.store.locked():
+                state = self.store.snapshot()
+                _check_context(state, context)
+                run = state["runs"][context.run_id]
+                mode = run.get("videoMode")
+                if mode not in {"mock", "live"}:
+                    raise AppError("VIDEO_MODEL_UNAVAILABLE", "原 Run 的视频模式不开放季批量登记。")
+                plan = self._plan_season_batch(
+                    state, parsed, project_id=context.project_id, mode=mode, strict=True
+                )
+                batch_id, replayed = self._open_season_batch(state, context, plan, parsed)
+            if not replayed:
+                self._run_season_batch(context, batch_id, plan)
+            state = self.store.snapshot()
+            record = Batch.model_validate(state["batches"][batch_id])
+            return {
+                "ok": True,
+                "data": {
+                    **batch_view(state, record),
+                    "mode": plan["mode"],
+                    "simulated": plan["mode"] != "live",
+                    "replayed": replayed,
+                },
+            }
+        except AppError as error:
+            return failure(error.code, str(error))
+
+    def preview_season(self, project_id: str, args: dict) -> dict:
+        """Read-only per-episode plan and estimate for the confirmation dialog.
+
+        It derives exactly what a registration would freeze and applies the same
+        ceilings, but writes nothing, registers no Job and submits nothing.
+        """
+        try:
+            parsed = SeasonGenerationArgs.model_validate(args)
+        except (ValidationError, ValueError, TypeError):
+            raise AppError("INVALID_ARGUMENTS", "季批量参数不符合 Schema。") from None
+        mode = self.generation_mode()
+        state = self.store.snapshot()
+        plan = self._plan_season_batch(state, parsed, project_id=project_id, mode=mode, strict=False)
+        running = running_batch(state, project_id, plan["season"].id)
+        return {
+            "seasonId": plan["season"].id,
+            "seasonVersion": plan["season"].current_version,
+            "mode": mode,
+            "simulated": mode != "live",
+            "resumeOf": plan["resume"].id if plan["resume"] is not None else None,
+            "runningBatchId": running.id if running is not None else None,
+            "episodeIds": list(plan["selection"]),
+            "episodes": [
+                {
+                    "episodeId": entry["episode_id"],
+                    "title": entry["episode"].title,
+                    "episodeVersion": entry["version"],
+                    "shotCount": entry["shot_count"],
+                    "newJobCount": entry["new_jobs"],
+                    "reusedCount": entry["reused"],
+                    "estimate": entry["estimate"],
+                    "shots": entry["shots"],
+                    "errorCode": entry["error_code"],
+                    "problem": entry["problem"],
+                }
+                for entry in plan["episodes"]
+            ],
+            "totalNewJobs": plan["total_jobs"],
+            "totalEstimate": (
+                {"currency": plan["currency"], "amount": money(plan["total_amount"])}
+                if plan["live"] and plan["total_jobs"]
+                else None
+            ),
+            "limits": {
+                "maxEpisodes": BATCH_EPISODE_LIMIT,
+                "maxNewJobs": BATCH_JOB_LIMIT,
+                "maxAmount": BATCH_AMOUNT_LIMIT,
+                "currency": "CNY",
+            },
+            "overLimit": plan["over_limit"],
+        }
+
+    def _plan_season_batch(self, state, parsed, *, project_id: str, mode: str, strict: bool) -> dict:
+        """Resolve the selection, freeze each episode's plan and enforce batch ceilings."""
+        live = mode == "live"
+        if live:
+            self.check_live_configuration(self.config.video_provider)
+        raw = state["seasons"].get(parsed.season_id)
+        if raw is None or raw["projectId"] != project_id:
+            raise AppError("SEASON_NOT_FOUND", "当前项目中没有这个季。")
+        season = Season.model_validate(raw)
+        members = list(season.latest.episode_ids)
+        resume = None
+        if parsed.resume_batch_id is not None:
+            resume = resume_target(state, project_id, parsed.resume_batch_id)
+            if resume.season_id != season.id:
+                raise AppError("BATCH_CONFLICT", "待恢复的批次不属于这个季。")
+            selection = [member.episode_id for member in resume.episodes if member.status != "succeeded"]
+            if not selection:
+                raise AppError("BATCH_CONFLICT", "待恢复的批次没有失败集。")
+        else:
+            selection = list(parsed.episode_ids) if parsed.episode_ids is not None else members
+            if not selection:
+                raise AppError("BATCH_EMPTY", "没有选中任何分集，未登记任何任务。")
+            if len(selection) > BATCH_EPISODE_LIMIT:
+                raise AppError(
+                    "BATCH_LIMIT",
+                    f"一次批次最多 {BATCH_EPISODE_LIMIT} 集；这个季有 {len(members)} 集，请显式选择至多 "
+                    f"{BATCH_EPISODE_LIMIT} 集。",
+                )
+        for episode_id in selection:
+            if episode_id not in members:
+                raise AppError("BATCH_CONFLICT", f"分集 {episode_id} 不在这个季的当前版本中。")
+        episodes: list[dict] = []
+        total_jobs = 0
+        total_amount = Decimal(0)
+        currency = None
+        for episode_id in selection:
+            raw_episode = state["episodes"].get(episode_id)
+            if raw_episode is None or raw_episode["projectId"] != project_id:
+                raise AppError("BATCH_CONFLICT", f"分集 {episode_id} 不存在或不属于当前项目。")
+            episode = Episode.model_validate(raw_episode)
+            entry = {
+                "episode": episode,
+                "episode_id": episode.id,
+                "version": episode.current_version,
+                "shot_count": 0,
+                "new_jobs": 0,
+                "reused": 0,
+                "estimate": None,
+                "shots": [],
+                "error_code": None,
+                "problem": None,
+            }
+            try:
+                entry.update(self._preview_episode(state, episode, live=live))
+            except AppError as error:
+                # An episode without registrable shots is isolated as BATCH_EMPTY; any
+                # other per-episode refusal keeps its own frozen code.
+                entry["error_code"] = (
+                    "BATCH_EMPTY"
+                    if error.code in {"SCENE_CONFLICT", "EPISODE_SHOT_BUDGET", "EPISODE_DURATION_LIMIT"}
+                    else error.code
+                )
+                entry["problem"] = str(error)
+            episodes.append(entry)
+            if entry["error_code"] is not None:
+                continue
+            total_jobs += entry["new_jobs"]
+            if entry["estimate"] is not None:
+                estimate_currency = entry["estimate"]["currency"]
+                if currency is None:
+                    currency = estimate_currency
+                if estimate_currency == currency:
+                    total_amount += Decimal(entry["estimate"]["amount"])
+        over_limit = total_jobs > BATCH_JOB_LIMIT or total_amount > Decimal(BATCH_AMOUNT_LIMIT)
+        if over_limit and strict:
+            raise AppError(
+                "BATCH_LIMIT",
+                f"批次上限是 {BATCH_EPISODE_LIMIT} 集 / {BATCH_JOB_LIMIT} 个新任务 / "
+                f"{BATCH_AMOUNT_LIMIT} CNY；本次是 {len(selection)} 集 / {total_jobs} 个新任务 / "
+                f"{money(total_amount)} {currency or 'CNY'}，整批未登记。",
+            )
+        return {
+            "mode": mode,
+            "live": live,
+            "season": season,
+            "selection": selection,
+            "resume": resume,
+            "episodes": episodes,
+            "total_jobs": total_jobs,
+            "total_amount": total_amount,
+            "currency": currency or "CNY",
+            "over_limit": over_limit,
+        }
+
+    def _preview_episode(self, state, episode, *, live: bool) -> dict:
+        """The exact new/reused split and per-shot estimates one registration would freeze."""
+        targets = episode_shot_plan(state, episode)
+        plan, rows = [], []
+        reused = 0
+        for target in targets:
+            board, shot = target["board"], target["shot"]
+            capabilities, request = self._derive_shot(state, board, shot, live=live)
+            previous = latest_shot_version(board, board.current_version, shot.id)
+            reuse = (
+                previous is not None and stored_request_fingerprint(previous.request) == request.fingerprint()
+            )
+            if reuse:
+                reused += 1
+            else:
+                plan.append((shot, capabilities, request))
+            rows.append(
+                {
+                    "shotId": shot.id,
+                    "order": shot.order,
+                    "durationSeconds": shot.duration_seconds,
+                    "reused": reuse,
+                    "estimate": (
+                        previous.estimate.model_dump(mode="json", by_alias=True)
+                        if reuse and previous.estimate
+                        else None
+                    ),
+                }
+            )
+        estimate = None
+        if live:
+            # The same episode bucket registration will enforce, proven up front.
+            self._episode_limits(state, episode, plan)
+            estimate = self._episode_estimate(plan)
+            quotes = {
+                shot.id: self._shot_estimate(capabilities, request) for shot, capabilities, request in plan
+            }
+            for row in rows:
+                quote = quotes.get(row["shotId"])
+                if quote is not None:
+                    row["estimate"] = quote.model_dump(mode="json", by_alias=True)
+        return {
+            "shot_count": len(targets),
+            "new_jobs": len(plan),
+            "reused": reused,
+            "estimate": estimate,
+            "shots": rows,
+        }
+
+    def _episode_estimate(self, plan) -> dict | None:
+        if not plan:
+            return None
+        total, currency = Decimal(0), None
+        for shot, capabilities, request in plan:
+            estimate = self._shot_estimate(capabilities, request)
+            if currency is None:
+                currency = estimate.currency
+            if estimate.currency != currency:
+                raise AppError(
+                    "EPISODE_COST_LIMIT",
+                    f"镜头 {shot.id} 的报价币种与同集其他镜头不一致；不换汇，整集未登记。",
+                )
+            total += Decimal(estimate.amount)
+        return {"currency": currency, "amount": money(total)}
+
+    def _open_season_batch(self, state, context, plan, parsed) -> tuple[str, bool]:
+        """Create the frozen batch once; replaying the same call returns the same record."""
+        season = plan["season"]
+        fingerprint = batch_fingerprint(
+            context.project_id,
+            season.id,
+            season.current_version,
+            [(entry["episode_id"], entry["version"]) for entry in plan["episodes"]],
+            plan["mode"],
+            {"episodeIds": list(plan["selection"])},
+        )
+        batch_id = batch_id_for(context.project_id, context.operation_key)
+        existing = state["batches"].get(batch_id)
+        if existing is not None:
+            record = Batch.model_validate(existing)
+            if record.fingerprint != fingerprint or record.season_id != season.id:
+                raise AppError("BATCH_CONFLICT", "同一调用 ID 已用于另一个批次，请换一个请求再试。")
+            return batch_id, True
+        if parsed.resume_batch_id is None:
+            # A plain repeat of an identical request replays its recorded outcome:
+            # nothing is re-registered and failed episodes still require an explicit
+            # resumeBatchId, so no provider call is ever retried implicitly.
+            for raw in state["batches"].values():
+                if raw["projectId"] != context.project_id:
+                    continue
+                record = Batch.model_validate(raw)
+                if record.fingerprint == fingerprint and record.status != "running":
+                    return record.id, True
+        running = running_batch(state, context.project_id, season.id)
+        if running is not None:
+            raise AppError(
+                "BATCH_CONFLICT",
+                "这个季已有一个进行中的批次；等它结束后再生成或恢复。",
+            )
+        timestamp = self.timestamp()
+        members = tuple(
+            BatchEpisode(
+                episode_id=entry["episode_id"],
+                episode_version=entry["version"],
+                status="pending",
+                shot_count=entry["shot_count"],
+            )
+            for entry in plan["episodes"]
+        )
+        record = new_batch(
+            batch_id=batch_id,
+            project_id=context.project_id,
+            season_id=season.id,
+            season_version=season.current_version,
+            members=members,
+            fingerprint=fingerprint,
+            resume_of=plan["resume"].id if plan["resume"] is not None else None,
+            timestamp=timestamp,
+        )
+        payload = record.model_dump(mode="json", by_alias=True)
+        self.store.transaction(lambda draft: draft["batches"].__setitem__(batch_id, payload))
+        return batch_id, False
+
+    def _run_season_batch(self, context, batch_id: str, plan: dict) -> None:
+        """Register each selected episode in its own transaction; never abort the rest."""
+        for entry in plan["episodes"]:
+            episode_id = entry["episode_id"]
+            if entry["error_code"] is not None:
+                self._write_batch_member(
+                    batch_id,
+                    lambda record: fail_member(record, episode_id, entry["error_code"], self.timestamp()),
+                )
+                continue
+            self._write_batch_member(
+                batch_id,
+                lambda record: mark_running(record, episode_id, self.timestamp()),
+                require_running=True,
+            )
+            episode_context = context.model_copy(update={"tool_call_id": f"batch:{batch_id}:{episode_id}"})
+            call_args = {
+                "batchId": batch_id,
+                "episodeId": episode_id,
+                "episodeVersion": entry["version"],
+                "confirm": True,
+            }
+            result = self.store.operation(
+                episode_context.operation_key,
+                "season_generate",
+                call_args,
+                lambda draft: self._register_batch_episode(draft, episode_context, batch_id, entry),
+            )
+            if not result.get("ok"):
+                code = result["error"]["code"]
+                self._write_batch_member(
+                    batch_id, lambda record: fail_member(record, episode_id, code, self.timestamp())
+                )
+                continue
+            for shot in result["data"]["shots"]:
+                if shot.get("jobId") and not shot.get("reused"):
+                    self.publish(self.get(shot["jobId"], project_id=context.project_id))
+
+    def _write_batch_member(self, batch_id: str, change, *, require_running: bool = False) -> None:
+        def commit(draft):
+            raw = draft["batches"].get(batch_id)
+            if raw is None:
+                raise AppError("BATCH_CONFLICT", "批次记录已不存在。")
+            record = Batch.model_validate(raw)
+            if require_running and record.status != "running":
+                raise AppError("BATCH_CONFLICT", "批次已经不是进行中状态。")
+            draft["batches"][batch_id] = change(record).model_dump(mode="json", by_alias=True)
+
+        self.store.transaction(commit)
+
+    def _register_batch_episode(self, draft, context, batch_id: str, entry) -> dict:
+        """One episode's Jobs, ShotVersions and batch progress share one transaction."""
+        episode_id = entry["episode_id"]
+        raw = draft["episodes"].get(episode_id)
+        if raw is None or raw["projectId"] != context.project_id:
+            raise AppError("BATCH_CONFLICT", "成员分集已不存在，未登记该集。")
+        episode = Episode.model_validate(raw)
+        if episode.current_version != entry["version"]:
+            raise AppError("BATCH_CONFLICT", "成员分集版本在批次创建后已变化，请重新读取季后再恢复。")
+        data = self._register_episode(
+            draft, context, EpisodeGenerationArgs(episode_id=episode_id, confirm=True)
+        )
+        record = Batch.model_validate(draft["batches"][batch_id])
+        estimate = data.get("totalEstimate")
+        updated = complete_member(
+            record,
+            episode_id,
+            shot_count=len(data["shots"]),
+            job_ids=[shot["jobId"] for shot in data["shots"]],
+            reused_count=sum(1 for shot in data["shots"] if shot["reused"]),
+            estimate=BatchEstimate.model_validate(estimate) if estimate else None,
+            timestamp=self.timestamp(),
+        )
+        draft["batches"][batch_id] = updated.model_dump(mode="json", by_alias=True)
+        return data
 
     def generation_mode(self) -> str:
         """The active video mode; only mock and live can register shot Jobs."""

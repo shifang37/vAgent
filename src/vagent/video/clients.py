@@ -33,6 +33,7 @@ CLIENT_PROMPTS = {
     "subtitle_export": "本地界面发起的字幕导出（不调用模型）。",
     "film_render": "本地界面发起的整片渲染（不调用模型）。",
     "season_save": "本地界面发起的季成员保存（不调用模型）。",
+    "season_generate": "本地界面发起的季批量登记（不调用模型）。",
 }
 CLIENT_GROUPS = (
     "shot_generate",
@@ -43,6 +44,7 @@ CLIENT_GROUPS = (
     "subtitle_export",
     "film_render",
     "season_save",
+    "season_generate",
 )
 
 
@@ -449,6 +451,43 @@ def save_season(
         raise AppError(result["error"]["code"], result["error"]["message"])
     data = result["data"]
     return _result(service, data, context.run_id)
+
+
+def generate_season(
+    service,
+    *,
+    session_id: str,
+    client_request_id: str,
+    season_id: str,
+    episode_ids=None,
+    resume_batch_id: str | None = None,
+    confirm: bool = True,
+) -> dict:
+    """Register one explicit season batch from the local UI.
+
+    The batch record is the replay journal: the same client request reuses its
+    deterministic Run and batch, so a retry returns the recorded outcome instead of
+    registering the same episodes twice.
+    """
+    args = {
+        "seasonId": season_id,
+        "confirm": confirm,
+        **({"episodeIds": list(episode_ids)} if episode_ids is not None else {}),
+        **({"resumeBatchId": resume_batch_id} if resume_batch_id is not None else {}),
+    }
+    replayed = _replay_or_conflict(service, session_id, client_request_id, "season_generate", args)
+    if replayed is not None:
+        return replayed
+    raw = service.store.snapshot()["seasons"].get(season_id)
+    if raw is None or raw["projectId"] != session_id:
+        raise AppError("SEASON_NOT_FOUND", "当前项目中没有这个季。")
+    context = client_context(
+        service, session_id=session_id, client_request_id=client_request_id, group="season_generate"
+    )
+    result = service.season_generate(args, context=context)
+    if not result.get("ok"):
+        raise AppError(result["error"]["code"], result["error"]["message"])
+    return _result(service, result["data"], context.run_id)
 
 
 async def film_render(

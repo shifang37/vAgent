@@ -43,13 +43,22 @@ import {
 } from "./render-state.js";
 
 import {
+  batchEpisodeRows,
+  batchMeta,
+  batchMetaText,
+  batchStatusText,
+  resumeBatchTarget,
   seasonEpisodeRows,
+  seasonGenerateBody,
+  seasonGenerateSelection,
+  seasonGenerateValidation,
   seasonMeta,
   seasonMetaText,
   seasonMembers,
   seasonPickerOptions,
   seasonSaveBody,
   seasonValidation,
+  toggleBatchEpisode,
 } from "./season-state.js";
 
 import {
@@ -173,15 +182,19 @@ let shotSelection = new Set(),
   shotBusy = new Set(),
   pendingBatch = null,
   sequence = { items: null, index: -1 };
-// M7 E1 season panel: a read view plus one local edit buffer. Saving only writes
-// season membership; it never registers a Job or calls a model.
+// M7 E1/E2 season panel: a read view plus one local edit buffer. Saving only
+// writes season membership; generating registers Jobs but never submits them.
 let seasonView = null,
   seasonList = [],
   seasonEditing = null,
   seasonSelection = [],
   seasonDraftTitle = "",
   seasonBusy = false,
-  seasonError = null;
+  seasonError = null,
+  seasonBatchSelection = [],
+  seasonBatchBusy = false,
+  seasonBatchError = null,
+  pendingSeasonBatch = null;
 const IMAGE_TYPES = ["image/png", "image/jpeg", "image/webp"];
 const MAX_IMAGE_BYTES = 20 * 1024 * 1024;
 const currentRun = () => snapshot?.run;
@@ -388,6 +401,10 @@ function resetStoryboardUi() {
   seasonSelection = [];
   seasonDraftTitle = "";
   seasonError = null;
+  seasonBatchSelection = [];
+  seasonBatchBusy = false;
+  seasonBatchError = null;
+  pendingSeasonBatch = null;
 }
 async function selectSession(id) {
   const generation = ++viewGeneration;
@@ -955,6 +972,8 @@ function resetSeasonEdit(view) {
   seasonSelection = meta ? [...meta.episodeIds] : [];
   seasonDraftTitle = meta ? meta.title : "";
   seasonError = null;
+  seasonBatchSelection = seasonGenerateSelection(view);
+  seasonBatchError = null;
 }
 
 function openSeasonPanel() {
@@ -1050,6 +1069,124 @@ async function saveSeason() {
   }
 }
 
+function toggleSeasonBatchEpisode(episodeId) {
+  const result = toggleBatchEpisode(seasonBatchSelection, episodeId);
+  seasonBatchSelection = result.selection;
+  seasonBatchError = result.error
+    ? { code: "BATCH_SELECTION", message: result.error }
+    : null;
+  renderSeasonPanel();
+}
+
+function seasonBatchEstimateCell(row) {
+  if (row.problem) return "不可登记";
+  if (row.newJobCount === 0) return "全部复用";
+  return row.estimate ? `${escapeHTML(row.estimate.amount)} ${escapeHTML(row.estimate.currency)}` : "—";
+}
+
+async function openSeasonBatchDialog(mode) {
+  if (!activeId || seasonBatchBusy || !seasonEditing?.seasonId) return;
+  const seasonId = seasonEditing.seasonId;
+  const resume = resumeBatchTarget(seasonView);
+  let query;
+  if (mode === "resume") {
+    if (!resume) return;
+    query = `resumeBatchId=${encodeURIComponent(resume.batchId)}`;
+  } else {
+    const check = seasonGenerateValidation(seasonBatchSelection);
+    if (!check.ok) {
+      seasonBatchError = { code: "BATCH_SELECTION", message: check.error };
+      renderSeasonPanel();
+      return;
+    }
+    query = `episodeIds=${encodeURIComponent(check.episodeIds.join(","))}`;
+  }
+  seasonBatchBusy = true;
+  seasonBatchError = null;
+  renderSeasonPanel();
+  let preview;
+  try {
+    preview = await api(
+      `/api/seasons/${encodeURIComponent(seasonId)}/estimate?projectId=${encodeURIComponent(activeId)}&${query}`,
+    );
+  } catch (error) {
+    seasonBatchError = { code: error.code, message: error.message };
+    return;
+  } finally {
+    seasonBatchBusy = false;
+    if (panelMode === "season") renderSeasonPanel();
+  }
+  const rows = preview.episodes || [];
+  const blocked = Boolean(preview.runningBatchId) || preview.overLimit;
+  const summary = preview.simulated
+    ? "当前为模拟视频模式：只登记本地任务，不提交供应商、不产生费用，也没有真实媒体。"
+    : `当前为真实视频模式：将登记 ${preview.totalNewJobs} 个新任务，估算 ${escapeHTML(preview.totalEstimate?.amount ?? "—")} ${escapeHTML(preview.totalEstimate?.currency ?? "CNY")}。`;
+  const generation = openDialog(
+    mode === "resume" ? "确认恢复失败集" : "确认季批量生成",
+    `<p>${summary}</p>
+    <table class="estimate-table"><thead><tr><th>分集</th><th>镜头</th><th>新任务</th><th>复用</th><th>估算</th></tr></thead><tbody>
+      ${rows
+        .map(
+          (row) =>
+            `<tr><td>${escapeHTML(row.title || row.episodeId)}</td><td>${row.shotCount}</td><td>${row.problem ? "—" : row.newJobCount}</td><td>${row.reusedCount}</td><td>${seasonBatchEstimateCell(row)}</td></tr>
+             ${row.problem ? `<tr><td colspan="5" class="season-warning">${escapeHTML(row.errorCode || "不可登记")} · ${escapeHTML(row.problem)}</td></tr>` : ""}`,
+        )
+        .join("")}
+    </tbody></table>
+    ${
+      preview.overLimit
+        ? `<p class="meta season-warning">超过批次上限：一次最多 ${preview.limits.maxEpisodes} 集 / ${preview.limits.maxNewJobs} 个新任务 / ${escapeHTML(preview.limits.maxAmount)} CNY。</p>`
+        : ""
+    }
+    ${
+      preview.runningBatchId
+        ? `<p class="meta season-warning">这个季已有进行中的批次；等它结束后再生成或恢复。</p>`
+        : ""
+    }
+    <p class="meta">逐集原子登记：某集失败只标记该集，其他集继续；同一镜头相同请求复用原任务。确认只登记，不提交、不等待。</p>
+    <div class="actions"><button class="secondary" data-action="close-dialog">取消</button>
+      <button class="primary" data-action="confirm-season-batch" ${blocked || !rows.length ? "disabled" : ""}>确认${mode === "resume" ? "恢复" : "生成"} ${preview.totalNewJobs} 个新任务</button></div>`,
+  );
+  pendingSeasonBatch = {
+    generation,
+    mode,
+    seasonId,
+    episodeIds: [...seasonBatchSelection],
+    resumeBatchId: mode === "resume" ? resume.batchId : null,
+  };
+}
+
+async function submitSeasonBatch() {
+  const pending = pendingSeasonBatch;
+  if (!pending || pending.generation !== dialogGeneration || seasonBatchBusy) return;
+  seasonBatchBusy = true;
+  pendingSeasonBatch = null;
+  try {
+    const body = seasonGenerateBody({
+      clientRequestId: crypto.randomUUID(),
+      seasonId: pending.seasonId,
+      episodeIds: pending.mode === "resume" ? null : pending.episodeIds,
+      resumeBatchId: pending.resumeBatchId,
+    });
+    const result = await post(
+      `/api/sessions/${encodeURIComponent(activeId)}/seasons/generate`,
+      body,
+    );
+    $("#dialog").close();
+    toast(
+      `批次 ${result.batchId.slice(0, 8)}：${batchStatusText(result.status)}，${result.newJobCount} 个新任务${result.replayed ? "（复用原批次）" : ""}。`,
+    );
+    await refreshSession(activeId);
+    await loadSeason(pending.seasonId);
+  } catch (error) {
+    toast(`${error.code || "BATCH_ERROR"} · ${error.message}`);
+    seasonBatchError = { code: error.code, message: error.message };
+  } finally {
+    seasonBatchBusy = false;
+    if (panelMode === "season") renderSeasonPanel();
+  }
+}
+
 function renderSeasonPanel() {
   const panel = $("#season-panel");
   if (panelMode !== "season") {
@@ -1102,6 +1239,54 @@ function renderSeasonPanel() {
       </label>`,
     )
     .join("");
+  const batch = batchMeta(seasonView);
+  const batchRows = batchEpisodeRows(seasonView);
+  const resume = resumeBatchTarget(seasonView);
+  const savedMembers = seasonMembers(seasonView);
+  const batchSelectionCheck = seasonGenerateValidation(seasonBatchSelection);
+  const batchRunning = batch?.status === "running";
+  const batchChoicesHTML = savedMembers
+    .map(
+      (member) => `<label class="season-episode">
+        <input type="checkbox" data-batch-episode="${escapeHTML(member.episodeId)}"
+          ${seasonBatchSelection.includes(member.episodeId) ? "checked" : ""} ${batchRunning || seasonBatchBusy ? "disabled" : ""} />
+        <span class="season-order">${member.order}</span>
+        <span class="season-episode-body">
+          <strong>${escapeHTML(member.title)}</strong>
+          <small>${member.shotCount} 镜 · ${member.sceneCount} 场</small>
+        </span>
+      </label>`,
+    )
+    .join("");
+  const batchRowsHTML = batchRows.length
+    ? `<div class="season-batch-episodes">${batchRows
+        .map(
+          (row) => `<div class="season-batch-row">
+            <span class="season-order">${row.order}</span>
+            <span class="season-episode-body">
+              <strong>${escapeHTML(row.title)} · ${escapeHTML(row.statusText)}</strong>
+              <small>登记 ${row.jobCount}/${row.shotCount} 个任务 · 复用 ${row.reusedCount} · 交付 ${row.deliveredShots} / 失败 ${row.failedShots} / 待定 ${row.pendingShots}</small>
+              ${row.errorCode ? `<small class="season-owner">${escapeHTML(row.errorCode)}</small>` : ""}
+              ${row.stale ? '<small class="season-owner">分集版本已变化</small>' : ""}
+            </span>
+          </div>`,
+        )
+        .join("")}</div>`
+    : "";
+  const batchHTML = seasonEditing
+    ? `<p class="meta"><strong>批量生成</strong>（一次 1–3 集；每季同时至多一个进行中批次）</p>
+      <p class="meta">${batch ? `最近批次 ${escapeHTML(batch.batchId.slice(0, 8))} · ${escapeHTML(batchMetaText(batch))}` : "这个季还没有批次。"}</p>
+      ${batchRowsHTML}
+      <p class="meta">选择要生成的已保存成员（最多 3 集）：</p>
+      <div class="season-episodes">${batchChoicesHTML}</div>
+      ${seasonBatchError ? `<p class="meta season-error">${escapeHTML(seasonBatchError.code)} · ${escapeHTML(seasonBatchError.message)}</p>` : ""}
+      <div class="season-actions">
+        <button class="primary" data-action="preview-season-batch" ${seasonBatchBusy || batchRunning || !batchSelectionCheck.ok ? "disabled" : ""}>${seasonBatchBusy ? "正在预览…" : `预览并生成 ${seasonBatchSelection.length} 集`}</button>
+        ${resume ? `<button class="secondary" data-action="resume-season-batch" ${seasonBatchBusy || batchRunning ? "disabled" : ""}>恢复失败集（${resume.count} 集）</button>` : ""}
+        <button class="secondary" data-action="refresh-season-batch" ${seasonBatchBusy ? "disabled" : ""}>刷新批次</button>
+      </div>
+      <p class="meta">批量只登记本地任务，不提交供应商；单集失败只标记该集，其他集继续。恢复必须显式点击，只重登记失败集并创建新批次。</p>`
+    : `<p class="meta">先保存季，才能批量生成。</p>`;
   panel.innerHTML = `${panelHeading("季", "close-season")}
     <div class="season-toolbar">
       ${pickerHTML}
@@ -1120,6 +1305,7 @@ function renderSeasonPanel() {
       <button class="primary" data-action="save-season" ${seasonBusy ? "disabled" : ""}>${seasonBusy ? "正在保存…" : "保存季"}</button>
       ${seasonEditing ? `<button class="secondary" data-action="close-season">取消</button>` : ""}
     </div>
+    ${batchHTML}
     <p class="meta">季只保存标题与有序成员关系；不改分集、场记、镜头、预算或成片，也不登记任务、不调用模型。保存同一内容会复用当前版本，修改会追加新版本。</p>`;
   icons(panel);
 }
@@ -2078,6 +2264,8 @@ $("#season-panel").addEventListener("change", (event) => {
   }
   const episodeId = event.target.dataset?.seasonEpisode;
   if (episodeId) toggleSeasonEpisode(episodeId);
+  const batchEpisodeId = event.target.dataset?.batchEpisode;
+  if (batchEpisodeId) toggleSeasonBatchEpisode(batchEpisodeId);
 });
 $("#season-panel").addEventListener("input", (event) => {
   if (event.target.id === "season-title") seasonDraftTitle = event.target.value;
@@ -2209,6 +2397,10 @@ document.addEventListener("click", async (event) => {
       resetSeasonEdit(seasonView);
       renderSeasonPanel();
     }
+    if (action === "preview-season-batch") await openSeasonBatchDialog("generate");
+    if (action === "resume-season-batch") await openSeasonBatchDialog("resume");
+    if (action === "refresh-season-batch" && seasonEditing?.seasonId)
+      await loadSeason(seasonEditing.seasonId);
     if (action === "close-observe") $("#observe-panel").hidden = true;
     if (action === "observe") {
       $("#artifact-panel").hidden = true;
@@ -2253,6 +2445,7 @@ document.addEventListener("click", async (event) => {
     }
     if (action === "batch-selected") await confirmBatch();
     if (action === "confirm-batch") await submitBatch();
+    if (action === "confirm-season-batch") await submitSeasonBatch();
     if (action === "redo-shot") await redoShot(shotIdOf(event));
     if (action === "play-shot")
       startSequence(shotIdOf(event), event.target.closest("[data-media-url]")?.dataset.mediaUrl);

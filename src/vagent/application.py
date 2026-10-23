@@ -303,12 +303,14 @@ class ApplicationService:
         assert_id(session_id)
         return {"seasons": season_summaries(self.store.snapshot(), session_id)}
 
-    def season(self, session_id, season_id=None):
+    def season(self, session_id, season_id=None, batch_id=None):
         """The one season view shared by the panel, the CLI and the tools."""
         assert_id(session_id)
         if season_id is not None:
             assert_id(season_id)
-        return read_season({"seasonId": season_id}, self.store.snapshot(), session_id)
+        if batch_id is not None:
+            assert_id(batch_id)
+        return read_season({"seasonId": season_id, "batchId": batch_id}, self.store.snapshot(), session_id)
 
     def save_season(self, session_id, request: dict) -> dict:
         """Explicit local season save; never a model turn and never a provider call."""
@@ -321,6 +323,32 @@ class ApplicationService:
             episode_ids=request["episodeIds"],
             season_id=request.get("seasonId"),
             expected_revision=request.get("expectedRevision"),
+        )
+
+    def generate_season(self, session_id, request: dict) -> dict:
+        """Explicit local season batch; registration only, never a submission."""
+        assert_id(session_id)
+        return clients.generate_season(
+            self.video_jobs,
+            session_id=session_id,
+            client_request_id=request["clientRequestId"],
+            season_id=request["seasonId"],
+            episode_ids=request.get("episodeIds"),
+            resume_batch_id=request.get("resumeBatchId"),
+            confirm=request.get("confirm", True),
+        )
+
+    def preview_season(self, session_id, season_id, *, episode_ids=None, resume_batch_id=None):
+        """Read-only per-episode plan for the Web confirmation dialog."""
+        assert_id(session_id)
+        assert_id(season_id)
+        return self.video_jobs.preview_season(
+            session_id,
+            {
+                "seasonId": season_id,
+                **({"episodeIds": list(episode_ids)} if episode_ids is not None else {}),
+                **({"resumeBatchId": resume_batch_id} if resume_batch_id is not None else {}),
+            },
         )
 
     def assets(self, project_id=None):
