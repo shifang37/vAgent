@@ -96,6 +96,13 @@ async def test_whole_episode_renders_cross_scene_with_voice_and_loudness(store):
     assert read["ok"], read
     assert read["data"]["render"]["status"] == "succeeded"
     assert read["data"]["render"]["filmVersion"] == 1
+    # The episode panel reads the same controlled projection as the HTTP API.
+    summary = fixture["service"].renders.episode_summary(
+        store.snapshot(), PROJECT, fixture["episode"]["episodeId"]
+    )
+    assert summary["status"] == "succeeded"
+    assert summary["mediaUrl"] == f"/api/media/{latest['outputMediaId']}/content"
+    assert summary["render"]["subtitle"]["sidecarUrl"].endswith("/subtitles.srt")
 
 
 async def test_the_same_episode_fingerprint_replays_without_a_second_render(store):

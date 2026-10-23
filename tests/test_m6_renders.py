@@ -224,3 +224,23 @@ def test_film_timeline_rebuilds_rounded_segment_starts(monkeypatch):
     assert [shot.start for shot in shots] == [Fraction(0), duration]
     assert [shot.duration for shot in shots] == [duration, duration]
     assert shots[0].start + shots[0].duration == shots[1].start
+
+
+def test_title_cards_render_through_ass_without_drawtext():
+    """Linux imageio-ffmpeg ships libass but not drawtext; title cards use ASS."""
+    from vagent.video.subtitles import render_title_ass
+
+    ass = render_title_ass(
+        (
+            RenderTitleCardArg(text="雨夜咖啡店", startMs=200, durationMs=1500),
+            RenderTitleCardArg(text="未完待续", startMs=9_000, durationMs=1_000),
+        ),
+        width=1920,
+        height=1080,
+    )
+    assert "Style: Title" in ass
+    assert "PlayResX: 1920" in ass and "PlayResY: 1080" in ass
+    assert "Dialogue: 0,0:00:00.20,0:00:01.70,Title" in ass
+    assert "Dialogue: 0,0:00:09.00,0:00:10.00,Title" in ass
+    assert "雨夜咖啡店" in ass and "未完待续" in ass
+    assert "drawtext" not in ass

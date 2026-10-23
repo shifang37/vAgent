@@ -70,7 +70,7 @@
 | 新增费用 | **0.00 CNY**（只复用 M5 已下载镜头） |
 | 文本模型调用 / 真实 TTS | 0 / 0（`local-tts-v1`） |
 | 分集 | `episodeId=de84c2ed-ddec-44c9-9cc0-25110e753d6a`，7 场、18 镜头 |
-| 成片 | 89.1667 秒、20,604,852 字节、SHA-256 `db1ffcf2…f9eabc407`、1280×720、H.264+AAC、`mov_text` |
+| 成片 | 89.1667 秒、20,600,359 字节、SHA-256 `ad34ebb9…feb7a4b8`、1280×720、H.264+AAC、`mov_text` |
 | 转场/标题卡 | 2 个 1.0 秒转场（crossfade + fade）、2 张标题卡（「冰箱上的便条」「未完待续」） |
 | 字幕 | 19 条 cue，旁挂 SRT SHA-256 `c2928327…7776fc4e15`；首条 `粥在锅里`、末条 `嗯。` |
 | 配音 | 11 条 voice 轨（画外/母亲，`local-narrator`/`local-female`），不调用 CosyVoice |
@@ -85,14 +85,14 @@
 `scripts/wheel_smoke.py` **PASS**（`output/m6-e4-wheel-smoke.json`）：
 
 - 安装态运行 M6 3 用例：3/3 PASS、56 次受控提交、56 个交付、1 个成片版本、1 次重放、27 条字幕（45.0 秒）。
-- 安装态 M6 工作台：`episodeId=624b085f-5929-4dd8-89b8-2dfe5a228505`、`filmId=1887cb74-50bb-42ed-9e19-5daffa747bd8`、89.3 秒；CLI `vagent film renders`、HTTP `/api/renders`、`/api/episodes/{id}`、会话快照、旁挂 SRT 与成片 Range 与源状态一致；`app.js`、`episode-state.js`、`subtitle-state.js`、`render-state.js`、`styles.css` 均可服务。
+- 安装态 M6 工作台：`episodeId=a5ef65ed-1845-4c62-adf4-a1325b32f7dc`、`filmId=a34e8a92-f372-4827-ac0b-f72c2c64fd18`、89.3 秒；CLI `vagent film renders`、HTTP `/api/renders`、`/api/episodes/{id}`、会话快照、旁挂 SRT 与成片 Range 与源状态一致；`app.js`、`episode-state.js`、`subtitle-state.js`、`render-state.js`、`styles.css` 均可服务。
 - 既有 M1–M5 与 keys-only 段全部保持通过（含 7 个 M2、6 个 M3、5 个 M5 用例）。
 
 ### 3.5 完整回归与门禁
 
 ```text
 .\.venv\Scripts\python.exe -m pytest -q -p no:cacheprovider
-1341 passed, 3 skipped in 1254.43s (0:20:54)
+1342 passed, 3 skipped in 1080.30s (0:18:00)
 
 .\.venv\Scripts\python.exe -m ruff check --no-cache src/vagent tests scripts
 .\.venv\Scripts\python.exe -m ruff format --check --no-cache src/vagent tests scripts
@@ -102,7 +102,7 @@ node --test tests/test_job_state.mjs tests/test_storyboard_state.mjs tests/test_
 51 passed
 ```
 
-- E3 基线为 1335 passed / 3 skipped；本包新增/更新：`test_m6_evaluation.py` 4 项、时间线回归 2 项、前端 `test_episode_state.mjs` 3 项（含既有共 8 项）。
+- E3 基线为 1335 passed / 3 skipped；本包新增/更新：`test_m6_evaluation.py` 4 项、时间线与标题卡回归 3 项、前端 `test_episode_state.mjs` 3 项（含既有共 8 项）。
 - 3 项 skip 仍是既有的“当前 Windows 账户无符号链接权限”用例，未新增 skip。
 - Ruff check/format 全仓库通过（197 个文件）；前端六个状态文件 51 项 Node 测试通过。
 
@@ -128,7 +128,7 @@ node --test tests/test_job_state.mjs tests/test_storyboard_state.mjs tests/test_
 
 ## 6. CI 与提交
 
-- 最终代码提交：（待填）。
+- 最终代码提交：`d64264a`（2026-10-23）。
 - 四组 CI（`ubuntu/windows × Python 3.11/3.12`，`.github/workflows/ci.yml`「Agent checks」）在该提交上的运行与 check runs：（待填）。
 - 汇总证据保存为 `output/m6-e4-ci-<sha>-summary.json`；（待填）。
 
@@ -139,6 +139,7 @@ node --test tests/test_job_state.mjs tests/test_storyboard_state.mjs tests/test_
 3. **初始字幕面板没有整集播放器**：E3 只在分镜面板提供成片播放器；E4 在分集面板新增整集播放器、逐场渲染状态与旁挂 SRT，仍复用现有成片播放器语义。
 4. **`mov_text` 浏览器支持不一致**：E4 不假设浏览器能显示内嵌字幕，改用同一份旁挂 SRT 的客户端 overlay；原生轨置为 `hidden`，避免重复显示。sidecar 与内嵌轨均保留，供下载与兼容播放器使用。
 5. **安装态 M2 段仍用 64 KiB 测试预算（套件缺陷）**：E1 已把 pytest 夹具提高到 96 KiB（`tests/test_m2_evaluation.py`），但 wheel smoke 调用 `evaluate_m2.py` 时仍用默认 64 KiB；M6 的 13/13 工具规则使 `batch-delivered` 实测 **76,869 字节**，触发 `CONTEXT_LIMIT`。修复：wheel smoke 显式传 `--context-bytes 98304`，与 pytest 夹具一致；产品默认仍是 `VAGENT_CONTEXT_BYTES=65536`，未改动。前两轮失败保留在运行记录中，第三轮通过（见 §3.4）。
+6. **Linux 的 imageio-ffmpeg 没有 `drawtext`（产品缺陷）**：E4 首次在 Ubuntu CI 上运行 E3 渲染用例时，所有带标题卡的成片都报 `RENDER_ENCODE_FAILED`（`Filter not found`）。`imageio-ffmpeg==0.6.0` 的 Linux 静态构建带 libass 与 `subtitles`，但没有 libfreetype 的 `drawtext`；Windows 构建有。修复：标题卡改为同一包内字体的 ASS 事件，经 `subtitles=titles.ass:fontsdir=fonts` 烧录，`title-zh-v1` 文字、时间与居中语义不变；新增 ASS 标题卡单测，并在 Ubuntu 容器复跑 5 个渲染/API/整集用例（9 passed）。
 
 ## 8. 复现说明
 

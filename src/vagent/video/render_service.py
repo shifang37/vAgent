@@ -98,6 +98,7 @@ from vagent.video.subtitles import (
     find_track,
     render_ass,
     render_srt,
+    render_title_ass,
     track_by_id,
     track_version_sha256,
 )
@@ -1284,18 +1285,15 @@ class RenderService:
                 "".join(f"[{label}]" for label in groups) + f"concat=n={len(groups)}:v=1:a=0[{joined}]"
             )
         title_label = joined
-        for number, (start, end, card) in enumerate(validate_title_cards(plan.title_cards, plan.total)):
-            text_file = f"title-{number}.txt"
-            (work / text_file).write_text(card.text, encoding="utf-8", newline="\n")
-            target = f"title{number}"
-            size = 48 if plan.profile["width"] == 1280 else 72
-            filters.append(
-                f"[{title_label}]drawtext=fontfile=fonts/subtitle-font.ttf:textfile={text_file}:"
-                f"fontcolor=white:fontsize={size}:box=1:boxcolor=black@0.45:boxborderw=24:"
-                f"x=(w-text_w)/2:y=(h-text_h)/2:enable='between(t,{format_seconds(start)},{format_seconds(end)})'"
-                f"[{target}]"
+        if plan.title_cards:
+            title_ass = render_title_ass(
+                plan.title_cards,
+                width=plan.profile["width"],
+                height=plan.profile["height"],
             )
-            title_label = target
+            (work / "titles.ass").write_text(title_ass, encoding="utf-8", newline="\n")
+            filters.append(f"[{joined}]subtitles=titles.ass:fontsdir=fonts[titlecards]")
+            title_label = "titlecards"
         video_label = title_label
         if args.subtitle_mode in {"burn", "both"}:
             filters.append(f"[{video_label}]subtitles=sub.ass:fontsdir=fonts[burned]")

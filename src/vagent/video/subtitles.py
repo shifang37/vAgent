@@ -930,6 +930,47 @@ def render_ass(cues, *, width: int = 1280, height: int = 720) -> str:
     return header + "\n".join(lines) + ("\n" if lines else "")
 
 
+def render_title_ass(cards, *, width: int = 1280, height: int = 720) -> str:
+    """Title cards as ASS events, so the bundled font burns without ``drawtext``.
+
+    The Linux imageio-ffmpeg build has libass but no libfreetype ``drawtext`` filter.
+    Rendering the same cards through the available ASS filter keeps the export path
+    portable while preserving the frozen ``title-zh-v1`` text and timing.
+    """
+    font_size = round(height * 48 / 720)
+    header = (
+        "[Script Info]\n"
+        "ScriptType: v4.00+\n"
+        f"PlayResX: {width}\n"
+        f"PlayResY: {height}\n"
+        "WrapStyle: 2\n"
+        "ScaledBorderAndShadow: yes\n"
+        "Title: title-zh-v1\n\n"
+        "[V4+ Styles]\n"
+        "Format: Name, Fontname, Fontsize, PrimaryColour, SecondaryColour, OutlineColour, BackColour, "
+        "Bold, Italic, Underline, StrikeOut, ScaleX, ScaleY, Spacing, Angle, BorderStyle, Outline, "
+        "Shadow, Alignment, MarginL, MarginR, MarginV, Encoding\n"
+        f"Style: Title,{FONT_NAME},{font_size},&H00FFFFFF,&H000000FF,&H00101010,&H73000000,"
+        "0,0,0,0,100,100,0,0,3,0,0,5,0,0,0,1\n\n"
+        "[Events]\n"
+        "Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text\n"
+    )
+    lines = []
+    for card in cards:
+        start = card.start_ms * 1000
+        end = start + card.duration_ms * 1000
+        text = (
+            str(card.text)
+            .replace("\\", "\\\\")
+            .replace("{", "\\{")
+            .replace("}", "\\}")
+            .replace("\r\n", "\\N")
+            .replace("\n", "\\N")
+        )
+        lines.append(f"Dialogue: 0,{_ass_timestamp(start)},{_ass_timestamp(end)},Title,,0,0,0,,{text}")
+    return header + "\n".join(lines) + ("\n" if lines else "")
+
+
 # --- views ------------------------------------------------------------------
 
 

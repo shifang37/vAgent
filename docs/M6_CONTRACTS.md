@@ -41,6 +41,7 @@
 >
 > - **时间线连续性**：真实 AAC 镜头的成片时间线把段起点舍入到微秒，但时长保留精确有理数；字幕与渲染都改为按精确时长累加起点，E1 旁挂导出在微秒基比较时间线。schema、工具面与错误码不变。
 > - **浏览器字幕开关**：分集面板从受控 `sidecarUrl` 读取旁挂 SRT，在播放器上叠加/隐藏；内嵌 `mov_text` 保留并置为 `hidden`，避免支持 `mov_text` 的浏览器重复显示。开关是只读前端动作，不写 Store。
+> - **标题卡实现**：Linux 的 `imageio-ffmpeg==0.6.0` 静态构建带 libass 但没有 `drawtext`；E4 把标题卡改为同一包内字体的 ASS 事件，经 `subtitles` 滤镜烧录，`title-zh-v1` 的文字、时间与居中语义不变，Windows/Linux 共用一条路径。
 > - **真实样本**：E4 复用 M5 E4 已批准的 `fridge-notes` 18 个 Wan 镜头，新增视频 submit=0、真实 TTS=0；真实 CosyVoice 与新付费样本仍需单独授权。
 
 ## 1. 决策与版本
