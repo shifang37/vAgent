@@ -128,9 +128,9 @@ node --test tests/test_job_state.mjs tests/test_storyboard_state.mjs tests/test_
 
 ## 6. CI 与提交
 
-- 最终代码提交：`5c888b7`（2026-10-23）。
-- 四组 CI（`ubuntu/windows × Python 3.11/3.12`，`.github/workflows/ci.yml`「Agent checks」）在该提交上的运行与 check runs：（待填）。
-- 汇总证据保存为 `output/m6-e4-ci-<sha>-summary.json`；（待填）。
+- 最终代码提交：`2aac7a8`（2026-10-23）。
+- 四组 CI（`ubuntu/windows × Python 3.11/3.12`，`.github/workflows/ci.yml`「Agent checks」）在该提交上全部 **success**（[运行 39912715486](https://github.com/shifang37/vAgent/actions/runs/39912715486)）：job `120279152737`（ubuntu 3.12）、`120279152894`（ubuntu 3.11）、`120279152960`（windows 3.11）、`120279153082`（windows 3.12）。
+- 汇总证据保存为 `output/m6-e4-ci-2aac7a8-summary.json`；每个 job 的 URL 与起止时间在汇总文件中。
 
 ## 7. 失败与偏差记录
 
