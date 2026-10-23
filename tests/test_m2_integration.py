@@ -75,7 +75,7 @@ async def test_mock_multi_shot_storyboard_trajectory(store):
     )
     assert result["status"] == "completed", result["answer"]
     assert result["executionVersion"] == 3 and result["videoMode"] == "mock"
-    assert result["toolFeatures"]["video"]["toolsVersion"] == 13
+    assert result["toolFeatures"]["video"]["toolsVersion"] == 15
     assert result["toolCalls"] == 3 and model.calls == 4
     state = store.snapshot()
     assert len(state["storyboards"]) == 1 and not state["jobs"]
@@ -104,7 +104,7 @@ async def test_mock_application_exposes_storyboard_tools_end_to_end(tmp_path):
         await service.task
         record = service.run_record(service.active_run_id)
         assert record["status"] == "completed", record["answer"]
-        assert record["toolFeatures"]["video"]["toolsVersion"] == 13
+        assert record["toolFeatures"]["video"]["toolsVersion"] == 15
         names = {tool["name"] for tool in service.capabilities()["tools"]}
         assert {"storyboard_read", "storyboard_save"}.issubset(names)
         assert len(service.store.snapshot()["storyboards"]) == 1

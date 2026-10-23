@@ -109,6 +109,15 @@ class TitleCardInput(BaseModel):
     styleProfile: Literal["title-zh-v1"] = "title-zh-v1"
 
 
+class SeasonSaveInput(BaseModel):
+    model_config = ConfigDict(extra="forbid", strict=True)
+    clientRequestId: str = Field(pattern=r"^[a-zA-Z0-9_-]{1,64}$")
+    seasonId: Identifier | None = None
+    title: str = Field(min_length=1, max_length=120)
+    episodeIds: list[Identifier] = Field(min_length=1, max_length=4)
+    expectedRevision: int | None = Field(default=None, ge=0)
+
+
 class FilmRenderInput(BaseModel):
     model_config = ConfigDict(extra="forbid", strict=True)
     clientRequestId: str = Field(pattern=r"^[a-zA-Z0-9_-]{1,64}$")
@@ -182,7 +191,8 @@ def create_app(config, *, port=3210, model=None, policy=None):
     async def app_error(_request, error):
         status = (
             404
-            if error.code in {"NOT_FOUND", "JOB_NOT_FOUND", "MEDIA_NOT_FOUND", "ASSET_NOT_FOUND"}
+            if error.code
+            in {"NOT_FOUND", "JOB_NOT_FOUND", "MEDIA_NOT_FOUND", "ASSET_NOT_FOUND", "SEASON_NOT_FOUND"}
             else 410
             if error.code in {"JOB_MEDIA_UNAVAILABLE", "ASSET_UNAVAILABLE"}
             else 409
@@ -200,6 +210,8 @@ def create_app(config, *, port=3210, model=None, policy=None):
                 "JOB_DOWNLOAD_RETRY_UNAVAILABLE",
                 "OPERATION_CONFLICT",
                 "VERSION_CONFLICT",
+                "SEASON_VERSION_CONFLICT",
+                "SEASON_EPISODE_CONFLICT",
             }
             else 400
         )
@@ -340,6 +352,18 @@ def create_app(config, *, port=3210, model=None, policy=None):
     @app.get("/api/episodes/{episode_id}")
     async def episode_detail(episode_id: str, projectId: str):
         return await file_io(app.state.service.episode, projectId, episode_id)
+
+    @app.get("/api/seasons")
+    async def seasons(projectId: str):
+        return await file_io(app.state.service.seasons, projectId)
+
+    @app.get("/api/seasons/{season_id}")
+    async def season_detail(season_id: str, projectId: str):
+        return await file_io(app.state.service.season, projectId, season_id)
+
+    @app.post("/api/sessions/{session_id}/seasons/save", status_code=201)
+    async def seasons_save(session_id: str, body: SeasonSaveInput):
+        return await file_io(app.state.service.save_season, session_id, body.model_dump(exclude_none=True))
 
     @app.get("/api/storyboards/{storyboard_id}")
     async def storyboard_detail(storyboard_id: str, projectId: str):
@@ -554,6 +578,7 @@ def create_app(config, *, port=3210, model=None, policy=None):
                 "film-state.js",
                 "subtitle-state.js",
                 "episode-state.js",
+                "season-state.js",
                 "render-state.js",
                 "styles.css",
                 "mark.svg",

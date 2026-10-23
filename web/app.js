@@ -43,6 +43,16 @@ import {
 } from "./render-state.js";
 
 import {
+  seasonEpisodeRows,
+  seasonMeta,
+  seasonMetaText,
+  seasonMembers,
+  seasonPickerOptions,
+  seasonSaveBody,
+  seasonValidation,
+} from "./season-state.js";
+
+import {
   episodeBudget,
   episodeMeta,
   episodePlayback,
@@ -90,6 +100,8 @@ const paths = {
   image:
     '<rect x="3" y="4" width="18" height="16" rx="2"/><circle cx="8.5" cy="9" r="1.5"/><path d="m4 18 5-5 4 4 3-2.5 4 3.5"/>',
   chart: '<path d="M5 20V10m5 10V4m5 16v-7m5 7V8"/>',
+  season:
+    '<path d="M4 5h16v14H4zM4 9h16M9 9v10M13 12h4m-4 3h4"/>',
 };
 function icons(root = document) {
   root.querySelectorAll("[data-icon]").forEach((el) => {
@@ -161,6 +173,15 @@ let shotSelection = new Set(),
   shotBusy = new Set(),
   pendingBatch = null,
   sequence = { items: null, index: -1 };
+// M7 E1 season panel: a read view plus one local edit buffer. Saving only writes
+// season membership; it never registers a Job or calls a model.
+let seasonView = null,
+  seasonList = [],
+  seasonEditing = null,
+  seasonSelection = [],
+  seasonDraftTitle = "",
+  seasonBusy = false,
+  seasonError = null;
 const IMAGE_TYPES = ["image/png", "image/jpeg", "image/webp"];
 const MAX_IMAGE_BYTES = 20 * 1024 * 1024;
 const currentRun = () => snapshot?.run;
@@ -360,6 +381,13 @@ function resetStoryboardUi() {
   $("#storyboard-panel").hidden = true;
   $("#artifact-panel").hidden = true;
   $("#episode-panel").hidden = true;
+  $("#season-panel").hidden = true;
+  seasonView = null;
+  seasonList = [];
+  seasonEditing = null;
+  seasonSelection = [];
+  seasonDraftTitle = "";
+  seasonError = null;
 }
 async function selectSession(id) {
   const generation = ++viewGeneration;
@@ -554,6 +582,7 @@ function render() {
   renderObserve();
   renderStoryboardPanel();
   renderEpisodePanel();
+  renderSeasonPanel();
 }
 function metric(label, value) {
   return `<div class="metric"><small>${label}</small><strong>${value ?? "—"}</strong></div>`;
@@ -635,6 +664,7 @@ function openStoryboardPanel() {
   $("#artifact-panel").hidden = true;
   $("#observe-panel").hidden = true;
   $("#episode-panel").hidden = true;
+  $("#season-panel").hidden = true;
   $("#storyboard-panel").hidden = false;
   renderStoryboardPanel();
 }
@@ -643,6 +673,7 @@ function openInspector(mode) {
   panelMode = mode;
   $("#storyboard-panel").hidden = true;
   $("#episode-panel").hidden = true;
+  $("#season-panel").hidden = true;
   $("#observe-panel").hidden = true;
   $("#artifact-panel").hidden = false;
 }
@@ -652,6 +683,7 @@ function openEpisodePanel() {
   $("#artifact-panel").hidden = true;
   $("#observe-panel").hidden = true;
   $("#storyboard-panel").hidden = true;
+  $("#season-panel").hidden = true;
   $("#episode-panel").hidden = false;
   renderEpisodePanel();
 }
@@ -670,6 +702,7 @@ async function openSceneStoryboard(storyboardId) {
   $("#artifact-panel").hidden = true;
   $("#observe-panel").hidden = true;
   $("#episode-panel").hidden = true;
+  $("#season-panel").hidden = true;
   $("#storyboard-panel").hidden = false;
   filmLoadedKey = null;
   filmState = null;
@@ -908,6 +941,187 @@ function renderEpisodePanel() {
   icons(panel);
   bindEpisodeFilm(panel);
   restoreEpisodePlayback(panel, previousPlayback);
+}
+
+// M7 E1: the season panel edits only membership and title. Saving never touches
+// episodes, scenes, shots, budgets, Jobs or films, and every save appends a version.
+function seasonProjectEpisodes() {
+  return snapshot?.episode?.episodes || [];
+}
+
+function resetSeasonEdit(view) {
+  const meta = seasonMeta(view);
+  seasonEditing = meta ? { seasonId: meta.seasonId, revision: meta.revision } : null;
+  seasonSelection = meta ? [...meta.episodeIds] : [];
+  seasonDraftTitle = meta ? meta.title : "";
+  seasonError = null;
+}
+
+function openSeasonPanel() {
+  panelMode = "season";
+  $("#artifact-panel").hidden = true;
+  $("#observe-panel").hidden = true;
+  $("#storyboard-panel").hidden = true;
+  $("#episode-panel").hidden = true;
+  $("#season-panel").hidden = false;
+  seasonView = snapshot?.season || null;
+  seasonList = seasonView?.seasons || [];
+  resetSeasonEdit(seasonView);
+  renderSeasonPanel();
+}
+
+async function loadSeason(seasonId) {
+  if (!activeId || !seasonId) return;
+  seasonBusy = true;
+  seasonError = null;
+  renderSeasonPanel();
+  try {
+    seasonView = await api(
+      `/api/seasons/${encodeURIComponent(seasonId)}?projectId=${encodeURIComponent(activeId)}`,
+    );
+    seasonList = seasonView.seasons || [];
+    resetSeasonEdit(seasonView);
+  } catch (error) {
+    seasonError = { code: error.code, message: error.message };
+  } finally {
+    seasonBusy = false;
+    if (panelMode === "season") renderSeasonPanel();
+  }
+}
+
+function toggleSeasonEpisode(episodeId) {
+  const index = seasonSelection.indexOf(episodeId);
+  if (index >= 0) {
+    seasonSelection.splice(index, 1);
+    seasonError = null;
+  } else if (seasonSelection.length >= 4) {
+    seasonError = { code: "SEASON_LIMIT", message: "一季最多 4 集；先取消一集再加入。" };
+  } else {
+    seasonSelection.push(episodeId);
+    seasonError = null;
+  }
+  renderSeasonPanel();
+}
+
+function startNewSeason() {
+  seasonEditing = null;
+  seasonSelection = [];
+  seasonDraftTitle = "";
+  seasonError = null;
+  renderSeasonPanel();
+}
+
+async function saveSeason() {
+  if (!activeId || seasonBusy) return;
+  const title = $("#season-title")?.value ?? seasonDraftTitle;
+  const check = seasonValidation(title, seasonSelection);
+  if (!check.ok) {
+    seasonError = { code: "SEASON_INVALID", message: check.error };
+    renderSeasonPanel();
+    return;
+  }
+  seasonBusy = true;
+  seasonError = null;
+  renderSeasonPanel();
+  try {
+    const body = seasonSaveBody({
+      clientRequestId: crypto.randomUUID(),
+      title: check.title,
+      episodeIds: check.episodeIds,
+      seasonId: seasonEditing?.seasonId,
+      expectedRevision: seasonEditing?.revision,
+    });
+    const result = await post(
+      `/api/sessions/${encodeURIComponent(activeId)}/seasons/save`,
+      body,
+    );
+    await refreshSession(activeId);
+    seasonView = await api(
+      `/api/seasons/${encodeURIComponent(result.seasonId)}?projectId=${encodeURIComponent(activeId)}`,
+    );
+    seasonList = seasonView.seasons || [];
+    resetSeasonEdit(seasonView);
+    toast(result.replayed ? "季内容未变化，已复用当前版本" : `季已保存为 v${result.version}`);
+  } catch (error) {
+    seasonError = { code: error.code, message: error.message };
+  } finally {
+    seasonBusy = false;
+    if (panelMode === "season") renderSeasonPanel();
+  }
+}
+
+function renderSeasonPanel() {
+  const panel = $("#season-panel");
+  if (panelMode !== "season") {
+    panel.hidden = true;
+    return;
+  }
+  panel.hidden = false;
+  const meta = seasonMeta(seasonView);
+  const members = seasonMembers(seasonView);
+  const episodes = seasonProjectEpisodes();
+  const currentSeasonId = seasonEditing?.seasonId || null;
+  const { rows, missing } = seasonEpisodeRows(
+    episodes,
+    seasonList,
+    currentSeasonId,
+    seasonSelection,
+  );
+  const picker = seasonPickerOptions(seasonView);
+  const pickerHTML = `<select id="season-picker" aria-label="选择季">
+    <option value="">新建季</option>
+    ${picker
+      .map(
+        (option) =>
+          `<option value="${escapeHTML(option.value)}" ${option.value === currentSeasonId ? "selected" : ""}>${escapeHTML(option.label)}</option>`,
+      )
+      .join("")}
+  </select>`;
+  if (!episodes.length) {
+    panel.innerHTML = `${panelHeading("季", "close-season")}
+      <p class="empty">当前项目还没有分集。先用 episode_plan 与 episode_save 保存 1–4 集，再把它们按顺序组成一季。</p>`;
+    icons(panel);
+    return;
+  }
+  const memberText = members.length
+    ? members
+        .map((member) => `${member.order}. ${escapeHTML(member.title)}`)
+        .join(" → ")
+    : "尚未选择成员";
+  const rowsHTML = rows
+    .map(
+      (row) => `<label class="season-episode ${row.disabled ? "is-owned" : ""}">
+        <input type="checkbox" data-season-episode="${escapeHTML(row.episodeId)}"
+          ${row.selected ? "checked" : ""} ${row.disabled ? "disabled" : ""} />
+        <span class="season-order">${row.order || "·"}</span>
+        <span class="season-episode-body">
+          <strong>${escapeHTML(row.title)}</strong>
+          <small>${row.shotCount} 镜 · ${row.sceneCount} 场 · ${row.targetDurationSeconds} 秒</small>
+          ${row.ownerTitle ? `<small class="season-owner">属于另一季「${escapeHTML(row.ownerTitle)}」：先在原季移除</small>` : ""}
+        </span>
+      </label>`,
+    )
+    .join("");
+  panel.innerHTML = `${panelHeading("季", "close-season")}
+    <div class="season-toolbar">
+      ${pickerHTML}
+      <button class="secondary" data-action="season-new" ${seasonBusy ? "disabled" : ""}>新建季</button>
+      <button class="secondary" data-action="refresh-season" ${seasonBusy ? "disabled" : ""}>刷新</button>
+    </div>
+    <p class="meta">${escapeHTML(seasonMetaText(meta))}</p>
+    <label class="season-title-field">季标题
+      <input id="season-title" maxlength="120" value="${escapeHTML(seasonDraftTitle)}" ${seasonBusy ? "disabled" : ""} />
+    </label>
+    <p class="meta">成员顺序（点击顺序即季内顺序，最多 4 集）：${memberText}</p>
+    ${missing.length ? `<p class="meta season-warning">有 ${missing.length} 个已保存成员在当前项目中找不到，请重新选择。</p>` : ""}
+    <div class="season-episodes">${rowsHTML}</div>
+    ${seasonError ? `<p class="meta season-error">${escapeHTML(seasonError.code)} · ${escapeHTML(seasonError.message)}</p>` : ""}
+    <div class="season-actions">
+      <button class="primary" data-action="save-season" ${seasonBusy ? "disabled" : ""}>${seasonBusy ? "正在保存…" : "保存季"}</button>
+      ${seasonEditing ? `<button class="secondary" data-action="close-season">取消</button>` : ""}
+    </div>
+    <p class="meta">季只保存标题与有序成员关系；不改分集、场记、镜头、预算或成片，也不登记任务、不调用模型。保存同一内容会复用当前版本，修改会追加新版本。</p>`;
+  icons(panel);
 }
 
 function renderStoryboardPanel() {
@@ -1855,6 +2069,19 @@ $("#storyboard-panel").addEventListener("change", (event) => {
   else shotSelection.delete(shotId);
   renderStoryboardPanel();
 });
+$("#season-panel").addEventListener("change", (event) => {
+  if (event.target.id === "season-picker") {
+    const seasonId = event.target.value;
+    if (!seasonId) startNewSeason();
+    else loadSeason(seasonId);
+    return;
+  }
+  const episodeId = event.target.dataset?.seasonEpisode;
+  if (episodeId) toggleSeasonEpisode(episodeId);
+});
+$("#season-panel").addEventListener("input", (event) => {
+  if (event.target.id === "season-title") seasonDraftTitle = event.target.value;
+});
 $("#image-input").addEventListener("change", async (event) => {
   const file = event.target.files[0];
   event.target.value = "";
@@ -1968,6 +2195,20 @@ document.addEventListener("click", async (event) => {
       panelMode = null;
       $("#episode-panel").hidden = true;
     }
+    if (action === "close-season") {
+      panelMode = null;
+      $("#season-panel").hidden = true;
+    }
+    if (action === "season-new") startNewSeason();
+    if (action === "save-season") await saveSeason();
+    if (action === "refresh-season" && seasonEditing?.seasonId)
+      await loadSeason(seasonEditing.seasonId);
+    else if (action === "refresh-season") {
+      seasonView = snapshot?.season || null;
+      seasonList = seasonView?.seasons || [];
+      resetSeasonEdit(seasonView);
+      renderSeasonPanel();
+    }
     if (action === "close-observe") $("#observe-panel").hidden = true;
     if (action === "observe") {
       $("#artifact-panel").hidden = true;
@@ -1977,6 +2218,7 @@ document.addEventListener("click", async (event) => {
     }
     if (action === "storyboard") openStoryboardPanel();
     if (action === "episode") openEpisodePanel();
+    if (action === "season") openSeasonPanel();
     if (action === "open-scene-storyboard")
       await openSceneStoryboard(
         event.target.closest("[data-storyboard-id]")?.dataset.storyboardId,

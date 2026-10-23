@@ -32,6 +32,7 @@ CLIENT_PROMPTS = {
     "subtitle_save": "本地界面发起的字幕保存（不调用模型）。",
     "subtitle_export": "本地界面发起的字幕导出（不调用模型）。",
     "film_render": "本地界面发起的整片渲染（不调用模型）。",
+    "season_save": "本地界面发起的季成员保存（不调用模型）。",
 }
 CLIENT_GROUPS = (
     "shot_generate",
@@ -41,6 +42,7 @@ CLIENT_GROUPS = (
     "subtitle_save",
     "subtitle_export",
     "film_render",
+    "season_save",
 )
 
 
@@ -63,11 +65,25 @@ def client_features(service, mode: str) -> dict:
     }
 
 
-def client_context(service, *, session_id: str, client_request_id: str, group: str, require_mode_config=True):
-    """Create or reuse the Run that owns one explicit local action."""
+def client_context(
+    service,
+    *,
+    session_id: str,
+    client_request_id: str,
+    group: str,
+    require_mode_config=True,
+    metadata_only=False,
+):
+    """Create or reuse the Run that owns one explicit local action.
+
+    ``metadata_only`` is for actions that never touch a video provider (season
+    membership). Such a Run keeps video mode off and records no video tool
+    features, so it works in text-only projects and can never be mistaken for a
+    generation Run.
+    """
     if group not in CLIENT_GROUPS:
         raise AppError("INVALID_ARGUMENTS", "未知的本地动作。")
-    mode = service.generation_mode()
+    mode = "off" if metadata_only else service.generation_mode()
     if mode == "live" and require_mode_config:
         # The two-Key setup needs only the Key of the provider the user selected.
         service.check_live_configuration(service.config.video_provider)
@@ -78,7 +94,7 @@ def client_context(service, *, session_id: str, client_request_id: str, group: s
         if existing["sessionId"] != session_id or existing.get("videoMode") != mode:
             raise AppError("OPERATION_CONFLICT", "这个请求 ID 已用于其他项目或视频模式，请换一个再试。")
     else:
-        features = client_features(service, mode)
+        features = {} if metadata_only else client_features(service, mode)
         policy = RunPolicy()
 
         def create(draft):
@@ -313,10 +329,15 @@ async def assemble_film(
 
 
 def _result(service, data: dict, run_id: str, storyboard_id: str | None = None) -> dict:
+    try:
+        mode = service.generation_mode()
+    except AppError:
+        # A metadata-only local action (season membership) is allowed with video off.
+        mode = getattr(service.config, "video_mode", "off")
     result = {
         **data,
         "runId": run_id,
-        "mode": service.generation_mode(),
+        "mode": mode,
     }
     if storyboard_id is not None:
         raw = service.store.snapshot()["storyboards"].get(storyboard_id) or {}
@@ -381,6 +402,53 @@ def save_subtitles(
         raise AppError(result["error"]["code"], result["error"]["message"])
     data = result["data"]
     return _result(service, data, context.run_id, data.get("storyboardId"))
+
+
+def save_season(
+    service,
+    *,
+    session_id: str,
+    client_request_id: str,
+    title: str,
+    episode_ids,
+    season_id: str | None = None,
+    expected_revision: int | None = None,
+) -> dict:
+    """Save one season's ordered members as an explicit local action.
+
+    Seasons never register Jobs, so this is a pure metadata transaction: it does
+    not need a video mode, a provider Key or a model, and replaying one request ID
+    returns the recorded season version instead of appending another.
+    """
+    from vagent.video.seasons import save_season
+
+    args = {
+        "title": title,
+        "episodeIds": list(episode_ids),
+        **({"seasonId": season_id} if season_id is not None else {}),
+        **({"expectedRevision": expected_revision} if expected_revision is not None else {}),
+    }
+    replayed = _replay_or_conflict(service, session_id, client_request_id, "season_save", args)
+    if replayed is not None:
+        return replayed
+    context = client_context(
+        service,
+        session_id=session_id,
+        client_request_id=client_request_id,
+        group="season_save",
+        require_mode_config=False,
+        metadata_only=True,
+    )
+    result = service.store.operation(
+        _operation_key(context.run_id, "season_save"),
+        "season_save",
+        args,
+        lambda draft: save_season(args, draft, session_id),
+    )
+    if not result.get("ok"):
+        raise AppError(result["error"]["code"], result["error"]["message"])
+    data = result["data"]
+    return _result(service, data, context.run_id)
 
 
 async def film_render(

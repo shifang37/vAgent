@@ -1,4 +1,4 @@
-"""M6 E3: tools/rules 13/13, the frozen 11/11 surface and the render tools."""
+"""M6 E3 render tools; M7 E1 raised the published surface to 15/15 and froze 13/13."""
 
 from shot_support import mock_tools, shot
 from subtitle_support import plan, save_episode
@@ -17,8 +17,8 @@ def names(registry):
 
 
 def test_tool_versions_are_thirteen_and_eleven_is_frozen():
-    assert (VIDEO_TOOLS_VERSION, VIDEO_RULES_VERSION) == (13, 13)
-    assert (LIVE_VIDEO_TOOLS_VERSION, LIVE_VIDEO_RULES_VERSION) == (13, 13)
+    assert (VIDEO_TOOLS_VERSION, VIDEO_RULES_VERSION) == (15, 15)
+    assert (LIVE_VIDEO_TOOLS_VERSION, LIVE_VIDEO_RULES_VERSION) == (15, 15)
     assert video_tools.M6_TOOL_NAMES == ("subtitle_save", "audio_generate", "film_render", "render_read")
     assert video_tools.M6_E1_TOOL_NAMES == ("subtitle_save",)
     assert video_tools.M6_E2_TOOL_NAMES == ("audio_generate",)
@@ -28,7 +28,7 @@ def test_tool_versions_are_thirteen_and_eleven_is_frozen():
 def test_new_runs_publish_thirteen_and_the_frozen_eleven_hides_the_render_tools(store):
     registry, _service, _adapter, _context = mock_tools(store)
     features = registry.features["video"]
-    assert (features["toolsVersion"], features["rulesVersion"]) == (13, 13)
+    assert (features["toolsVersion"], features["rulesVersion"]) == (15, 15)
     assert features["tts"][0]["provider"] == "local"
     current = names(registry)
     assert {

@@ -106,7 +106,7 @@ def test_cli_film_render_and_renders(tmp_path):
     assert data["filmVersion"] == 1 and data["status"] == "succeeded"
     assert data["film"]["latest"]["render"]["subtitle"]["mode"] == "soft"
     state = json.loads((home / "state.json").read_bytes())
-    assert state["schemaVersion"] == 8
+    assert state["schemaVersion"] == 9
     assert len(state["films"]) == 1 and len(state["renders"]) == 1
     # A local render never registers a Job.
     assert len(state["jobs"]) == len(before["jobs"])

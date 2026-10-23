@@ -1,6 +1,6 @@
 # 后续规划：从“可拼接成片”到 AI 短剧流水线
 
-状态：**E0–E4 已完成（2026-10-22）**；M5 已随 **v0.4.0** 发布（[发布说明](./RELEASE_0.4.0.md)）。**M6 E0 契约已冻结（2026-10-22）**：[M6 契约](./M6_CONTRACTS.md)、[E0 验收](./M6_E0_ACCEPTANCE.md)；**M6 E1 字幕已交付（2026-10-22，schema 7、tools/rules 10/10、离线 submit=0）**：[E1 验收](./M6_E1_ACCEPTANCE.md)；**M6 E2 音频已交付（2026-10-22，tools/rules 11/11、TTS 真实请求=0、视频 submit=0）**：[E2 验收](./M6_E2_ACCEPTANCE.md)；**M6 E3 转场/片头尾/导出/整集已交付（2026-10-23，schema 8、tools/rules 13/13）**：[E3 验收](./M6_E3_ACCEPTANCE.md)；**M6 E4 整集成片验收已交付（2026-10-23，89.3 秒离线整集 + 89.1667 秒真实镜头复用、新增 submit=0）**：[E4 验收](./M6_E4_ACCEPTANCE.md)；**M7 E0 契约已冻结（2026-10-23，165 个契约模型哈希、schema 9 方向、13/13→18/18、13 个新错误码）**：[M7 契约](./M7_CONTRACTS.md)、[E0 验收](./M7_E0_ACCEPTANCE.md)。下一步是 **M7 E1 季与 schema 9**。基线：`master` `5cfd754`（M6 E4 已合入）；上一发布 `v0.3.0` 指向 `4c456f6`。当前能力：16:9 720P、Wan t2v/i2v/flf2v 真实样本、Kling/fal 受控接入、copy 优先 + 自动转码拼接、CLI/Web/headless，剧本/小说 → 分集分场分镜与逐场成片，以及字幕/配音/混音/转场/标题卡/整集渲染。**本规划不包含 9:16 竖屏**，竖屏单列为后续独立话题。
+状态：**E0–E4 已完成（2026-10-22）**；M5 已随 **v0.4.0** 发布（[发布说明](./RELEASE_0.4.0.md)）。**M6 E0 契约已冻结（2026-10-22）**：[M6 契约](./M6_CONTRACTS.md)、[E0 验收](./M6_E0_ACCEPTANCE.md)；**M6 E1 字幕已交付（2026-10-22，schema 7、tools/rules 10/10、离线 submit=0）**：[E1 验收](./M6_E1_ACCEPTANCE.md)；**M6 E2 音频已交付（2026-10-22，tools/rules 11/11、TTS 真实请求=0、视频 submit=0）**：[E2 验收](./M6_E2_ACCEPTANCE.md)；**M6 E3 转场/片头尾/导出/整集已交付（2026-10-23，schema 8、tools/rules 13/13）**：[E3 验收](./M6_E3_ACCEPTANCE.md)；**M6 E4 整集成片验收已交付（2026-10-23，89.3 秒离线整集 + 89.1667 秒真实镜头复用、新增 submit=0）**：[E4 验收](./M6_E4_ACCEPTANCE.md)；**M7 E0 契约已冻结（2026-10-23，165 个契约模型哈希、schema 9 方向、13/13→18/18、13 个新错误码）**：[M7 契约](./M7_CONTRACTS.md)、[E0 验收](./M7_E0_ACCEPTANCE.md)；**M7 E1 季与 schema 9 已交付（2026-10-23，schema 9、tools/rules 15/15、离线 submit=0、165 个既有模型哈希不变）**：[E1 验收](./M7_E1_ACCEPTANCE.md)。下一步是 **M7 E2 批量队列**。基线：`master` `5cfd754`（M6 E4 已合入）；上一发布 `v0.3.0` 指向 `4c456f6`。当前能力：16:9 720P、Wan t2v/i2v/flf2v 真实样本、Kling/fal 受控接入、copy 优先 + 自动转码拼接、CLI/Web/headless，剧本/小说 → 分集分场分镜与逐场成片，以及字幕/配音/混音/转场/标题卡/整集渲染。**本规划不包含 9:16 竖屏**，竖屏单列为后续独立话题。
 
 > **E0 已完成（2026-10-22）**：契约见 [M5_CONTRACTS](./M5_CONTRACTS.md)（schema v6 外壳、Episode/Scene/Character/Style、`text-split-zh-v1`、镜头/时长/预算、错误码），证据见 [M5 E0 验收](./M5_E0_ACCEPTANCE.md)。E0 的 `schemaVersion 6` 与本文第 4 节 M6 的“成片版本 v6”不是同一个编号空间：M6 若需新的存储形状必须用 v7。
 >
@@ -110,7 +110,7 @@
 | 包 | 交付 | 验收 |
 |---|---|---|
 | E0 契约冻结 | **已交付（2026-10-23）**：Season/Batch/Timeline 数据对象、schema 9 方向、批量队列与时间线算法、工具面 13/13→18/18、13 个新错误码、165 个契约模型哈希与本地裁剪探针；见 [M7 契约](./M7_CONTRACTS.md) 与 [E0 验收](./M7_E0_ACCEPTANCE.md) | 旧 v1–v8 可读的设计成立；无产品代码变更；视频 submit=0、模型调用=0、TTS 请求=0 |
-| E1 季与 schema 9 | schema v9（`seasons`/`batches`/`timelines` 三个空集合）、`Season`/`SeasonVersion`、`season_save`/`season_read`、v8→v9 逐字节备份、CLI/Web 季面板；tools/rules **15/15**（冻结 13/13） | v1–v8 机械迁移与字节备份；季成员唯一、顺序只增不改；无 Job、无模型调用 |
+| E1 季与 schema 9 | **已交付（2026-10-23）**：schema v9（`seasons`/`batches`/`timelines` 三个空集合）、v8→v9 逐字节备份、`Season`/`SeasonVersion` 与提交校验、`season_save`/`season_read`、CLI/Web 季面板、`season-state.js`；tools/rules **15/15**（冻结 13/13）；见 [E1 验收](./M7_E1_ACCEPTANCE.md) | v1–v8 机械迁移与字节备份；季成员唯一、顺序只增不改；无 Job、无模型调用、submit=0 |
 | E2 批量队列 | `Batch`/`BatchEpisode`、`season_generate`（1–3 集、逐集原子、失败隔离、显式恢复、60 Job/180 CNY）、Store 崩溃恢复、Web 批量确认与恢复；tools/rules **16/16**（冻结 15/15） | 3 集批次中单集失败不阻塞其他集；单集交付失败可由 `shot_redo` 修复且不影响其他集；恢复不重复提交；不确定提交不重投；受控/离线 submit=0 |
 | E3 时间线工作台 | `Timeline`/`TimelineVersion`、`timeline_save`/`timeline_read`、`film_render` 的 `timeline` scope、`ffmpeg-render-timeline-v1`、字幕/音频重映射、客户端 BGM/SFX 导入、Web 裁剪/排序/转场/预览/导出；tools/rules **18/18**（冻结 16/16） | 重排/裁剪/转场后成片可播放、时长正确；字幕不漂移；旧版本保留；同指纹幂等；失败不提交 |
 | E4 验收 | `scripts/evaluate_m7.py` 默认离线（3 集批次/失败隔离/恢复、时间线 v1→v2 重拼）、浏览器工作台、安装态与 CI；只复用已有本地媒体 | 3 集批量中单集失败不阻塞；恢复不重复提交；时间线编辑后重拼只增不改；浏览器可编辑/预览/导出；新增付费样本需单独授权 |
@@ -160,7 +160,7 @@
 
 ## 8. 新对话启动方式
 
-M5 已全部完成（E0–E4）并随 **v0.4.0** 发布；M6 E0–E4 已交付（2026-10-23，schema 8、tools/rules 13/13）。**M7 E0 契约已冻结（2026-10-23）**：[M7 契约](./M7_CONTRACTS.md)、[E0 验收](./M7_E0_ACCEPTANCE.md) 与 `docs/M7_E0_BASELINE.json`。下一步是 **M7 E1 季与 schema 9**。启动 E1 前先读 [M7 契约](./M7_CONTRACTS.md) §1–§3/§9、[E0 验收](./M7_E0_ACCEPTANCE.md)、`docs/M7_E0_BASELINE.json`，以及 [M6 契约](./M6_CONTRACTS.md) §5/§10 与 [E4 验收](./M6_E4_ACCEPTANCE.md)：
+M5 已全部完成（E0–E4）并随 **v0.4.0** 发布；M6 E0–E4 已交付（2026-10-23，schema 8、tools/rules 13/13）；**M7 E1 季与 schema 9 已交付（2026-10-23，schema 9、tools/rules 15/15、离线 submit=0）**：[M7 契约](./M7_CONTRACTS.md)、[E1 验收](./M7_E1_ACCEPTANCE.md) 与 `docs/M7_E0_BASELINE.json`。下一步是 **M7 E2 批量队列**。启动 E2 前先读 [M7 契约](./M7_CONTRACTS.md) §1–§3/§9、[E1 验收](./M7_E1_ACCEPTANCE.md)、`docs/M7_E0_BASELINE.json`，以及 [M6 契约](./M6_CONTRACTS.md) §5/§10 与 [E4 验收](./M6_E4_ACCEPTANCE.md)：
 
 > 基于 `master`（M6 E4 交付后；schema 8、tools/rules 13/13、冻结 11/11…1/1），按 `docs/M7_CONTRACTS.md` 执行 M7：季/多集、批量队列、失败重试与时间线工作台。不要做 9:16 竖屏；真实付费样本单独授权。
 

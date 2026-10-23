@@ -33,6 +33,7 @@ from vagent.video.providers.fal import FalAdapter
 from vagent.video.providers.kling import KlingAdapter
 from vagent.video.providers.mock import MockVideoAdapter
 from vagent.video.providers.wan import WanAdapter
+from vagent.video.seasons import read_season
 from vagent.video.storyboards import find_shot, storyboard_in_state
 from vagent.video.tools import register_video_tools
 from vagent.video.usage import summarize_records
@@ -417,6 +418,32 @@ def local_episode_read(state, args, films=None) -> dict:
             include_digests=False,
         )
     return view
+
+
+def local_season_read(state, args) -> dict:
+    """Read one season view without a model, Worker or provider call."""
+    assert_id(args.project)
+    if args.season_id:
+        assert_id(args.season_id)
+    return read_season({"seasonId": args.season_id}, state, args.project)
+
+
+def local_season_save(config, store, args) -> int:
+    """Save one season's ordered members as an explicit local action."""
+    assert_id(args.project)
+    store.ensure_session(args.project)
+    service = JobService(store, [MockVideoAdapter(store)], config=config)
+    result = clients.save_season(
+        service,
+        session_id=args.project,
+        client_request_id=args.request_id or str(uuid4()),
+        title=args.title,
+        episode_ids=args.episodes,
+        season_id=args.season_id,
+        expected_revision=args.expected_revision,
+    )
+    print_json(result)
+    return 0
 
 
 def local_episode_plan(args) -> dict:
@@ -999,6 +1026,29 @@ def parser() -> argparse.ArgumentParser:
     episode_generate.add_argument("--episode", dest="episode_id", required=True)
     episode_generate.add_argument("--confirm", action="store_true", help="显式确认整批镜头与集级预算")
     episode_generate.add_argument("--request-id", dest="request_id", help="同一请求 ID 重放原结果")
+    season = commands.add_parser("season", help="季：保存有序分集成员、查看季与成员摘要；不登记任务")
+    season_actions = season.add_subparsers(dest="action", required=True)
+    season_show = season_actions.add_parser("show", help="读取季、成员集摘要与全部季；只读")
+    season_show.add_argument("-s", "--project", default="default")
+    season_show.add_argument("--season", dest="season_id", help="指定季；省略时读取本项目最新创建的季")
+    season_save_cli = season_actions.add_parser("save", help="保存季标题与 1–4 个有序分集 ID；不登记任务")
+    season_save_cli.add_argument("-s", "--project", default="default")
+    season_save_cli.add_argument("--season", dest="season_id", help="修改已有季；省略时新建")
+    season_save_cli.add_argument("--title", required=True, help="季标题")
+    season_save_cli.add_argument(
+        "--episode",
+        dest="episodes",
+        action="append",
+        required=True,
+        help="有序分集 ID，可重复 1–4 次；顺序即季内顺序",
+    )
+    season_save_cli.add_argument(
+        "--expected-revision",
+        dest="expected_revision",
+        type=int,
+        help="修改时必须提供 season show 返回的 revision",
+    )
+    season_save_cli.add_argument("--request-id", dest="request_id", help="同一请求 ID 重放原结果")
     subtitle = commands.add_parser("subtitle", help="字幕：确定性对齐、保存修正与本地软/烧录导出")
     subtitle_actions = subtitle.add_subparsers(dest="action", required=True)
     subtitle_show = subtitle_actions.add_parser("show", help="读取当前字幕轨、版本与逐条 cue")
@@ -1142,6 +1192,12 @@ def main() -> None:
                     raise SystemExit(local_episode_save(config, store, args))
                 else:
                     raise SystemExit(asyncio.run(local_episode_generate(config, store, args)))
+        elif args.command == "season":
+            with FileStore.open(config.home) as store:
+                if args.action == "show":
+                    print_json(local_season_read(store.snapshot(), args))
+                else:
+                    raise SystemExit(local_season_save(config, store, args))
         elif args.command == "usage" and args.project is not None:
             with FileStore.open(config.home) as store:
                 print_json(local_usage(store.snapshot(), args.project))

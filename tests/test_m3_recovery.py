@@ -34,7 +34,7 @@ def live_registry(store):
 def test_the_current_live_toolset_is_ten_ten_and_keeps_every_frozen_view(store):
     tools = live_registry(store)
     features = tools.features["video"]
-    assert (features["toolsVersion"], features["rulesVersion"]) == (13, 13)
+    assert (features["toolsVersion"], features["rulesVersion"]) == (15, 15)
     assert {cap["provider"] for cap in features["capabilities"]} == {"wan"}
     for version, names in ((5, True), (4, False)):
         frozen = tools.for_tools_version(version)
@@ -84,7 +84,7 @@ async def test_a_five_five_run_restores_with_its_frozen_features_under_ten_ten(s
         resumed_model = ScriptedModel(lambda *_: AIMessage(content="按原 5/5 工具集继续完成"))
         resumed_model.name = "e2-restore-fixture"
         current = AgentRunner(store=reopened, model=resumed_model, tools=mock_registry(reopened))
-        assert current.tools.features["video"]["toolsVersion"] == 13
+        assert current.tools.features["video"]["toolsVersion"] == 15
         restored = current.for_record(reopened.snapshot()["runs"][first["id"]])
         assert restored.tools.features["video"]["toolsVersion"] == 5
         final = await current.resume(first["id"])
@@ -94,4 +94,4 @@ async def test_a_five_five_run_restores_with_its_frozen_features_under_ten_ten(s
         fresh_model = ScriptedModel(lambda *_: AIMessage(content="新 Run 使用 9/9"))
         fresh_model.name = "e2-restore-fixture"
         fresh = AgentRunner(store=reopened, model=fresh_model, tools=mock_registry(reopened))
-        assert fresh.tools.features["video"]["toolsVersion"] == 13
+        assert fresh.tools.features["video"]["toolsVersion"] == 15

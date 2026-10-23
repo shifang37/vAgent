@@ -68,8 +68,8 @@ def episode_args(plan, cast, *, title="雨夜咖啡店"):
 
 
 def test_tool_versions_are_ten_and_nine_is_frozen():
-    assert (VIDEO_TOOLS_VERSION, VIDEO_RULES_VERSION) == (13, 13)
-    assert (LIVE_VIDEO_TOOLS_VERSION, LIVE_VIDEO_RULES_VERSION) == (13, 13)
+    assert (VIDEO_TOOLS_VERSION, VIDEO_RULES_VERSION) == (15, 15)
+    assert (LIVE_VIDEO_TOOLS_VERSION, LIVE_VIDEO_RULES_VERSION) == (15, 15)
     assert "episode_plan" in video_tools.M5_TOOL_NAMES
     assert "consistency_review" in video_tools.M5_E2_TOOL_NAMES
     assert "episode_generate" in video_tools.M5_E3_TOOL_NAMES
@@ -79,7 +79,7 @@ def test_tool_versions_are_ten_and_nine_is_frozen():
 def test_new_runs_publish_ten_and_old_snapshots_restore(store):
     registry, service, _adapter, _context = mock_tools(store, clock=None)
     features = registry.features["video"]
-    assert (features["toolsVersion"], features["rulesVersion"]) == (13, 13)
+    assert (features["toolsVersion"], features["rulesVersion"]) == (15, 15)
     # Frozen variants predate the E2 TTS capability key; restore their exact shape.
     frozen_features = {key: value for key, value in features.items() if key != "tts"}
     names = {spec["function"]["name"] for spec in registry.specs()}

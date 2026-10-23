@@ -32,6 +32,7 @@ $env:VAGENT_HOME = Join-Path $PWD '.vagent/web'
 - 成片区（分镜面板顶部，M3 E1）：显示当前成片版本、成片播放器（支持拖动）、历史版本列表（逐版本下载）与「拼接成片 / 重新拼接」按钮。拼接只使用当前分镜 revision 与已交付镜头，请求带 `clientRequestId`（同一 ID 重放原结果）；成功后成片追加新版本，旧版本与文件保留，镜头重做后不会自动重拼。错误按 `FILM_INPUT_MISSING`/`FILM_INPUT_NOT_READY`/`FILM_INPUT_INCOMPATIBLE`/`FILM_MEDIA_INVALID`/`VERSION_CONFLICT` 等给出可操作说明。
 - 整片渲染区（成片区，M6 E3）：显示最新渲染任务状态、逐场状态/时长/失败阶段与旁挂 SRT；「整片渲染」按当前分镜与字幕轨发起 `film_render`（720P、soft/burn/both，服务端默认无转场/标题卡），成功后刷新成片与进度。请求带 `clientRequestId`，同指纹重放原成片；错误按 `TRANSITION_INVALID`/`TITLE_CARD_LIMIT`/`RENDER_*`/`LOUDNESS_OUT_OF_RANGE` 给出说明。
 - 字幕区（分镜面板成片下方，M6 E1）：显示当前字幕版本、cue 数、冻结时间线来源（成片/分镜）与逐版本 SRT/ASS 下载；「生成字幕 / 按当前台词重新生成」调用 `subtitle_save`（省略 cues，服务端确定性对齐），「导出软字幕 / 导出烧录字幕」把某一确定字幕版本追加为新的成片版本并刷新播放器。请求都带 `clientRequestId`，同一 ID 重放原结果；错误按 `SUBTITLE_CUE_CONFLICT`/`SUBTITLE_OVERFLOW`/`SUBTITLE_TRACK_MISSING`/`RENDER_TIMELINE_MISMATCH`/`FONT_MISSING`/`RENDER_*` 给出可操作说明。人工逐条修正走 `vagent subtitle save --cues`。
+- 季面板（左栏「季」，M7 E1）：列出本项目的季并显示当前版本/revision/成员数；选择季按需读取详情，新建季只需标题与 1–4 个有序分集（勾选顺序即季内顺序），属于其他季当前版本的分集禁用并提示先在原季移除。保存走 `/api/sessions/{id}/seasons/save`，相同内容复用版本、修改追加新版本；面板只读写季元数据，不登记任务、不调用模型，视频模式 off 也可用。
 - 批量生成确认对话框：先请求只读估算，逐镜头列出模式/时长/估算与合计，并显示本 Run 已用与剩余额度；确认后整批登记，超出上限时服务端整批拒绝。
 - 序列连播：客户端按顺序播放各镜头本地 MP4（不做服务端拼接），可暂停、下一个或停止；尚无本地媒体的镜头在面板上明确标注并被跳过。
 - 用量面板（左栏「用量统计」）：按项目聚合任务计数与状态、登记估算与账单状态（未取得账单保持未知）、分镜与镜头版本数、素材数、模型 Token 覆盖率与按日记录；只读本地数据，不做外部调用。
@@ -76,6 +77,8 @@ live Job 视图包含 `lastProviderStatus`、`queryPauseReason`、冻结费用�
 | `GET /api/subtitles/{trackId}/{version}/srt|ass` | 该不可变字幕版本的确定性 SRT/ASS 附件；版本不存在 400 `SUBTITLE_TRACK_MISSING` |
 | `POST /api/sessions/{id}/films/render` | CSRF + JSON `{clientRequestId, scope, storyboardId|episodeId, trackId?, profile?, subtitleMode?, transitions?, titleCards?, expectedRevision?}`，202 返回成片与渲染任务视图；本地 FFmpeg、不登记 Job；同指纹幂等 |
 | `GET /api/renders?projectId=...&renderId|storyboardId|episodeId|filmId=...` | 只读渲染任务/成片进度、逐场状态、失败阶段与测量 |
+| `GET /api/seasons?projectId=`、`GET /api/seasons/{id}?projectId=` | 季摘要列表 / 完整视图（当前版本、`revision`、有序 `episodeIds`、成员集摘要；E1 `batch` 恒为 null）；跨项目 `SEASON_NOT_FOUND` 404 |
+| `POST /api/sessions/{id}/seasons/save` | CSRF + JSON `{clientRequestId, title, episodeIds[], seasonId?, expectedRevision?}`，201 返回季版本；相同内容 `replayed=true`，修改必须匹配 `revision`（409），未知字段/超 4 集 422；不登记 Job、不调用模型 |
 | `GET /api/films/{filmId}/versions/{version}/subtitles.srt|ass` | 渲染版本按转场夹取后的旁挂字幕；E1 无转场版本仍可从 `/api/subtitles/...` 读取 |
 
 CLI/Web 的显式重做与批量登记各自创建一条“客户端 Run”（`model="local-client"`，不更新会话的 latest Run，也不占用对话 Run 的额度），因此对话 Run 的恢复路径不受影响；同一 `clientRequestId` 重放原结果，不会重复登记。素材只经本地受信入口写入，读取接口不返回本地路径或私有 URL，工具 `asset_read` 同样只返回元数据。
@@ -84,13 +87,13 @@ CLI/Web 的显式重做与批量登记各自创建一条“客户端 Run”（`m
 
 SSE 首先发送 `snapshot`，包含持久状态和可选的内存 `draft`；正文通过 `assistant.delta` 推送，携带 Run ID、模型步、序号和文字。客户端拒绝旧步和重复序号，发现缺口时重新连接获取快照。每个订阅队列最多 64 项，慢客户端溢出时回退到当前快照；15 秒心跳，不承诺永久事件重放。
 
-快照还包含当前项目的 `jobs` 和原 Run 的 `wait` 摘要。独立 `job.updated` 携带 Job 自己的 sessionId/runId 与有界视图；客户端按 jobId + revision 丢弃重复或旧版本，即使另一条 Run 已开始也不会把旧 Job 事件写入新 Run。`run.waiting`、`run.resumed`、`run.resume_blocked`、`run.completed` 在 SSE 交付时附带当前会话快照；未知事件退回快照，不混入文本增量。HTTP 恢复查询/下载响应晚于新 SSE 时也不能回退 Job 状态；更新快照或任务卡时复用同一视频节点，保留播放进度。
+快照还包含当前项目的 `jobs`、`season` 与 `episode` 投影，以及原 Run 的 `wait` 摘要。独立 `job.updated` 携带 Job 自己的 sessionId/runId 与有界视图；客户端按 jobId + revision 丢弃重复或旧版本，即使另一条 Run 已开始也不会把旧 Job 事件写入新 Run。`run.waiting`、`run.resumed`、`run.resume_blocked`、`run.completed` 在 SSE 交付时附带当前会话快照；未知事件退回快照，不混入文本增量。HTTP 恢复查询/下载响应晚于新 SSE 时也不能回退 Job 状态；更新快照或任务卡时复用同一视频节点，保留播放进度。
 
 Token 草稿不写入状态文件或事件日志。模型响应通过完成标记、完整 JSON 和质量检查后，`model.completed` 触发正式消息快照；中断、取消或截断丢弃草稿。工具参数只在整步响应完成后执行，不执行半截 JSON。流式 usage 和缓存字段按完整调用统计，不逐块累加累计值；缺失保持未知。
 
 ## 本地访问边界
 
-仅监听 127.0.0.1，Host 限定 localhost/127.0.0.1 与指定端口；Origin 必须精确同源，拒绝 cross-site/same-site Fetch Metadata。写请求需要 CSRF Token；JSON 请求体最多 128 KiB，素材上传是 multipart 且正文最多 20 MB + 64 KiB。静态文件仅提供 `index.html`、`app.js`、`job-state.js`、`storyboard-state.js`、`film-state.js`、`episode-state.js`、`subtitle-state.js`、`render-state.js`、`styles.css`、`mark.svg`，不提供 `.env` 或数据目录。Job 提示词、结果和来源标题均作为转义后的文本显示。
+仅监听 127.0.0.1，Host 限定 localhost/127.0.0.1 与指定端口；Origin 必须精确同源，拒绝 cross-site/same-site Fetch Metadata。写请求需要 CSRF Token；JSON 请求体最多 128 KiB，素材上传是 multipart 且正文最多 20 MB + 64 KiB。静态文件仅提供 `index.html`、`app.js`、`job-state.js`、`storyboard-state.js`、`film-state.js`、`episode-state.js`、`subtitle-state.js`、`season-state.js`、`render-state.js`、`styles.css`、`mark.svg`，不提供 `.env` 或数据目录。Job 提示词、结果和来源标题均作为转义后的文本显示。
 
 DeepSeek 与视频 Key 分开配置，来自数据目录 `config.yml`、服务端环境或本地 `.env`，读取接口只返回是否已配置。密码框提交后清空，关闭设置时也清空，不写入 localStorage/sessionStorage。环境和启动配置优先且不可被页面覆盖；文本与视频配置保存后立即生效、无需重启——视频配置用于新登记任务，在途与历史任务按各自冻结配置恢复。运行或验证期间拒绝配置修改，验证期间拒绝新执行。受信任的本机进程仍可调用接口；本服务不是多用户鉴权系统，不支持局域网公开部署。
 

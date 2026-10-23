@@ -7,7 +7,7 @@ from pathlib import Path
 import pytest
 
 from vagent.errors import AppError
-from vagent.storage import DatabaseV5, DatabaseV8, FileStore
+from vagent.storage import DatabaseV5, DatabaseV9, FileStore
 from vagent.video.contracts import canonical_fingerprint
 from vagent.video.episodes import (
     EPISODE_COST_CAP,
@@ -26,7 +26,15 @@ FIXTURES = Path(__file__).parent / "fixtures" / "m5"
 MANIFEST = json.loads((FIXTURES / "manifest.json").read_bytes())
 SNAPSHOTS = MANIFEST["snapshots"]
 V6_ADDED = {"episodes": {}, "scenes": {}, "characters": {}, "styles": {}}
-V8_ADDED = {**V6_ADDED, "audio": {}, "subtitleTracks": {}, "renders": {}}
+V9_ADDED = {
+    **V6_ADDED,
+    "audio": {},
+    "subtitleTracks": {},
+    "renders": {},
+    "seasons": {},
+    "batches": {},
+    "timelines": {},
+}
 
 
 def load(entry):
@@ -37,8 +45,8 @@ def v6_projection(state):
     return {**state, "schemaVersion": 6, **V6_ADDED}
 
 
-def v8_projection(state):
-    return {**state, "schemaVersion": 8, **V8_ADDED}
+def v9_projection(state):
+    return {**state, "schemaVersion": 9, **V9_ADDED}
 
 
 @pytest.mark.parametrize("entry", SNAPSHOTS, ids=lambda entry: entry["file"])
@@ -108,7 +116,7 @@ def test_v5_baseline_integrity_and_frozen_identities(entry):
 
 
 @pytest.mark.parametrize("entry", SNAPSHOTS, ids=lambda entry: entry["file"])
-def test_v5_baseline_migrates_to_the_v7_envelope(tmp_path, entry):
+def test_v5_baseline_migrates_to_the_v9_envelope(tmp_path, entry):
     raw = (FIXTURES / entry["file"]).read_bytes()
     original = json.loads(raw)
     (tmp_path / "state.json").write_bytes(raw)
@@ -120,19 +128,19 @@ def test_v5_baseline_migrates_to_the_v7_envelope(tmp_path, entry):
         (tmp_path / name).write_bytes(content)
     with FileStore.open(tmp_path) as store:
         migrated = store.snapshot()
-    expected = v8_projection(original)
+    expected = v9_projection(original)
     assert migrated == expected
     # The E0-frozen v5->v6 projection is still reproduced bit-for-bit by the same
     # migration; only the mechanical v7 collections follow it.
     projection = v6_projection(original)
     assert canonical_fingerprint(projection) == entry["expectedV6CanonicalSha256"]
-    for name, added in V8_ADDED.items():
+    for name, added in V9_ADDED.items():
         assert migrated[name] == added
     # Every historical domain value is untouched, only the envelope grew.
     for collection, value in original.items():
         if collection != "schemaVersion":
             assert migrated[collection] == value
-    DatabaseV8.model_validate(migrated)
+    DatabaseV9.model_validate(migrated)
     backups = list(tmp_path.glob("state-v5-*.json"))
     assert len(backups) == 1 and backups[0].read_bytes() == raw
     for name, content in sentinels.items():

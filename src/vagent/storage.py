@@ -23,6 +23,7 @@ from vagent.video.contracts import Job, MediaAsset, StoredJob
 from vagent.video.episodes import Character, Episode, Scene, Style
 from vagent.video.films import Film, FilmMedia
 from vagent.video.renders import RenderTask
+from vagent.video.seasons import Season, validate_season_changes
 from vagent.video.storyboards import Asset, Storyboard
 from vagent.video.subtitles import SubtitleTrack, validate_subtitle_changes
 from vagent.waiting import WAIT_EXECUTION_VERSIONS, StoredWait, WaitBinding, parse_wait
@@ -259,10 +260,24 @@ class DatabaseV8(DatabaseV7):
     renders: dict[str, RenderTask]
 
 
+class DatabaseV9(DatabaseV8):
+    """Schema 9 adds the M7 season/batch/timeline collections.
+
+    E1 implements seasons only; ``batches`` and ``timelines`` stay empty mappings
+    until E2/E3 add their own records and Store validators. They are typed as JSON
+    objects here so the v9 envelope never has to change shape again.
+    """
+
+    schema_version: Literal[9]
+    seasons: dict[str, Season]
+    batches: dict[str, dict]
+    timelines: dict[str, dict]
+
+
 def migrated_state(state: dict) -> dict:
     """Mechanical envelope upgrade; never re-encode historical domain objects."""
     version = state["schemaVersion"]
-    if type(version) is not int or version not in {1, 2, 3, 4, 5, 6, 7, 8}:
+    if type(version) is not int or version not in {1, 2, 3, 4, 5, 6, 7, 8, 9}:
         raise ValueError("Unsupported schema version")
     upgraded = copy.deepcopy(state)
     if version == 1:
@@ -279,6 +294,8 @@ def migrated_state(state: dict) -> dict:
         upgraded.update(schemaVersion=7, audio={}, subtitleTracks={})
     if version < 8:
         upgraded.update(schemaVersion=8, renders={})
+    if version < 9:
+        upgraded.update(schemaVersion=9, seasons={}, batches={}, timelines={})
     return upgraded
 
 
@@ -307,7 +324,7 @@ class FileStore:
                 raw = (home / "state.json").read_bytes()
             except FileNotFoundError:
                 state = {
-                    "schemaVersion": 8,
+                    "schemaVersion": 9,
                     "projects": {},
                     "sessions": {},
                     "artifacts": {},
@@ -326,12 +343,15 @@ class FileStore:
                     "audio": {},
                     "subtitleTracks": {},
                     "renders": {},
+                    "seasons": {},
+                    "batches": {},
+                    "timelines": {},
                 }
             else:
                 try:
                     state = json.loads(raw)
                     version = state["schemaVersion"]
-                    if type(version) is not int or version not in {1, 2, 3, 4, 5, 6, 7, 8}:
+                    if type(version) is not int or version not in {1, 2, 3, 4, 5, 6, 7, 8, 9}:
                         raise ValueError("Unsupported schema version")
                     {
                         1: DatabaseV1,
@@ -342,6 +362,7 @@ class FileStore:
                         6: Database,
                         7: DatabaseV7,
                         8: DatabaseV8,
+                        9: DatabaseV9,
                     }[version].model_validate(state)
                     for collection in (state["sessions"], state["runs"]):
                         for item in collection.values():
@@ -360,7 +381,7 @@ class FileStore:
                         validate_storyboard_changes,
                     )
 
-                    checked = migrated_state(state) if version < 8 else state
+                    checked = migrated_state(state) if version < 9 else state
                     validate_job_changes(checked["jobs"], checked)
                     validate_storyboard_changes(checked["storyboards"], checked)
                     validate_asset_changes(checked["assets"], checked)
@@ -372,15 +393,16 @@ class FileStore:
                     validate_audio_changes(checked["audio"], checked)
                     validate_subtitle_changes(checked["subtitleTracks"], checked)
                     validate_render_changes(checked["renders"], checked)
+                    validate_season_changes(checked.get("seasons", {}), checked)
                 except (ValueError, TypeError, KeyError, AppError):
                     raise AppError(
                         "INVALID_STORE", "本地状态损坏或版本不支持，已保留原文件，未重置数据。"
                     ) from None
-                if version < 8:
+                if version < 9:
                     # Keep the exact pre-migration bytes, including legacy message encoding.
                     atomic_write_bytes(home / f"state-v{version}-{uuid4()}.json", raw)
                     state = migrated_state(state)
-                    DatabaseV8.model_validate(state)
+                    DatabaseV9.model_validate(state)
                     # Migration and runtime recovery are distinct commits. In particular,
                     # no fingerprints/default fields or SQLite checkpoints are rewritten.
                     atomic_write_json(home / "state.json", state)
@@ -482,7 +504,7 @@ class FileStore:
         with self.locked():
             draft = copy.deepcopy(self._state)
             value = mutate(draft)
-            DatabaseV8.model_validate(draft)
+            DatabaseV9.model_validate(draft)
             validate_job_changes(self._state["jobs"], draft)
             validate_media_changes(self._state["media"], draft)
             validate_storyboard_changes(self._state["storyboards"], draft)
@@ -495,6 +517,7 @@ class FileStore:
             validate_audio_changes(self._state["audio"], draft)
             validate_subtitle_changes(self._state["subtitleTracks"], draft)
             validate_render_changes(self._state.get("renders", {}), draft)
+            validate_season_changes(self._state.get("seasons", {}), draft)
             atomic_write_json(self.home / "state.json", draft)
             self._state = draft
             return copy.deepcopy(value)

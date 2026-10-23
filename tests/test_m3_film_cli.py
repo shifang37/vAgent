@@ -134,7 +134,7 @@ async def test_cli_film_show_and_assemble_without_keys(tmp_path):
     state = json.loads((home / "state.json").read_bytes())
     assert len(state["films"]) == 1 and len(state["films"][result["filmId"]]["versions"]) == 1
     assert len(state["jobs"]) == len(before["jobs"])  # no generation Job was registered
-    assert state["schemaVersion"] == 8
+    assert state["schemaVersion"] == 9
     reread = command(tmp_path, home, "film", "show", "-s", "coffee")
     assert reread.returncode == 0, reread.stderr
     assert json.loads(reread.stdout)["film"]["currentVersion"] == 1

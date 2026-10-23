@@ -1891,3 +1891,101 @@ footer {
   color: #334a61;
   font-weight: 600;
 }
+
+/* M7 E1: 季侧栏与有序成员 */
+.season-panel {
+  width: 440px;
+}
+.season-toolbar {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+  margin-bottom: 12px;
+}
+.season-toolbar select {
+  flex: 1;
+  min-width: 0;
+  padding: 7px 8px;
+  border: 1px solid #dfe7ef;
+  border-radius: 8px;
+  background: #fff;
+  font-size: 12px;
+  color: #334a61;
+}
+.season-title-field {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  margin: 10px 0;
+  font-size: 12px;
+  color: #65758a;
+}
+.season-title-field input {
+  padding: 8px 10px;
+  border: 1px solid #dfe7ef;
+  border-radius: 8px;
+  font-size: 13px;
+  color: #334a61;
+}
+.season-episodes {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  margin: 12px 0;
+}
+.season-episode {
+  display: flex;
+  gap: 10px;
+  align-items: flex-start;
+  padding: 9px 10px;
+  border: 1px solid #e3eaf3;
+  border-radius: 10px;
+  background: #fff;
+  cursor: pointer;
+}
+.season-episode.is-owned {
+  opacity: 0.62;
+  cursor: not-allowed;
+}
+.season-episode input {
+  margin-top: 3px;
+}
+.season-order {
+  width: 18px;
+  height: 18px;
+  border-radius: 50%;
+  background: #eef3fa;
+  color: #5e7dae;
+  font-size: 11px;
+  line-height: 18px;
+  text-align: center;
+  flex: none;
+}
+.season-episode-body {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+}
+.season-episode-body strong {
+  font-size: 13px;
+  color: #334a61;
+}
+.season-episode-body small {
+  font-size: 11px;
+  color: #7b8a9d;
+}
+.season-owner {
+  color: #b06b35;
+}
+.season-error {
+  color: #b4392f;
+}
+.season-warning {
+  color: #b06b35;
+}
+.season-actions {
+  display: flex;
+  gap: 8px;
+  margin: 12px 0;
+}

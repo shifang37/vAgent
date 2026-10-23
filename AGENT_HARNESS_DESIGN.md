@@ -334,11 +334,19 @@ E2（音频）的边界选择：
 - **工具面**：`audio_generate` 是 `async_write_execute`（无 Job、无等待），tools/rules 11/11，冻结 10/10 与更早变体；`episode_read` 只追加 `audio` 投影。headless 规划排除该付费写工具。
 - **混音**：`mix-zh-v1` 以 `amix normalize=0` 保留 voice 0 dB/BGM −18 dB/SFX −6 dB，BGM 用 `sidechaincompress`（−20 dB 线性 0.1、8、20 ms、400 ms）ducking；两遍 `loudnorm`（−16 LUFS/−1 dBTP/LRA 11）后用 EBU R128 复测成品，超差即 `LOUDNESS_OUT_OF_RANGE` 并删除产物。E2 只交付本地混音服务，`film_render` 集成留给 E3。
 
-### 8.8 M7 多集与工作台（E0 冻结）
+### 8.8 M7 多集与工作台（E0 冻结，E1 已交付）
 
-M7 契约见 [M7 契约](./docs/M7_CONTRACTS.md)，E0 基线与本地裁剪探针见 [E0 验收](./docs/M7_E0_ACCEPTANCE.md) 与 `docs/M7_E0_BASELINE.json`。**E0 只冻结要求与基线，不改产品代码：视频 submit=0、模型调用=0、TTS 请求=0。** 实现从 E1 开始。
+M7 契约见 [M7 契约](./docs/M7_CONTRACTS.md)，E0 基线与本地裁剪探针见 [E0 验收](./docs/M7_E0_ACCEPTANCE.md) 与 `docs/M7_E0_BASELINE.json`。**E0 只冻结要求与基线，不改产品代码：视频 submit=0、模型调用=0、TTS 请求=0。** E1 已交付（见 [E1 验收](./docs/M7_E1_ACCEPTANCE.md)）：schema 9 三个空集合与 v8→v9 逐字节备份、`Season`/`SeasonVersion`、`season_save`/`season_read`、tools/rules 15/15（冻结 13/13）、CLI/Web 季面板；既有 165 个契约模型哈希不变，视频 submit=0、模型调用=0、TTS 请求=0。
 
-E1 的边界选择：
+E1 的实现边界：
+
+- **存储**：`DatabaseV9` 只加 `seasons`/`batches`/`timelines` 三个集合；E1 只写 `seasons`，另两个保持空映射，交由 E2/E3 的域校验器填充；`v8→v9` 机械迁移与逐字节备份，v1–v8 全部可读，打开与每次提交都重跑季校验。
+- **季校验**：Store 级 `validate_season_changes` 复核版本连续、`currentVersion` 指向最新版、每项目 ≤8 季、每季 1–4 集、成员有序唯一、同一集至多属于一个季的当前版本；历史版本逐字节保留，删除或改写即 `SEASON_VERSION_CONFLICT`/`SEASON_EPISODE_CONFLICT`。
+- **幂等与并发**：`season_save` 以完整内容（标题 + 有序成员）判等，相同内容返回当前版本并标记 `replayed=true`，不追加空版本；内容变化必须带 `expectedRevision`，否则 `SEASON_VERSION_CONFLICT`。
+- **零费用路径**：季保存不登记 Job、不调用模型或供应商；CLI/Web 的本地保存走 metadata-only 客户端 Run（`videoMode=off`、`toolFeatures={}`），因此文本项目在视频模式 off 下也能组织季。
+- **工具面**：E1 追加 `season_save`/`season_read`（15/15），13/13 与更早变体按 `toolFeatures` 冻结；headless 仍只编排分镜，不加入季批量或时间线渲染。
+
+后续阶段的边界选择：
 
 - **存储**：schema 9 只加 `seasons`/`batches`/`timelines` 三个空集合；`v8→v9` 机械迁移 + 逐字节备份；E1 只新增 v9 模型，既有 165 个契约哈希与冻结上限逐字节不变。E3 才允许给 `FilmAssembly` 追加 `ffmpeg-render-timeline-v1` 字面量、给 `RenderSources`/`RenderTask` 追加可选时间线字段、给 `film_render`/`render_read` 追加时间线输入 schema，并在 E3 验收中逐项列出嵌套哈希变化。
 - **季**：`Season`/`SeasonVersion` 只保存标题与有序 Episode ID；角色/风格仍是项目级共享圣经；一集至多属于一个季的当前版本，历史版本保留但不作为当前归属依据。

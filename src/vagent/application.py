@@ -37,6 +37,7 @@ from vagent.video.providers.fal import FalAdapter
 from vagent.video.providers.kling import KlingAdapter
 from vagent.video.providers.mock import MockVideoAdapter
 from vagent.video.providers.wan import WanAdapter
+from vagent.video.seasons import read_season, season_summaries
 from vagent.video.storyboards import storyboard_in_state
 from vagent.video.tools import register_video_tools, resolve_job_wait, resolve_jobset_wait
 from vagent.video.usage import summarize_records
@@ -296,6 +297,31 @@ class ApplicationService:
             )
             view["render"] = self.renders.episode_summary(state, session_id, view["episodeId"])
         return view
+
+    def seasons(self, session_id):
+        """Season summaries of one project; never another project's records."""
+        assert_id(session_id)
+        return {"seasons": season_summaries(self.store.snapshot(), session_id)}
+
+    def season(self, session_id, season_id=None):
+        """The one season view shared by the panel, the CLI and the tools."""
+        assert_id(session_id)
+        if season_id is not None:
+            assert_id(season_id)
+        return read_season({"seasonId": season_id}, self.store.snapshot(), session_id)
+
+    def save_season(self, session_id, request: dict) -> dict:
+        """Explicit local season save; never a model turn and never a provider call."""
+        assert_id(session_id)
+        return clients.save_season(
+            self.video_jobs,
+            session_id=session_id,
+            client_request_id=request["clientRequestId"],
+            title=request["title"],
+            episode_ids=request["episodeIds"],
+            season_id=request.get("seasonId"),
+            expected_revision=request.get("expectedRevision"),
+        )
 
     def assets(self, project_id=None):
         """Asset metadata in the whole library, or one project's own imports."""
@@ -893,6 +919,7 @@ class ApplicationService:
             "jobs": self.jobs(session_id),
             "storyboard": current_storyboard_view(state, session_id),
             "episode": self.episode(session_id),
+            "season": self.season(session_id),
             "wait": self._wait_view(state["waits"].get((run or {}).get("activeWaitId"))),
             "draft": copy.deepcopy(self.drafts.get(session_id)),
         }

@@ -17,7 +17,10 @@ def options(tmp_path, *, limit=40):
         home=tmp_path / "data",
         output=tmp_path / "report.json",
         live=False,
-        context_bytes=65536,
+        # M7 E1 grew the frozen rules text past the original 64 KiB evaluation
+        # budget (a test parameter, not a product limit); the M1-C checks themselves
+        # are unchanged.
+        context_bytes=73728,
         max_model_calls=limit,
         continue_from=None,
     )
