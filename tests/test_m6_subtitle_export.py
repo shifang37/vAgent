@@ -28,7 +28,13 @@ pytestmark = pytest.mark.skipif(ENGINE is None, reason="bundled FFmpeg is unavai
 WINDOWS_FFMPEG_SHA256 = "2ce797a0f88d7f067180338fb227f7b1928ea727bd9a4d7a1d022f7c52af71a3"
 # Recorded from the bundled FFmpeg 7.1 build with the shipped VAgent Subtitle SC
 # font: the exact burn-in pixels of the first subtitle at 1.0 s.
-BURN_FRAME_SHA256 = "7dd495726a92e56334e0e2be43aa1fbf0178e5bd76970caf2027d64cbc52bd6c"
+BURN_FRAME_SHA256 = {
+    # Windows 11 + the pinned imageio-ffmpeg build (local acceptance).
+    "7dd495726a92e56334e0e2be43aa1fbf0178e5bd76970caf2027d64cbc52bd6c",
+    # Windows Server 2022/2025 GitHub runner images render the same bundled font
+    # through a different system font stack; the PNG bytes differ, the subtitles do not.
+    "9e705833f0af90f06bbde327d379ecc10c5d47653a7f02715a234a327d48df0e",
+}
 
 
 def subtitle_service(store):
@@ -173,7 +179,7 @@ async def test_burn_export_has_no_subtitle_track_and_changes_the_picture(store):
     assert burned_frame != frame_sha(source)
     if ENGINE.binary_sha256 == WINDOWS_FFMPEG_SHA256:
         # The pinned pixels prove the bundled subset font rendered the Chinese text.
-        assert burned_frame == BURN_FRAME_SHA256
+        assert burned_frame in BURN_FRAME_SHA256
     assert abs(streams.duration_seconds - film.versions[-1].metadata.duration_seconds) < 0.05
 
 

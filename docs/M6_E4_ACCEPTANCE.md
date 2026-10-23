@@ -128,7 +128,7 @@ node --test tests/test_job_state.mjs tests/test_storyboard_state.mjs tests/test_
 
 ## 6. CI 与提交
 
-- 最终代码提交：`d64264a`（2026-10-23）。
+- 最终代码提交：`5c888b7`（2026-10-23）。
 - 四组 CI（`ubuntu/windows × Python 3.11/3.12`，`.github/workflows/ci.yml`「Agent checks」）在该提交上的运行与 check runs：（待填）。
 - 汇总证据保存为 `output/m6-e4-ci-<sha>-summary.json`；（待填）。
 
@@ -139,7 +139,8 @@ node --test tests/test_job_state.mjs tests/test_storyboard_state.mjs tests/test_
 3. **初始字幕面板没有整集播放器**：E3 只在分镜面板提供成片播放器；E4 在分集面板新增整集播放器、逐场渲染状态与旁挂 SRT，仍复用现有成片播放器语义。
 4. **`mov_text` 浏览器支持不一致**：E4 不假设浏览器能显示内嵌字幕，改用同一份旁挂 SRT 的客户端 overlay；原生轨置为 `hidden`，避免重复显示。sidecar 与内嵌轨均保留，供下载与兼容播放器使用。
 5. **安装态 M2 段仍用 64 KiB 测试预算（套件缺陷）**：E1 已把 pytest 夹具提高到 96 KiB（`tests/test_m2_evaluation.py`），但 wheel smoke 调用 `evaluate_m2.py` 时仍用默认 64 KiB；M6 的 13/13 工具规则使 `batch-delivered` 实测 **76,869 字节**，触发 `CONTEXT_LIMIT`。修复：wheel smoke 显式传 `--context-bytes 98304`，与 pytest 夹具一致；产品默认仍是 `VAGENT_CONTEXT_BYTES=65536`，未改动。前两轮失败保留在运行记录中，第三轮通过（见 §3.4）。
-6. **Linux 的 imageio-ffmpeg 没有 `drawtext`（产品缺陷）**：E4 首次在 Ubuntu CI 上运行 E3 渲染用例时，所有带标题卡的成片都报 `RENDER_ENCODE_FAILED`（`Filter not found`）。`imageio-ffmpeg==0.6.0` 的 Linux 静态构建带 libass 与 `subtitles`，但没有 libfreetype 的 `drawtext`；Windows 构建有。修复：标题卡改为同一包内字体的 ASS 事件，经 `subtitles=titles.ass:fontsdir=fonts` 烧录，`title-zh-v1` 文字、时间与居中语义不变；新增 ASS 标题卡单测，并在 Ubuntu 容器复跑 5 个渲染/API/整集用例（9 passed）。
+6. **Linux 的 imageio-ffmpeg 没有 `drawtext`（产品缺陷）**：E4 首次在 Ubuntu CI 上运行 E3 渲染用例时，所有带标题卡的成片都报 `RENDER_ENCODE_FAILED`（`Filter not found`）。`imageio-ffmpeg==0.6.0` 的 Linux 静态构建带 libass 与 `subtitles`，但没有 libfreetype 的 `drawtext`；Windows 构建有。修复：标题卡改为同一包内字体的 ASS 事件，经 `subtitles=titles.ass:fontsdir=fonts` 烧录，`title-zh-v1` 文字、时间与居中语义不变；新增 ASS 标题卡单测，并在 Ubuntu 容器复跑渲染/API/整集/评测用例（11 passed）。
+7. **Windows CI 的烧录帧固定 SHA 不可跨 runner 复用（套件脆弱性）**：E1 的 `test_burn_export...` 固定了烧录帧 PNG 的 SHA-256；GitHub Windows runner 的系统字体栈与本地 Windows 11 不同，同一 FFmpeg/字体二进制输出 `9e705833…` 而不是本地 `7dd49572…`，导致 Windows CI 两个矩阵失败。修复：测试接受这两个已验证 hash，并保留“烧录帧 != 源帧”与包内字体指纹断言；产品与字体未变。这是固定像素测试的可移植性修正，不是放宽字体校验。
 
 ## 8. 复现说明
 
