@@ -36,6 +36,12 @@
 > - **1080P**：作为参数化上采样 profile，逐场直接归一到 1920×1080/30fps，记录 `upscaled=true`；不做超分或画质承诺。
 > - **工具面**：新 Run tools/rules **13/13**；`film_render` 为 `write`、锁外执行、无 Job、无供应商费用；`render_read` 只读。冻结 **11/11**（隐藏 `film_render`/`render_read`）与 10/10…1/1 继续按 `toolFeatures` 恢复。`episode_read` 只追加 `render` 投影。
 > - **错误码**：§7 的 18 个码保持不变；E3 额外使用 `RENDER_ENCODE_FAILED`/`RENDER_VALIDATION_FAILED`（E1 已用于本地导出）与 `CONFIRMATION_REQUIRED`，并新增 `RENDER_NOT_FOUND`/`RENDER_CONFLICT` 表示任务读取与任务历史。
+>
+> **E4 已实施（2026-10-23）**：整集成片、浏览器字幕开关、真实镜头复用与验收见 [E4 验收](./M6_E4_ACCEPTANCE.md)。实现中对本文件的细化（不改冻结语义）：
+>
+> - **时间线连续性**：真实 AAC 镜头的成片时间线把段起点舍入到微秒，但时长保留精确有理数；字幕与渲染都改为按精确时长累加起点，E1 旁挂导出在微秒基比较时间线。schema、工具面与错误码不变。
+> - **浏览器字幕开关**：分集面板从受控 `sidecarUrl` 读取旁挂 SRT，在播放器上叠加/隐藏；内嵌 `mov_text` 保留并置为 `hidden`，避免支持 `mov_text` 的浏览器重复显示。开关是只读前端动作，不写 Store。
+> - **真实样本**：E4 复用 M5 E4 已批准的 `fridge-notes` 18 个 Wan 镜头，新增视频 submit=0、真实 TTS=0；真实 CosyVoice 与新付费样本仍需单独授权。
 
 ## 1. 决策与版本
 
@@ -191,7 +197,7 @@ E0 前的 7 个决策点已确认，冻结如下：
 | E1 字幕 | **已交付（2026-10-22）**：schema v7（两个空集合 + media kind=audio）、`subtitle_save`、`subtitle-align-zh-v1`、SRT/ASS 生成、软字幕与旁挂、烧录 profile 与包内字体；tools/rules **10/10**（冻结 9/9）。见 [E1 验收](./M6_E1_ACCEPTANCE.md) | 60 秒样例字幕零漂移；中文渲染正确；人工修正可重渲染；重叠/越界/缺轨全部拒绝；submit=0、模型调用=0 |
 | E2 音频 | **已交付（2026-10-22）**：`audio_generate`、`tts-providers-v1`、`local-tts-v1` 与 CosyVoice 适配器、音色绑定、音频资产/媒体读写、`mix-zh-v1` 混音/ducking、两遍响度测量；tools/rules **11/11**（冻结 10/10）。见 [E2 验收](./M6_E2_ACCEPTANCE.md) | 人声清晰无削波；响度测量在容差内；来源与许可可追溯；字符/次数/金额额度超限整批拒绝；离线全链路零真实请求 |
 | E3 转场/片头尾/导出/整集 | **已交付（2026-10-23）**：`film_render`/`render_read`、`cut/fade/crossfade`、标题卡、跨场整集渲染、`720p`/`1080p` profile、旁挂 SRT、schema 8 渲染任务；tools/rules **13/13**（冻结 11/11）。见 [E3 验收](./M6_E3_ACCEPTANCE.md) | 转场无黑帧、音画同步；时长与时间线一致；整集 60–90 秒成片（验收 89.3 秒）；单场失败隔离；同指纹幂等 |
-| E4 验收 | 60–90 秒整集成片（复用真实镜头 + 离线套件）、浏览器播放与字幕开关、响度与字幕检查、安装态与 CI、验收文档 | 一条完整短剧成片可播放、字幕可开关、音频测量达标；失败保留；CI 通过；真实付费样本需单独授权 |
+| E4 验收 | **已交付（2026-10-23）**：离线套件 3 用例（89.3 秒整集、单场失败隔离、拒绝矩阵）、浏览器整集播放与字幕开关、M5 真实镜头复用（89.1667 秒、新增 submit=0）、安装态与 CI。见 [E4 验收](./M6_E4_ACCEPTANCE.md) | 一条完整短剧成片可播放、字幕可开关、音频测量达标；失败保留；CI 通过；真实付费样本需单独授权 |
 
 ## 11. 明确不做
 

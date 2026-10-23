@@ -14,6 +14,7 @@ export lives in ``vagent.video.subtitle_service``.
 import hashlib
 import json
 from datetime import UTC, datetime
+from fractions import Fraction
 from typing import Literal
 from uuid import uuid4
 
@@ -540,15 +541,21 @@ def _film_entries(state: dict, project_id: str, storyboard_id: str, scene_id: st
     if film is None:
         return None, None
     base = _film_base_version(film)
-    entries = [
-        SubtitleTimelineEntry(
-            scene_id=scene_id,
-            shot_id=segment.shot_id,
-            start=segment.start,
-            duration=segment.duration,
+    # Assembly starts are rounded to microseconds, while the segment durations are exact
+    # media durations. Rebuild the starts from the durations so one timeline is exactly
+    # contiguous; a cue window must not depend on which rounding won.
+    entries = []
+    offset = Fraction(0)
+    for segment in base.assembly.timeline:
+        entries.append(
+            SubtitleTimelineEntry(
+                scene_id=scene_id,
+                shot_id=segment.shot_id,
+                start=Rational.of(offset),
+                duration=segment.duration,
+            )
         )
-        for segment in base.assembly.timeline
-    ]
+        offset += segment.duration.fraction()
     return entries, base
 
 
@@ -643,11 +650,11 @@ def resolve_episode_source(state: dict, project_id: str, episode_id: str) -> dic
                 SubtitleTimelineEntry(
                     scene_id=scene.id,
                     shot_id=entry.shot_id,
-                    start=Rational.microseconds(offset + entry.start.total_microseconds()),
+                    start=Rational.of(offset + entry.start.fraction()),
                     duration=entry.duration,
                 )
             )
-        offset += sum(entry.duration.total_microseconds() for entry in scene_entries)
+        offset += sum(entry.duration.fraction() for entry in scene_entries)
         dialogue[scene.id] = list(frozen.dialogue)
         scenes.append(scene.id)
         payload_scenes.append(

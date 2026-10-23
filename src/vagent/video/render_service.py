@@ -419,7 +419,7 @@ class RenderService:
                         source=entry.source,
                     )
                 )
-            offset += scene_entries[-1].start + scene_entries[-1].duration if scene_entries else Fraction(0)
+            offset += sum(entry.duration for entry in scene_entries)
             missing = [shot.shot_id for shot in shots if shot.media_id is None]
             scenes.append(
                 PlannedScene(
@@ -529,11 +529,16 @@ class RenderService:
                 ]:
                     segment_by_shot = {item.shot_id: item for item in base.assembly.timeline}
         if segment_by_shot:
+            # Film segment starts are rounded to microseconds; rebuild them from the
+            # exact durations so the render timeline is contiguous and can match a
+            # subtitle track saved from the same film.
+            offset = Fraction(0)
             for shot in shots:
                 segment = segment_by_shot.get(shot.shot_id)
+                shot.start = offset
                 if segment is not None:
-                    shot.start = segment.start.fraction()
                     shot.duration = segment.duration.fraction()
+                offset += shot.duration
             return
         offset = Fraction(0)
         for shot in shots:

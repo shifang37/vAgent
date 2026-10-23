@@ -1,5 +1,7 @@
 """M6 E1: deterministic subtitle alignment, append-only tracks and SRT/ASS bytes."""
 
+from fractions import Fraction
+
 from vagent.video.episodes import SceneDialogue
 from vagent.video.films import Rational
 from vagent.video.subtitles import (
@@ -110,3 +112,38 @@ def test_srt_and_ass_are_deterministic_and_use_the_exact_timeline():
     assert "[V4+ Styles]" in ass and "VAgent Subtitle SC" in ass
     assert ass.count("Dialogue:") == len(cues)
     assert "0:00:00.00" in ass
+
+
+def test_film_entries_rebuild_rounded_assembly_starts(monkeypatch):
+    """Exact AAC durations with microsecond-rounded starts must still be contiguous."""
+    from types import SimpleNamespace
+
+    from vagent.video import subtitles
+
+    duration = Fraction(55822, 11025)
+    film = SimpleNamespace(
+        versions=[
+            SimpleNamespace(
+                render=None,
+                assembly=SimpleNamespace(
+                    timeline=[
+                        SimpleNamespace(
+                            shot_id="s1",
+                            start=Rational.microseconds(0),
+                            duration=Rational.of(duration),
+                        ),
+                        SimpleNamespace(
+                            shot_id="s2",
+                            start=Rational.microseconds(5_063_220),
+                            duration=Rational.of(duration),
+                        ),
+                    ]
+                ),
+            )
+        ]
+    )
+    monkeypatch.setattr(subtitles, "find_film", lambda *_args: film)
+    entries, _base = subtitles._film_entries({}, "coffee", "board", "scene")
+    assert [entry.start.fraction() for entry in entries] == [Fraction(0), duration]
+    assert [entry.duration.fraction() for entry in entries] == [duration, duration]
+    assert entries[0].start.fraction() + entries[0].duration.fraction() == entries[1].start.fraction()

@@ -1,6 +1,7 @@
 """M6 E3 render domain: effective timeline, transitions, cue remap and task limits."""
 
 from fractions import Fraction
+from types import SimpleNamespace
 
 import pytest
 from pydantic import ValidationError
@@ -184,3 +185,42 @@ def test_task_status_and_scene_consistency_are_checked():
         RenderTask(**{**base, "episodeId": "episode"})
     with pytest.raises(ValidationError):
         RenderSceneProgress(storyboard_id="board", shot_ids=("shot",), status="failed", error_code=None)
+
+
+def test_film_timeline_rebuilds_rounded_segment_starts(monkeypatch):
+    """AAC durations are exact rationals while assembly starts are microsecond-rounded.
+
+    The render must rebuild starts from the durations, otherwise a subtitle track
+    saved from the same film cannot match it exactly.
+    """
+    from vagent.video import render_service as module
+    from vagent.video.render_service import RenderService
+
+    duration = Fraction(55822, 11025)
+    segments = [
+        SimpleNamespace(
+            shot_id="s1",
+            start=Rational.microseconds(0),
+            duration=Rational.of(duration),
+        ),
+        SimpleNamespace(
+            shot_id="s2",
+            start=Rational.microseconds(5_063_220),
+            duration=Rational.of(duration),
+        ),
+    ]
+    base = SimpleNamespace(
+        inputs=[SimpleNamespace(shot_id="s1"), SimpleNamespace(shot_id="s2")],
+        assembly=SimpleNamespace(timeline=segments),
+        render=None,
+    )
+    monkeypatch.setattr(module, "find_film", lambda *_args: SimpleNamespace(versions=[base]))
+    service = RenderService.__new__(RenderService)
+    shots = [
+        SimpleNamespace(shot_id="s1", start=Fraction(0), duration=Fraction(5)),
+        SimpleNamespace(shot_id="s2", start=Fraction(0), duration=Fraction(5)),
+    ]
+    service._assign_timeline({}, "coffee", SimpleNamespace(id="board"), shots)
+    assert [shot.start for shot in shots] == [Fraction(0), duration]
+    assert [shot.duration for shot in shots] == [duration, duration]
+    assert shots[0].start + shots[0].duration == shots[1].start

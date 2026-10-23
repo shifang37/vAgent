@@ -271,7 +271,13 @@ class SubtitleService:
         for segment, entry in zip(segments, version.timeline, strict=True):
             if segment.shot_id != entry.shot_id:
                 return False
-            if segment.start != entry.start or segment.duration != entry.duration:
+            # Assembly timestamps and subtitle timestamps are both exact rationals, but
+            # the film records its segment starts rounded to microseconds. Compare in the
+            # contract's microsecond time base so the same timeline is recognized.
+            if (
+                segment.start.total_microseconds() != entry.start.total_microseconds()
+                or segment.duration.total_microseconds() != entry.duration.total_microseconds()
+            ):
                 return False
         return True
 

@@ -664,6 +664,10 @@ def smoke_m2_evaluation(directory):
             str(Path(directory) / "m2-state"),
             "--output",
             str(output),
+            # E1 raised the fixture budget to 96 KiB after the M6 rules grew past 64 KiB;
+            # the installed suite uses the same harness budget as tests/test_m2_evaluation.py.
+            "--context-bytes",
+            "98304",
         ],
         env=isolated_environment(Path(directory) / "unused-config"),
     )
@@ -957,6 +961,111 @@ def smoke_m5_evaluation(directory):
     assert report["totals"]["redos"] == 2
     assert not (Path(report["dataDirectory"]) / "instance.lock").exists()
     return report
+
+
+def smoke_m6_evaluation(directory):
+    output = Path(directory) / "m6-evaluation.json"
+    run_command(
+        [
+            sys.executable,
+            "-I",
+            str(Path(__file__).with_name("evaluate_m6.py").resolve()),
+            "--home",
+            str(Path(directory) / "m6-state"),
+            "--output",
+            str(output),
+        ],
+        env=isolated_environment(Path(directory) / "unused-config"),
+        timeout=900,
+    )
+    report = json.loads(output.read_text(encoding="utf-8"))
+    assert report["status"] == "passed" and report["mode"] == "offline-fixture"
+    assert report["totals"]["passedCases"] == report["totals"]["plannedCases"] == 3
+    assert report["totals"]["submitCalls"] == 56
+    assert report["totals"]["deliveredClips"] == 56
+    assert report["totals"]["filmVersions"] == 1
+    assert report["totals"]["renderReplays"] == 1
+    assert report["totals"]["subtitleCues"] == 27
+    assert not (Path(report["dataDirectory"]) / "episode-both" / "instance.lock").exists()
+    return report
+
+
+async def smoke_m6_workbench(directory, evaluation_report):
+    """Installed M6 surface: episode film CLI, HTTP render/episode media and sidecar."""
+    home = Path(evaluation_report["dataDirectory"]) / "episode-both"
+    from vagent.video.episodes import Episode
+    from vagent.video.films import find_episode_film
+
+    with FileStore.open(home) as store:
+        state = store.snapshot()
+        episode_raw = next(iter(state["episodes"].values()))
+        episode = Episode.model_validate(episode_raw)
+        film = find_episode_film(state, episode.project_id, episode.id)
+        assert film is not None
+        version = film.versions[-1]
+        assert version.render is not None and version.render.subtitle is not None
+        film_id = film.id
+        film_version = version.version
+        output_media_id = version.output_media_id
+        sidecar_url = f"/api/films/{film_id}/versions/{film_version}/subtitles.srt"
+        expected_sidecar = version.render.subtitle.sidecar_sha256
+    cli = Path(sysconfig.get_path("scripts")) / ("vagent.exe" if os.name == "nt" else "vagent")
+    env = isolated_environment(home)
+    renders = json.loads(
+        run_command(
+            [str(cli), "film", "renders", "-s", episode.project_id, "--episode", episode.id],
+            env=env,
+            timeout=180,
+        )
+    )
+    assert renders["render"]["status"] == "succeeded"
+    assert renders["render"]["filmId"] == film_id
+    assert renders["render"]["filmVersion"] == film_version
+    assert renders["render"]["render"]["subtitle"]["sidecarSha256"] == expected_sidecar
+
+    config = load_config({"VAGENT_HOME": str(home), "VAGENT_VIDEO_MODE": "mock"})
+    app = create_app(config)
+    async with app.router.lifespan_context(app):
+        async with httpx.AsyncClient(
+            transport=httpx.ASGITransport(app=app), base_url="http://127.0.0.1:3210"
+        ) as client:
+            for name in (
+                "app.js",
+                "episode-state.js",
+                "subtitle-state.js",
+                "render-state.js",
+                "styles.css",
+                "index.html",
+            ):
+                assert (await client.get(f"/{name}")).status_code == 200
+            detail = (await client.get(f"/api/episodes/{episode.id}?projectId={episode.project_id}")).json()
+            assert detail["render"]["status"] == "succeeded"
+            assert detail["render"]["mediaUrl"] == f"/api/media/{output_media_id}/content"
+            assert detail["render"]["render"]["subtitle"]["sidecarUrl"] == sidecar_url
+            snapshot = (await client.get(f"/api/sessions/{episode.project_id}")).json()
+            assert snapshot["episode"]["render"]["filmId"] == film_id
+            by_episode = (
+                await client.get(f"/api/renders?projectId={episode.project_id}&episodeId={episode.id}")
+            ).json()
+            assert by_episode["render"]["filmVersion"] == film_version
+            sidecar = await client.get(sidecar_url)
+            assert sidecar.status_code == 200
+            assert hashlib.sha256(sidecar.content).hexdigest() == expected_sidecar
+            film_media = await client.get(detail["render"]["mediaUrl"], headers={"Range": "bytes=0-1023"})
+            assert film_media.status_code in {200, 206}
+            assert len(film_media.content) == 1024 or film_media.status_code == 200
+    return {
+        "episodeId": episode.id,
+        "filmId": film_id,
+        "filmVersion": film_version,
+        "durationSeconds": version.metadata.duration_seconds,
+        "sidecarSha256": expected_sidecar,
+        "cliRenders": True,
+        "httpEpisodeRender": True,
+        "httpSessionSnapshot": True,
+        "httpSidecar": True,
+        "httpFilmRange": True,
+    }
 
 
 async def smoke_m5_workbench(directory):
@@ -1387,6 +1496,8 @@ async def main(output=None):
             m3_report = smoke_m3_evaluation(directory)
             m5_workbench = await smoke_m5_workbench(directory)
             m5_report = smoke_m5_evaluation(directory)
+            m6_report = smoke_m6_evaluation(directory)
+            m6_workbench = await smoke_m6_workbench(directory, m6_report)
             keys_only_report = await smoke_keys_only_live(directory)
             report = {
                 "status": "passed",
@@ -1410,6 +1521,8 @@ async def main(output=None):
                     "sixCaseM3Suite": True,
                     "m5EpisodeWorkbenchCliAndHttp": True,
                     "fiveCaseM5Suite": True,
+                    "m6FilmWorkbenchCliAndHttp": True,
+                    "threeCaseM6Suite": True,
                     "keysOnlyLiveSharedHost": True,
                 },
                 "videoRestart": video_report,
@@ -1422,6 +1535,8 @@ async def main(output=None):
                 "m3Evaluation": m3_report,
                 "m5EpisodeWorkbench": m5_workbench,
                 "m5Evaluation": m5_report,
+                "m6FilmWorkbench": m6_workbench,
+                "m6Evaluation": m6_report,
                 "keysOnlyLive": keys_only_report,
             }
     report["temporaryDataCleaned"] = not Path(directory).exists()
@@ -1429,7 +1544,7 @@ async def main(output=None):
         output.parent.mkdir(parents=True, exist_ok=True)
         output.write_text(json.dumps(report, ensure_ascii=False, indent=2), encoding="utf-8")
     print(
-        "PASS: installed wheel, Web assets, config, streaming, text/quality, MCP, mock video tools, durable wait, original Run restart/automatic continuation, readonly delivery, unchanged budgets, CLI list/get/usage, five M1-B cases, live protocol with local media restart and CLI media evidence, seven M1-C cases, M2 storyboard/asset CLI and HTTP surface, seven M2 cases, M3 local film assembly with film media HTTP/CLI replay and provider settings, six M3 cases, M5 episode CLI/HTTP workbench and five M5 cases, keys-only live shared-host fixture with zero-cost save probe and hot registration, cleanup."
+        "PASS: installed wheel, Web assets, config, streaming, text/quality, MCP, mock video tools, durable wait, original Run restart/automatic continuation, readonly delivery, unchanged budgets, CLI list/get/usage, five M1-B cases, live protocol with local media restart and CLI media evidence, seven M1-C cases, M2 storyboard/asset CLI and HTTP surface, seven M2 cases, M3 local film assembly with film media HTTP/CLI replay and provider settings, six M3 cases, M5 episode CLI/HTTP workbench and five M5 cases, M6 episode render CLI/HTTP workbench and three M6 cases, keys-only live shared-host fixture with zero-cost save probe and hot registration, cleanup."
     )
     return report
 

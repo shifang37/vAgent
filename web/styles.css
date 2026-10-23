@@ -1793,6 +1793,60 @@ footer {
   gap: 12px;
   margin-top: 12px;
 }
+/* M6 E4: whole-episode film card, player and the sidecar subtitle overlay. */
+.episode-film {
+  margin: 14px 0 6px;
+  padding: 12px 14px;
+  border: 1px solid #dfe7ef;
+  border-radius: 12px;
+  background: #f8fafd;
+}
+.episode-film.is-empty {
+  background: #fcfdff;
+}
+.episode-film .film-head strong {
+  color: #536c85;
+  font-size: 13px;
+}
+.episode-player {
+  position: relative;
+  margin-top: 4px;
+  border-radius: 10px;
+  overflow: hidden;
+  background: #0b1220;
+}
+.episode-film-video {
+  display: block;
+  width: 100%;
+  max-height: 260px;
+  background: #0b1220;
+}
+.episode-subtitles {
+  position: absolute;
+  left: 8%;
+  right: 8%;
+  bottom: 14%;
+  padding: 2px 8px;
+  border-radius: 4px;
+  background: rgba(8, 15, 28, 0.72);
+  color: #f8fafc;
+  font-size: 14px;
+  line-height: 1.45;
+  text-align: center;
+  white-space: pre-line;
+  pointer-events: none;
+  text-shadow: 0 1px 2px rgba(0, 0, 0, 0.9);
+}
+.episode-subtitles[hidden] {
+  display: none;
+}
+.episode-film .film-versions {
+  margin-top: 8px;
+}
+.episode-film .film-actions {
+  margin-top: 8px;
+}
+
 .episode-scene {
   border: 1px solid #dfe7ef;
   border-radius: 12px;

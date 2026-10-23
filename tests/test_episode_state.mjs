@@ -4,12 +4,18 @@ import assert from "node:assert/strict";
 import {
   episodeBudget,
   episodeMeta,
+  episodePlayback,
   episodeProgress,
+  episodeRender,
+  episodeRenderSummary,
+  episodeSubtitleToggleLabel,
   filmStatusLabel,
+  parseSubtitleSrt,
   sceneFilmPath,
   sceneGeneration,
   sceneSummary,
   shotStatusLabel,
+  subtitleCueAt,
 } from "../web/episode-state.js";
 
 const EPISODE = {
@@ -157,4 +163,108 @@ test("shot status labels and episode meta are stable", () => {
   assert.equal(meta.title, "冰箱上的便条");
   assert.equal(meta.sceneCount, 2);
   assert.equal(meta.targetDurationSeconds, 60);
+});
+
+const RENDERED = {
+  renderId: "render-1",
+  status: "succeeded",
+  filmId: "film-episode-1",
+  filmVersion: 1,
+  mediaUrl: "/api/media/44444444-4444-4444-8444-444444444444/content",
+  scenes: [
+    { status: "succeeded" },
+    { status: "succeeded" },
+  ],
+  render: {
+    subtitle: {
+      mode: "soft",
+      sidecarUrl: "/api/films/film-episode-1/versions/1/subtitles.srt",
+    },
+    measurements: {
+      durationSeconds: 89.166666,
+      video: { width: 1280, height: 720 },
+    },
+    audio: {
+      loudness: {
+        output: {
+          verification: { integratedLufs: -16.0, truePeakDb: -14.2 },
+        },
+      },
+    },
+  },
+};
+
+test("episode render projection keeps playback and diagnostics separate", () => {
+  const render = episodeRender({ render: RENDERED });
+  assert.equal(render.status, "succeeded");
+  assert.equal(render.filmId, "film-episode-1");
+  assert.equal(render.mediaUrl, RENDERED.mediaUrl);
+  assert.equal(render.sidecarUrl, RENDERED.render.subtitle.sidecarUrl);
+  assert.equal(render.durationSeconds, 89.166666);
+  assert.equal(render.width, 1280);
+  assert.equal(render.height, 720);
+  assert.equal(render.loudnessLufs, -16.0);
+  assert.equal(render.sceneCount, 2);
+  assert.equal(render.failedScenes, 0);
+  assert.deepEqual(episodePlayback({ render: RENDERED }), render);
+
+  const failed = episodeRender({
+    render: {
+      renderId: "render-2",
+      status: "failed",
+      failureStage: "source",
+      errorCode: "RENDER_SOURCE_MISSING",
+      scenes: [{ status: "succeeded" }, { status: "failed" }],
+    },
+  });
+  assert.equal(failed.status, "failed");
+  assert.equal(failed.mediaUrl, null);
+  assert.equal(failed.failedScenes, 1);
+  assert.equal(
+    episodeRenderSummary(failed),
+    "渲染失败 · 1 场失败 · RENDER_SOURCE_MISSING",
+  );
+  assert.equal(episodeRender(null), null);
+  assert.equal(episodePlayback(null), null);
+  assert.equal(episodeRenderSummary(null), "整集尚未渲染");
+});
+
+test("episode render summary names duration, picture and loudness", () => {
+  assert.equal(
+    episodeRenderSummary(episodeRender({ render: RENDERED })),
+    "89.2 秒 · 1280×720 · -16.0 LUFS · 软字幕",
+  );
+  assert.equal(episodeSubtitleToggleLabel(true), "字幕：开");
+  assert.equal(episodeSubtitleToggleLabel(false), "字幕：关");
+});
+
+const SRT = `1
+00:00:09,126 --> 00:00:14,189
+粥在锅里
+
+2
+00:00:14,189 --> 00:00:19,252
+，火关小
+，记得吃。
+
+3
+bad block without timing
+`;
+
+test("sidecar SRT parses into exact playback cues and skips bad blocks", () => {
+  const cues = parseSubtitleSrt(SRT);
+  assert.equal(cues.length, 2);
+  assert.deepEqual(cues[0], { start: 9.126, end: 14.189, text: "粥在锅里" });
+  assert.deepEqual(cues[1], {
+    start: 14.189,
+    end: 19.252,
+    text: "，火关小\n，记得吃。",
+  });
+  assert.equal(subtitleCueAt(cues, 9.0), null);
+  assert.equal(subtitleCueAt(cues, 9.126).text, "粥在锅里");
+  assert.equal(subtitleCueAt(cues, 14.189).text, "，火关小\n，记得吃。");
+  assert.equal(subtitleCueAt(cues, 19.252), null);
+  assert.equal(subtitleCueAt(cues, Number.NaN), null);
+  assert.deepEqual(parseSubtitleSrt(""), []);
+  assert.deepEqual(parseSubtitleSrt(" \r\n "), []);
 });

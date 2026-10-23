@@ -45,11 +45,17 @@ import {
 import {
   episodeBudget,
   episodeMeta,
+  episodePlayback,
   episodeProgress,
+  episodeRender,
+  episodeRenderSummary,
+  episodeSubtitleToggleLabel,
   filmStatusLabel,
+  parseSubtitleSrt,
   sceneGeneration,
   sceneSummary,
   shotStatusLabel,
+  subtitleCueAt,
 } from "./episode-state.js";
 
 const $ = (selector) => document.querySelector(selector);
@@ -193,6 +199,11 @@ async function api(path, options = {}) {
 }
 const post = (path, body = {}) =>
   api(path, { method: "POST", body: JSON.stringify(body) });
+async function apiText(path) {
+  const response = await fetch(path, { cache: "no-store" });
+  if (!response.ok) throw new Error("字幕暂时无法读取。");
+  return response.text();
+}
 // An upload must not set Content-Type: the browser adds the multipart boundary.
 const upload = (path, form) =>
   fetch(path, {
@@ -695,6 +706,126 @@ async function showUsage() {
   renderUsagePanel();
 }
 
+// M6 E4 episode film: the rendered whole-episode MP4 and its sidecar SRT. The
+// overlay is deliberately client-side so the subtitle switch works even where the
+// browser does not render the embedded mov_text track.
+let episodeFilmKey = null;
+let episodeFilmCues = [];
+let episodeSubtitleOn = true;
+let episodeSubtitleBusy = false;
+let episodeSubtitleError = null;
+
+async function loadEpisodeFilm(view) {
+  const render = episodeRender(view);
+  const key = render
+    ? `${render.renderId || render.filmId}:${render.filmVersion}:${render.sidecarUrl || ""}`
+    : null;
+  if (!key || key === episodeFilmKey) return;
+  episodeFilmKey = key;
+  episodeFilmCues = [];
+  episodeSubtitleError = null;
+  if (!render.sidecarUrl) {
+    if (panelMode === "episode") renderEpisodePanel();
+    return;
+  }
+  episodeSubtitleBusy = true;
+  try {
+    const text = await apiText(render.sidecarUrl);
+    if (episodeFilmKey !== key) return;
+    episodeFilmCues = parseSubtitleSrt(text);
+  } catch (error) {
+    if (episodeFilmKey !== key) return;
+    episodeFilmCues = [];
+    episodeSubtitleError = { code: "SUBTITLE_SIDECAR", message: error.message };
+  } finally {
+    if (episodeFilmKey === key) {
+      episodeSubtitleBusy = false;
+      if (panelMode === "episode") renderEpisodePanel();
+    }
+  }
+}
+
+function applyEpisodeSubtitles(video) {
+  const overlay = $("#episode-subtitle-overlay");
+  const button = $('[data-action="toggle-episode-subtitles"]');
+  if (button) {
+    button.textContent = episodeSubtitleToggleLabel(episodeSubtitleOn);
+    button.setAttribute("aria-pressed", String(episodeSubtitleOn));
+  }
+  if (video) {
+    for (const track of video.textTracks || []) {
+      // The overlay owns subtitle visibility; hide the native track so a browser
+      // that supports mov_text cannot draw a second copy.
+      track.mode = episodeSubtitleOn ? "hidden" : "disabled";
+    }
+  }
+  if (!overlay) return;
+  const cue = episodeSubtitleOn && video ? subtitleCueAt(episodeFilmCues, video.currentTime) : null;
+  overlay.textContent = cue?.text || "";
+  overlay.hidden = !cue;
+}
+
+function bindEpisodeFilm(panel) {
+  const video = panel.querySelector("#episode-film-video");
+  if (!video) return;
+  for (const event of ["loadedmetadata", "timeupdate", "seeked", "play"]) {
+    video.addEventListener(event, () => applyEpisodeSubtitles(video));
+  }
+  applyEpisodeSubtitles(video);
+}
+
+function restoreEpisodePlayback(panel, previous) {
+  if (!previous) return;
+  const video = panel.querySelector("#episode-film-video");
+  if (!video || video.getAttribute("src") !== previous.src) return;
+  const restore = () => {
+    if (previous.time > 0) video.currentTime = previous.time;
+    if (!previous.paused) video.play().catch(() => {});
+    applyEpisodeSubtitles(video);
+  };
+  if (video.readyState >= 1) restore();
+  else video.addEventListener("loadedmetadata", restore, { once: true });
+}
+
+function episodeFilmSection(view) {
+  const raw = view?.render;
+  const render = episodeRender(view);
+  if (!render) {
+    return `<section class="episode-film is-empty" aria-label="整集成片">
+      <div class="film-head"><strong>整集成片</strong><span class="meta">尚未渲染</span></div>
+      <p class="meta">全部场记与镜头交付后，可以通过 CLI 或 Agent 的 <code>film_render</code> 渲染整集；这里只读展示与播放。</p>
+    </section>`;
+  }
+  const rows = renderSceneRows(raw)
+    .map(
+      (row) =>
+        `<li><span>${escapeHTML(row.label)}</span><span class="job-state ${escapeHTML(row.tone)}">${escapeHTML(row.status)}</span><span class="meta">${escapeHTML(row.detail)}</span></li>`,
+    )
+    .join("");
+  const summary = escapeHTML(episodeRenderSummary(render));
+  if (!render.mediaUrl) {
+    return `<section class="episode-film is-empty" aria-label="整集成片">
+      <div class="film-head"><strong>整集成片</strong><span class="meta">${summary}</span></div>
+      ${rows ? `<ul class="film-versions">${rows}</ul>` : ""}
+      ${render.errorCode ? `<p class="meta film-error">${escapeHTML(render.errorCode)}</p>` : ""}
+    </section>`;
+  }
+  return `<section class="episode-film" aria-label="整集成片">
+    <div class="film-head"><strong>整集成片</strong><span class="meta">${summary}</span></div>
+    <div class="episode-player">
+      <video id="episode-film-video" class="episode-film-video" src="${escapeHTML(render.mediaUrl)}" controls preload="metadata" playsinline aria-label="整集成片播放"></video>
+      <div id="episode-subtitle-overlay" class="episode-subtitles" aria-live="off" hidden></div>
+    </div>
+    <div class="film-actions">
+      <button class="secondary" data-action="toggle-episode-subtitles" aria-pressed="${episodeSubtitleOn}" ${render.sidecarUrl ? "" : "disabled"}>${escapeHTML(episodeSubtitleToggleLabel(episodeSubtitleOn))}</button>
+      ${render.sidecarUrl ? `<a class="secondary" href="${escapeHTML(render.sidecarUrl)}" download="episode-${escapeHTML(render.filmId || "film")}.srt">下载旁挂 SRT</a>` : ""}
+      ${episodeSubtitleBusy ? '<span class="meta">正在读取字幕…</span>' : ""}
+    </div>
+    ${rows ? `<ul class="film-versions">${rows}</ul>` : ""}
+    ${episodeSubtitleError ? `<p class="meta film-error">${escapeHTML(episodeSubtitleError.message)}</p>` : ""}
+  </section>`;
+}
+
 function renderEpisodePanel() {
   const panel = $("#episode-panel");
   if (panelMode !== "episode") {
@@ -714,6 +845,15 @@ function renderEpisodePanel() {
   const rows = sceneGeneration(view);
   const scenes = view.scenes || [];
   const characters = view.consistency?.characters || [];
+  const existingVideo = panel.querySelector("#episode-film-video");
+  const previousPlayback = existingVideo
+    ? {
+        src: existingVideo.getAttribute("src"),
+        time: existingVideo.currentTime,
+        paused: existingVideo.paused,
+      }
+    : null;
+  void loadEpisodeFilm(view);
   const scenesHTML = scenes
     .map((scene, index) => {
       const row = rows.get(scene.sceneId);
@@ -760,11 +900,14 @@ function renderEpisodePanel() {
         ? `<p class="meta">有 ${budget.foreignCurrencyJobs.length} 个任务使用其他币种报价，不进入集级 CNY 额度。</p>`
         : ""
     }
+    ${episodeFilmSection(view)}
     <div class="episode-scenes">${scenesHTML || '<p class="empty">分集还没有冻结的场记。</p>'}</div>
     <h3>角色一致性</h3>
     <ul class="episode-consistency">${charactersHTML}</ul>
     <p class="meta">分集、场记与角色圣经由 Agent 的 episode_* / bible_* 工具保存；整集登记与逐镜头重做通过对话显式确认或 CLI 执行，这里只读展示。</p>`;
   icons(panel);
+  bindEpisodeFilm(panel);
+  restoreEpisodePlayback(panel, previousPlayback);
 }
 
 function renderStoryboardPanel() {
@@ -1861,6 +2004,10 @@ document.addEventListener("click", async (event) => {
       renderState = null;
       renderError = null;
       if (panelMode === "storyboard") renderStoryboardPanel();
+    }
+    if (action === "toggle-episode-subtitles") {
+      episodeSubtitleOn = !episodeSubtitleOn;
+      applyEpisodeSubtitles($("#episode-film-video"));
     }
     if (action === "batch-selected") await confirmBatch();
     if (action === "confirm-batch") await submitBatch();
