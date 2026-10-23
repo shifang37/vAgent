@@ -79,6 +79,7 @@ node --test tests/test_season_state.mjs
 - E2 定向用例：`tests/test_m7_batches.py`（10）、`tests/test_m7_batch_api.py`（2）、`tests/test_m7_batch_cli.py`（2）、`tests/test_m7_tools.py`（5）、`tests/test_m7_schema.py`、`tests/test_m7_seasons.py`、`tests/test_m7_season_api.py`、`tests/test_m7_season_cli.py` 共 **43 passed**；前端 `season-state` 14 项通过。
 - 版本敏感子集：`test_m2_compatibility`、`test_m2_clients`、`test_m2_generation`、`test_m2_integration`、`test_m3_recovery`、`test_m5_tools`、`test_m6_tools`、`test_video_integration`、`test_live_application` 共 **135 passed**；`test_m1c_evaluation` 与 `test_m5_episodes` 共 **35 passed**（未上调任何上下文预算）。
 - 契约基线：`test_every_e0_baseline_schema_hash_is_unchanged` 复核 E0 的 165 个既有模型哈希全部不变；新增模型只有 `Batch`/`BatchEpisode`/`BatchEstimate` 与工具输入 `SeasonGenerationArgs`。
+- 安装态 wheel：重新 `python -m build` 后在仓库外安装 wheel 并运行 `scripts/wheel_smoke.py` **PASS**（Web 资源、配置脱敏、流式、本地 MCP、M1b 5 用例、M1-C 7 用例、M2/M3/M5/M6 工作台与 7/6/5/3 用例、keys-only live 夹具与清理）。期间修复 M6/M7 规则增长后 wheel smoke 的两处夹具上下文预算：`smoke_live_media` 显式 98 KiB、M1-C 评估传 `--context-bytes 98304`；产品默认 `VAGENT_CONTEXT_BYTES` 保持 65536。
 
 ## 8. 边界与明确未做
 

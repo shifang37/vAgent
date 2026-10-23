@@ -327,6 +327,9 @@ async def smoke_live_media(directory):
             {
                 "VAGENT_HOME": str(home),
                 "VAGENT_VIDEO_MODE": "live",
+                # The live tool surface grew with M6/M7; keep this fixture's harness
+                # budget aligned with the tests instead of the product default.
+                "VAGENT_CONTEXT_BYTES": "98304",
                 "VAGENT_DASHSCOPE_KEY": "wheel-video-fixture-key",
                 "VAGENT_DASHSCOPE_WORKSPACE_ID": "wheel-fixture",
             }
@@ -496,6 +499,9 @@ def smoke_m1c_evaluation(directory):
             str(Path(directory) / "m1c-state"),
             "--output",
             str(output),
+            # Match the M2/M3 fixture budget after the live rule text grew in M6/M7.
+            "--context-bytes",
+            "98304",
         ],
         env=isolated_environment(Path(directory) / "unused-config"),
     )
