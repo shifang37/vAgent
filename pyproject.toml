@@ -4,7 +4,7 @@ build-backend = "hatchling.build"
 
 [project]
 name = "shifang37-vagent"
-version = "0.4.0"
+version = "0.5.0"
 description = "DeepSeek video creation agent with a custom LangGraph harness"
 readme = "README.md"
 requires-python = ">=3.11"
