@@ -36,12 +36,16 @@ jobs:
       - run: node --check web/subtitle-state.js
       - run: node --check web/episode-state.js
       - run: node --check web/season-state.js
+      - run: node --check web/render-state.js
+      - run: node --check web/timeline-state.js
       - run: node --test tests/test_job_state.mjs
       - run: node --test tests/test_storyboard_state.mjs
       - run: node --test tests/test_film_state.mjs
       - run: node --test tests/test_episode_state.mjs
       - run: node --test tests/test_subtitle_state.mjs
+      - run: node --test tests/test_render_state.mjs
       - run: node --test tests/test_season_state.mjs
+      - run: node --test tests/test_timeline_state.mjs
       - run: python -m pytest -q
       - run: python -m build --no-isolation --outdir dist/python
       - name: Verify installed wheel outside source tree

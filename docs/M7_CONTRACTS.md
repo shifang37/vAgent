@@ -26,6 +26,8 @@
 > - **音轨的权威性**：`scope=timeline` 只混音 `TimelineVersion.audio` 列出的资产，不再沿用 M6 的“全部已导入 BGM/SFX 自动混入”；voice 由重映射后的 cue 定位，完全裁掉的 cue 不参与混音；BGM/SFX 按 `startMs/gainDb` 放置。
 > - **渲染与版本**：`FilmVersion.assembly_version=ffmpeg-render-timeline-v1`、`render.sources.timeline` 记录时间线 ID/版本/指纹；同一集的时间线渲染与整集渲染共享一条成片历史（按指纹幂等，旧版本逐字节保留）。`FilmRenderArgs`/`RenderReadArgs`/`RenderTask` 只追加 `timeline` 相关可选字段。
 > - **客户端动作**：`POST /api/sessions/{id}/timelines/save`、`GET /api/episodes/{id}/timeline`、`POST /api/audio/import` 与 `GET /api/audio` 都是本地动作；保存时间线/导入音频使用 `videoMode=off` 的 metadata-only 客户端 Run，渲染使用本地 `film_render`（不再要求视频模式）。导入只接受 WAV/MP4（≤25 MB、≤60 秒），强制 `license`/`sourceUrl`，按 SHA-256 去重，模型只看到 `audioId`。
+>
+> **E4 已验收（2026-10-23）**：`scripts/evaluate_m7.py` 默认离线覆盖 3 集批次/失败隔离/恢复、时间线 v1→v2 重拼、字幕重映射、过期拒绝与非法编辑拒绝；`tests/test_m7_evaluation.py` 4 项；受控浏览器完成编辑/预览/导出；`scripts/wheel_smoke.py` 追加安装态 M7 套件与季/时间线工作台。真实视频 submit=0、文本模型调用=0、TTS 真实请求=0，未新增付费样本；tools/rules 保持 **18/18**（冻结 16/16），未改产品语义。详见 [M7 验收](./M7_ACCEPTANCE.md)。
 
 ## 1. 决策与版本
 
@@ -210,7 +212,7 @@ BGM/SFX 导入不注册为模型工具：它是 Web/CLI 的受控上传动作，
 | E1 | **15/15** | `season_save`、`season_read`；schema 9 |
 | E2 | **16/16** | `season_generate` |
 | E3 | **18/18** | `timeline_save`、`timeline_read`；`film_render` 增加 `timeline` scope 与时间线字段 |
-| E4 | 18/18（不变） | 只做验收与修复 |
+| E4 | 18/18（不变） | 只做验收与修复；已验收 |
 
 **费用口径**：视频与 TTS 分桶，不换汇、不互相抵扣；批次与逐集都在登记事务内复核额度；`unknown` 价格只报字符数/次数并明确标注；任何付费请求都必须显式确认、回显估算，不自动重提。headless 仍只编排分镜，不加入 `season_generate` 或时间线渲染。
 
@@ -252,7 +254,7 @@ M6 的 18 个错误码全部保留；M7 新增：
 | E1 季与 schema 9 | **已交付（2026-10-23）**：schema v9（`seasons`/`batches`/`timelines` 三个空集合）、`Season`/`SeasonVersion`、`season_save`/`season_read`、v8→v9 逐字节备份、CLI/Web 季面板；tools/rules **15/15**（冻结 13/13）。见 [E1 验收](./M7_E1_ACCEPTANCE.md) | 旧 v1–v8 数据可读；季成员唯一、顺序只增不改；无 Job、无模型、submit=0 |
 | E2 批量队列 | **已交付（2026-10-23）**：`Batch`/`BatchEpisode`、`season_generate`（1–3 集、逐集原子、失败隔离、显式恢复、60 Job/180 CNY 预检）、Store 崩溃恢复（`BATCH_INTERRUPTED`）、`season_read` 批次交付计数、CLI/Web 批量确认与恢复；tools/rules **16/16**（冻结 15/15）。见 [E2 验收](./M7_E2_ACCEPTANCE.md) | 3 集批次中单集失败不阻塞其他集；单集交付失败可由 `shot_redo` 修复且不影响其他集；恢复不重复提交；不确定提交不重投；受控/离线 submit=0 |
 | E3 时间线工作台 | **已交付（2026-10-23）**：`Timeline`/`TimelineVersion`/`TimelineClip`/`TimelineTransition`/`TimelineSubtitleRef`/`TimelineAudioTrack`/`TimelineTitleCard`、`timeline_save`/`timeline_read`、`film_render` 的 `timeline` scope、`ffmpeg-render-timeline-v1`、`timeline-subtitle-remap-v1`、客户端 BGM/SFX 导入、Web 裁剪/排序/转场/预览/导出；tools/rules **18/18**（冻结 16/16）。见 [E3 验收](./M7_E3_ACCEPTANCE.md) | 重排/裁剪/转场后成片可播放且时长正确；字幕不漂移；旧版本保留；同指纹幂等；失败不提交 |
-| E4 验收 | **待实施**：`scripts/evaluate_m7.py` 默认离线、3 集批次/失败隔离/恢复、时间线 v1→v2 重拼、浏览器工作台、安装态与 CI；复用已有本地媒体 | 3 集批量中单集失败不阻塞；恢复不重复提交；时间线编辑后重拼版本只增不改；浏览器可编辑/预览/导出；真实付费样本需单独授权 |
+| E4 验收 | **已交付（2026-10-23）**：`scripts/evaluate_m7.py` 默认离线、3 集批次/失败隔离/恢复、时间线 v1→v2 重拼、字幕重映射、受控浏览器编辑/预览/导出、安装态 wheel 与 CI；复用已有本地媒体，未新增付费样本。见 [M7 验收](./M7_ACCEPTANCE.md) | 3 集批量中单集失败不阻塞；恢复不重复提交；时间线编辑后重拼版本只增不改；浏览器可编辑/预览/导出；真实付费样本需单独授权 |
 
 ## 10. 明确不做
 

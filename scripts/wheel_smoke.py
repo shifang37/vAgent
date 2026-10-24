@@ -3,6 +3,7 @@
 import argparse
 import asyncio
 import hashlib
+import io
 import json
 import os
 import struct
@@ -10,6 +11,7 @@ import subprocess
 import sys
 import sysconfig
 import tempfile
+import wave
 import zlib
 from contextlib import chdir
 from datetime import datetime, timedelta
@@ -477,6 +479,9 @@ def smoke_evaluation(directory):
             str(Path(directory) / "m1b-state"),
             "--output",
             str(output),
+            # Match the pytest fixture after the M6/M7 tool and rule growth.
+            "--context-bytes",
+            "98304",
         ],
         env=isolated_environment(Path(directory) / "unused-config"),
     )
@@ -1075,6 +1080,224 @@ async def smoke_m6_workbench(directory, evaluation_report):
     }
 
 
+def smoke_m7_evaluation(directory):
+    output = Path(directory) / "m7-evaluation.json"
+    run_command(
+        [
+            sys.executable,
+            "-I",
+            str(Path(__file__).with_name("evaluate_m7.py").resolve()),
+            "--home",
+            str(Path(directory) / "m7-state"),
+            "--output",
+            str(output),
+        ],
+        env=isolated_environment(Path(directory) / "unused-config"),
+        timeout=900,
+    )
+    report = json.loads(output.read_text(encoding="utf-8"))
+    totals = report["totals"]
+    assert report["status"] == "passed" and report["mode"] == "offline-fixture"
+    assert totals["passedCases"] == totals["plannedCases"] == 3
+    assert totals["mockJobs"] == 96 and totals["batches"] == 4 and totals["batchResumes"] == 1
+    assert totals["controlledSubmits"] == 14 and totals["deliveredClips"] == 14
+    assert totals["timelineVersions"] == 2 and totals["filmVersions"] == 2
+    assert totals["subtitleCues"] == 22
+    assert totals["realProviderCalls"] == 0 and totals["textModelCalls"] == 0
+    assert not (Path(report["dataDirectory"]) / "season-batch" / "instance.lock").exists()
+    return report
+
+
+def silent_wav(seconds=0.5, sample_rate=48000):
+    buffer = io.BytesIO()
+    with wave.open(buffer, "wb") as handle:
+        handle.setnchannels(1)
+        handle.setsampwidth(2)
+        handle.setframerate(sample_rate)
+        handle.writeframes(b"\x00\x00" * int(sample_rate * seconds))
+    return buffer.getvalue()
+
+
+async def smoke_m7_workbench(directory, evaluation_report):
+    """Installed M7 surface: season/batch, timeline panel, audio import and exports."""
+    home = Path(evaluation_report["dataDirectory"]) / "timeline-reassemble"
+    from vagent.video.films import Film, find_episode_film
+    from vagent.video.seasons import Season
+    from vagent.video.timelines import Timeline
+
+    with FileStore.open(home) as store:
+        state = store.snapshot()
+        season = Season.model_validate(next(iter(state["seasons"].values())))
+        timeline = Timeline.model_validate(next(iter(state["timelines"].values())))
+        film = find_episode_film(state, "m7-e4", timeline.episode_id)
+        assert film is not None
+        version = Film.model_validate(state["films"][film.id]).versions[-1]
+        film_id = film.id
+        film_version = version.version
+        film_sha = version.sha256
+        duration_seconds = version.metadata.duration_seconds
+        sidecar_url = f"/api/films/{film_id}/versions/{film_version}/subtitles.srt"
+        expected_sidecar = version.render.subtitle.sidecar_sha256
+        expected_jobs = len(state["jobs"])
+        batch_id = next(iter(state["batches"].values()))["id"]
+    cli = Path(sysconfig.get_path("scripts")) / ("vagent.exe" if os.name == "nt" else "vagent")
+    env = isolated_environment(home)
+    season_show = json.loads(
+        run_command(
+            [str(cli), "season", "show", "-s", "m7-e4", "--season", season.id],
+            env=env,
+            timeout=180,
+        )
+    )
+    assert season_show["season"]["currentVersion"] == 1
+    assert len(season_show["episodes"]) == 2
+    assert season_show["batch"]["batchId"] == batch_id
+    assert season_show["batch"]["status"] == "succeeded"
+    assert [item["jobCount"] for item in season_show["batch"]["episodes"]] == [12, 12]
+    timeline_show = json.loads(
+        run_command(
+            [str(cli), "timeline", "show", "-s", "m7-e4", "--episode", timeline.episode_id],
+            env=env,
+            timeout=180,
+        )
+    )
+    assert timeline_show["timelineId"] == timeline.id
+    assert timeline_show["currentVersion"] == 2 and timeline_show["latest"]["clipCount"] == 14
+    assert timeline_show["latest"]["effectiveDurationMs"] == 65_600
+    assert timeline_show["latest"]["stale"] is False
+    sources = json.loads(
+        run_command(
+            [str(cli), "timeline", "sources", "-s", "m7-e4", "--episode", timeline.episode_id],
+            env=env,
+            timeout=180,
+        )
+    )
+    assert len(sources["shots"]) == 14
+    assert sources["timeline"]["currentVersion"] == 2
+    assert any(item["kind"] == "bgm" for item in sources["audio"])
+    audio_list = json.loads(run_command([str(cli), "audio", "list", "-s", "m7-e4"], env=env, timeout=180))
+    assert any(item["kind"] == "bgm" for item in audio_list["audio"])
+    renders = json.loads(
+        run_command(
+            [str(cli), "film", "renders", "-s", "m7-e4", "--timeline", timeline.id],
+            env=env,
+            timeout=180,
+        )
+    )
+    assert renders["render"]["status"] == "succeeded"
+    assert renders["render"]["timelineId"] == timeline.id
+    assert renders["render"]["filmVersion"] == film_version
+    replayed = json.loads(
+        run_command(
+            [
+                str(cli),
+                "film",
+                "render",
+                "-s",
+                "m7-e4",
+                "--timeline",
+                timeline.id,
+                "--mode",
+                "both",
+                "--confirm",
+            ],
+            env=env,
+            timeout=300,
+        )
+    )
+    assert replayed["replay"] is True and replayed["filmVersion"] == film_version
+
+    config = load_config({"VAGENT_HOME": str(home), "VAGENT_VIDEO_MODE": "mock"})
+    app = create_app(config)
+    async with app.router.lifespan_context(app):
+        async with httpx.AsyncClient(
+            transport=httpx.ASGITransport(app=app), base_url="http://127.0.0.1:3210"
+        ) as client:
+            for name in ("season-state.js", "timeline-state.js", "app.js", "index.html", "styles.css"):
+                assert (await client.get(f"/{name}")).status_code == 200
+            page = await client.get("/")
+            assert b'id="season-panel"' in page.content
+            assert b'id="timeline-panel"' in page.content
+            assert b'id="audio-input"' in page.content
+            seasons = (await client.get("/api/seasons?projectId=m7-e4")).json()
+            assert [item["seasonId"] for item in seasons["seasons"]] == [season.id]
+            detail = (await client.get(f"/api/seasons/{season.id}?projectId=m7-e4")).json()
+            assert detail["batch"]["status"] == "succeeded"
+            assert len(detail["episodes"]) == 2
+            estimate = (await client.get(f"/api/seasons/{season.id}/estimate?projectId=m7-e4")).json()
+            assert estimate["episodes"] and estimate["overLimit"] is False
+            editor = (
+                await client.get(f"/api/episodes/{timeline.episode_id}/timeline?projectId=m7-e4")
+            ).json()
+            assert editor["timeline"]["currentVersion"] == 2
+            assert editor["timeline"]["stale"] is False
+            assert len(editor["shots"]) == 14
+            assert any(item["kind"] == "bgm" for item in editor["audio"])
+            timeline_detail = (await client.get(f"/api/timelines/{timeline.id}?projectId=m7-e4")).json()
+            assert timeline_detail["latest"]["effectiveDurationMs"] == 65_600
+            audio = (await client.get("/api/audio?projectId=m7-e4")).json()
+            assert any(item["kind"] == "bgm" for item in audio["audio"])
+            client.headers["X-CSRF-Token"] = (await client.get("/api/session-token")).json()["token"]
+            imported = await client.post(
+                "/api/audio/import",
+                data={
+                    "clientRequestId": "wheel-m7-audio",
+                    "projectId": "m7-e4",
+                    "kind": "sfx",
+                    "title": "快门",
+                    "sourceUrl": "https://example.test/shutter.wav",
+                    "license": "CC0",
+                },
+                files={"file": ("shutter.wav", silent_wav(), "audio/wav")},
+            )
+            assert imported.status_code == 201, imported.text
+            assert imported.json()["kind"] == "sfx" and imported.json()["replayed"] is False
+            render_read = (await client.get(f"/api/renders?projectId=m7-e4&timelineId={timeline.id}")).json()
+            assert render_read["render"]["status"] == "succeeded"
+            assert render_read["render"]["filmVersion"] == film_version
+            assert render_read["render"]["render"]["subtitle"]["sidecarUrl"] == sidecar_url
+            session = (await client.get("/api/sessions/m7-e4")).json()
+            assert session["season"]["batch"]["batchId"] == batch_id
+            episode_detail = (await client.get(f"/api/episodes/{timeline.episode_id}?projectId=m7-e4")).json()
+            assert episode_detail["timeline"]["timelineId"] == timeline.id
+            assert episode_detail["render"]["scope"] == "timeline"
+            assert episode_detail["render"]["filmVersion"] == film_version
+            assert episode_detail["render"]["mediaUrl"] == f"/api/media/{version.output_media_id}/content"
+            sidecar = await client.get(sidecar_url)
+            assert sidecar.status_code == 200
+            assert hashlib.sha256(sidecar.content).hexdigest() == expected_sidecar
+            film_media = await client.get(
+                episode_detail["render"]["mediaUrl"], headers={"Range": "bytes=0-1023"}
+            )
+            assert film_media.status_code in {200, 206}
+            assert len(film_media.content) == 1024 or film_media.status_code == 200
+    with FileStore.open(home) as reopened:
+        assert len(reopened.snapshot()["jobs"]) == expected_jobs
+    return {
+        "seasonId": season.id,
+        "seasonVersion": season.current_version,
+        "batchId": batch_id,
+        "episodeId": timeline.episode_id,
+        "timelineId": timeline.id,
+        "timelineVersions": timeline.current_version,
+        "filmId": film_id,
+        "filmVersion": film_version,
+        "filmSha256": film_sha,
+        "durationSeconds": duration_seconds,
+        "sidecarSha256": expected_sidecar,
+        "cliSeason": True,
+        "cliTimeline": True,
+        "cliRenderReplay": True,
+        "httpSeasonEstimate": True,
+        "httpAudioImport": True,
+        "httpTimelineEditor": True,
+        "httpRenderRead": True,
+        "httpSessionSnapshot": True,
+        "httpSidecar": True,
+        "httpFilmRange": True,
+    }
+
+
 async def smoke_m5_workbench(directory):
     """Installed M5 surface: episode state, CLI read view and the read-only Web panel."""
     from vagent.video.adaptation import plan_episode
@@ -1505,6 +1728,8 @@ async def main(output=None):
             m5_report = smoke_m5_evaluation(directory)
             m6_report = smoke_m6_evaluation(directory)
             m6_workbench = await smoke_m6_workbench(directory, m6_report)
+            m7_report = smoke_m7_evaluation(directory)
+            m7_workbench = await smoke_m7_workbench(directory, m7_report)
             keys_only_report = await smoke_keys_only_live(directory)
             report = {
                 "status": "passed",
@@ -1530,6 +1755,8 @@ async def main(output=None):
                     "fiveCaseM5Suite": True,
                     "m6FilmWorkbenchCliAndHttp": True,
                     "threeCaseM6Suite": True,
+                    "m7SeasonTimelineWorkbenchCliAndHttp": True,
+                    "threeCaseM7Suite": True,
                     "keysOnlyLiveSharedHost": True,
                 },
                 "videoRestart": video_report,
@@ -1544,6 +1771,8 @@ async def main(output=None):
                 "m5Evaluation": m5_report,
                 "m6FilmWorkbench": m6_workbench,
                 "m6Evaluation": m6_report,
+                "m7Workbench": m7_workbench,
+                "m7Evaluation": m7_report,
                 "keysOnlyLive": keys_only_report,
             }
     report["temporaryDataCleaned"] = not Path(directory).exists()
@@ -1551,7 +1780,7 @@ async def main(output=None):
         output.parent.mkdir(parents=True, exist_ok=True)
         output.write_text(json.dumps(report, ensure_ascii=False, indent=2), encoding="utf-8")
     print(
-        "PASS: installed wheel, Web assets, config, streaming, text/quality, MCP, mock video tools, durable wait, original Run restart/automatic continuation, readonly delivery, unchanged budgets, CLI list/get/usage, five M1-B cases, live protocol with local media restart and CLI media evidence, seven M1-C cases, M2 storyboard/asset CLI and HTTP surface, seven M2 cases, M3 local film assembly with film media HTTP/CLI replay and provider settings, six M3 cases, M5 episode CLI/HTTP workbench and five M5 cases, M6 episode render CLI/HTTP workbench and three M6 cases, keys-only live shared-host fixture with zero-cost save probe and hot registration, cleanup."
+        "PASS: installed wheel, Web assets, config, streaming, text/quality, MCP, mock video tools, durable wait, original Run restart/automatic continuation, readonly delivery, unchanged budgets, CLI list/get/usage, five M1-B cases, live protocol with local media restart and CLI media evidence, seven M1-C cases, M2 storyboard/asset CLI and HTTP surface, seven M2 cases, M3 local film assembly with film media HTTP/CLI replay and provider settings, six M3 cases, M5 episode CLI/HTTP workbench and five M5 cases, M6 episode render CLI/HTTP workbench and three M6 cases, M7 season/timeline workbench with audio import and three M7 cases, keys-only live shared-host fixture with zero-cost save probe and hot registration, cleanup."
     )
     return report
 
