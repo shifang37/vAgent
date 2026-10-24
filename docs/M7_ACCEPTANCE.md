@@ -83,7 +83,7 @@ node --test tests/test_job_state.mjs tests/test_storyboard_state.mjs tests/test_
 
 - 本包新增：`scripts/evaluate_m7.py`、`tests/test_m7_evaluation.py` 4 项、wheel smoke 的 M7 两段；CI 同时补上 `render-state`/`timeline-state` 的 `node --check` 与 Node 测试（E3 的 CI 只跑到 `season-state`）。
 - 3 项 skip 仍是既有的「当前 Windows 账户无符号链接权限」用例，未新增 skip。
-- 四组 CI（ubuntu/windows × Python 3.11/3.12）在最终代码提交上的运行与结论见第 6 节。
+- 四组 CI（ubuntu/windows × Python 3.11/3.12）在最终代码提交 `760fed9` 上全部 **success**（[运行 40063039486](https://github.com/shifang37/vAgent/actions/runs/40063039486)，attempt 2；attempt 1 的 Windows 3.12 因 runner 通信中断重跑，不是测试失败）。
 
 ## 4. 明确未做与边界
 
@@ -100,10 +100,11 @@ node --test tests/test_job_state.mjs tests/test_storyboard_state.mjs tests/test_
 2. **本机 workspace-write 沙箱的子进程写入不可用（环境问题，不是产品缺陷）。** 开发开始时 Ruff/pytest 在 `scripts/`、`src/`、`tests/`、`docs/` 无法创建临时文件；本会话文件策略随后切换为完全访问，Ruff、pytest、构建与浏览器验收均正常执行，未改动任何文件权限。与 M3/M5 记录的宿主环境问题同类。
 3. **浏览器面板首帧早于会话快照。** 时间线面板打开时依赖 `snapshot.episode.episodes`；会话切换后快照尚未到达时面板显示空态。受控脚本在面板出现后重试打开直至分集选择器出现（`panelAttempts=2`），页面本身无需修改；这是验收脚本的等待策略，不是产品缺陷。
 4. **E3 推送后的四组 CI 全部失败于安装态 M1-b 用例。** E3 把工具/规则增长到 18/18 后，`scripts/wheel_smoke.py` 的 `smoke_evaluation` 仍用 `evaluate_m1b.py` 的默认 64 KiB，安装态 `await-success` 触发 `CONTEXT_LIMIT`；pytest 夹具此前已提高到 96 KiB。修复：wheel smoke 显式传 `--context-bytes 98304`，产品默认 `VAGENT_CONTEXT_BYTES` 仍为 65536。四组 CI 在 E4 最终提交上复跑通过。
+5. **Windows 3.12 runner 通信中断（基础设施）。** E4 首次 CI（attempt 1）的 ubuntu 3.11/3.12 与 windows 3.11 均 success；windows 3.12 在 `pytest` 步骤被 GitHub 标记为 “hosted runner lost communication with the server”，没有测试断言失败。重跑该 job（attempt 2）后四组全部 success。
 
 ## 6. 复现说明
 
 1. 全新数据目录运行离线套件：`VAGENT_HOME=<new> .\.venv\Scripts\python.exe scripts/evaluate_m7.py --home <new> --output <new.json>`；重放同一调用使用相同参数与同一数据目录之外的新目录。
 2. 浏览器：复制 `tmp/m7-e4-suite-final/timeline-reassemble` 为 `tmp/m7-e4-browser/home`，`VAGENT_HOME=tmp/m7-e4-browser/home VAGENT_VIDEO_MODE=mock .\.venv\Scripts\python.exe -m vagent web --port 3314 --no-open`，再运行 `node tmp/m7-e4-browser/check.mjs`；报告与截图写入 `output/m7-e4-browser/`。
 3. 安装态：构建 wheel、在独立环境安装后运行 `scripts/wheel_smoke.py --output output/m7-e4-wheel-smoke.json`。
-4. CI：四组 `Agent checks`（Ubuntu/Windows × Python 3.11/3.12）在最终代码提交上的运行与结论见 `output/m7-e4-ci-*-summary.json`；运行链接与任务 ID 在本文件后续更新中回填。
+4. CI：最终代码提交 `760fed9` 的 `Agent checks` 运行 [40063039486](https://github.com/shifang37/vAgent/actions/runs/40063039486)（attempt 2）四组全部 success；任务 ID 与起止时间见 `output/m7-e4-ci-760fed9-summary.json`。
