@@ -98,6 +98,19 @@ import {
   timelineValidation,
 } from "./timeline-state.js";
 
+import {
+  ROUTE_VERIFICATION,
+  routeCandidateRows,
+  routeErrorText,
+  routeNotes,
+  routePreviewPath,
+  routeProviderLabel,
+  routeProviderSwitchBody,
+  routeRecommendedLabel,
+  routeRequestSummary,
+  routeSwitchable,
+} from "./route-state.js";
+
 const $ = (selector) => document.querySelector(selector);
 const paths = {
   "plus-square":
@@ -233,6 +246,9 @@ let timelineEditor = null,
   timelinePreviewState = { index: -1, plan: [] },
   timelineAudioBusy = false,
   pendingTimelineAudio = null;
+// M8 E1 route preview: one read-only comparison dialog, fetched per view. It is
+// never cached and never changes a Job; switching a provider uses PATCH /api/config.
+let routePreviewBusy = false;
 const IMAGE_TYPES = ["image/png", "image/jpeg", "image/webp"];
 const MAX_IMAGE_BYTES = 20 * 1024 * 1024;
 const currentRun = () => snapshot?.run;
@@ -977,6 +993,7 @@ function renderEpisodePanel() {
         <p class="meta">分镜：${scene.storyboardId ? "已绑定" : "未绑定"} · 成片：${escapeHTML(filmStatusLabel(film))}</p>
         <div class="episode-actions">
           ${scene.storyboardId ? `<button class="secondary" data-action="open-scene-storyboard" data-storyboard-id="${escapeHTML(scene.storyboardId)}">查看分镜与镜头</button>` : ""}
+          ${scene.storyboardId ? `<button class="secondary" data-action="route-preview" data-scope="episode" data-storyboard-id="${escapeHTML(scene.storyboardId)}">集级报价对比</button>` : ""}
           ${playable ? `<a class="primary" href="${escapeHTML(latest.mediaUrl)}" target="_blank" rel="noopener">播放成片 v${film.currentVersion}</a>` : ""}
           ${playable ? `<a class="secondary" href="${escapeHTML(latest.mediaUrl)}?download=1" download="${escapeHTML(latest.outputMediaId)}.mp4">下载</a>` : ""}
         </div>
@@ -1861,6 +1878,7 @@ function renderStoryboardPanel() {  const panel = $("#storyboard-panel");
       <button class="primary" data-action="batch-selected" ${chosen && !shotBusy.size ? "" : "disabled"}>生成选中镜头 · ${chosen}</button>
       <button class="secondary" data-action="toggle-all-shots">${chosen === board.shots.length ? "清空选择" : "全选镜头"}</button>
       <button class="secondary" data-action="refresh-storyboard">刷新</button>
+      <button class="secondary" data-action="route-preview" data-scope="shot">报价对比</button>
       ${playlist.items.length ? `<button class="secondary" data-action="${playing ? "stop-sequence" : "play-sequence"}">${playing ? "停止连播" : `连播 ${playlist.items.length} 个镜头`}</button>` : ""}
     </div>
     ${playing ? sequencePlayer(playing, playlist) : ""}
@@ -2429,6 +2447,89 @@ function openDialog(title, body) {
   if (!$("#dialog").open) $("#dialog").showModal();
   return dialogGeneration;
 }
+function routePreviewHTML(view) {
+  const rows = routeCandidateRows(view);
+  const currentProvider = health?.configuration?.videoProvider;
+  const cards = rows
+    .map(
+      (row) => `<article class="route-card ${row.available ? "route-available" : "route-blocked"}">
+        <div class="route-card-head"><strong>${escapeHTML(row.label)}</strong><span class="job-state ${
+          row.available ? "succeeded" : "attention"
+        }">${row.available ? "可用" : "不可用"}</span></div>
+        <p class="meta">${escapeHTML(row.model || "没有已发布的冻结条目")}</p>
+        <p class="route-amount">${escapeHTML(row.amountText)}</p>
+        ${
+          row.quantity
+            ? `<p class="meta">${escapeHTML(row.unitPrice)} ${escapeHTML(row.currency)}/秒 × ${escapeHTML(row.quantity)} 秒 · 价格版本 ${escapeHTML(row.priceVersion || "未知")}</p>`
+            : ""
+        }
+        ${
+          row.available
+            ? ""
+            : `<p class="meta">原因：${escapeHTML(row.reasonText)}（<code>${escapeHTML(row.reason)}</code>）</p>`
+        }
+        <p class="meta">Key ${row.keyConfigured ? "已配置（不读取内容）" : "未配置"} · ${
+          row.verification === ROUTE_VERIFICATION ? "仅有文档依据，未做真实样本" : escapeHTML(row.verification || "")
+        }</p>
+        ${
+          row.sourceUrl
+            ? `<p class="meta">价格来源 <a href="${escapeHTML(row.sourceUrl)}" target="_blank" rel="noopener noreferrer">${escapeHTML(row.sourceUrl)}</a> · 核对于 ${escapeHTML(row.checkedAt || "未知")}</p>`
+            : ""
+        }
+        ${
+          row.available && routeSwitchable(row, currentProvider)
+            ? `<p><button class="secondary" data-action="use-route-provider" data-provider="${escapeHTML(row.provider)}">使用该供应商</button></p>`
+            : ""
+        }
+      </article>`,
+    )
+    .join("");
+  return `<p class="meta">${escapeHTML(routeRequestSummary(view))} · 推荐：<strong>${escapeHTML(
+    routeRecommendedLabel(view),
+  )}</strong></p>
+    <div class="route-cards">${cards}</div>
+    <ul class="route-notes">${routeNotes(view)
+      .map((note) => `<li>${escapeHTML(note)}</li>`)
+      .join("")}</ul>
+    <p class="meta">「使用该供应商」只把选择写进既有设置（PATCH /api/config 的 videoProvider）；已登记的 Job 保留冻结的供应商、能力与价格版本，不会被改写或重新提交。</p>`;
+}
+
+async function showRoutePreview({ scope = "shot", storyboardId = null, version = null, shotIds = [] } = {}) {
+  if (routePreviewBusy) return toast("正在读取报价，请稍候。");
+  routePreviewBusy = true;
+  openDialog("供应商报价对比", '<p class="meta">正在按冻结能力表比较报价…</p>');
+  try {
+    // The config is read only to know the current provider (and whether it may be
+    // switched); the preview itself never writes it.
+    const [config, view] = await Promise.all([
+      api("/api/config"),
+      api(routePreviewPath({ storyboardId, version, shotIds, scope })),
+    ]);
+    applyConfiguration(config);
+    openDialog("供应商报价对比", routePreviewHTML(view));
+  } catch (error) {
+    openDialog(
+      "供应商报价对比",
+      `<p class="meta">无法预览：${escapeHTML(routeErrorText(error.code))}</p><p class="meta">${escapeHTML(error.message || "")}</p>`,
+    );
+  } finally {
+    routePreviewBusy = false;
+  }
+}
+
+async function useRouteProvider(provider) {
+  if (!provider) return;
+  const config = await api("/api/config", {
+    method: "PATCH",
+    body: JSON.stringify(routeProviderSwitchBody(provider)),
+  });
+  applyConfiguration(config);
+  $("#dialog").close();
+  toast(
+    `已切换视频供应商为 ${routeProviderLabel(provider)}；只影响之后登记的任务，已登记的 Job 保留冻结的供应商与价格。`,
+  );
+}
+
 function renderConnection() {
   $("#model").textContent = health?.model || "未连接";
   $("#connection-label").textContent = health?.modelKind === "injected-test"
@@ -3110,6 +3211,18 @@ document.addEventListener("click", async (event) => {
       await openSceneStoryboard(
         event.target.closest("[data-storyboard-id]")?.dataset.storyboardId,
       );
+    if (action === "route-preview") {
+      const explicitBoard = event.target.closest("[data-storyboard-id]")?.dataset.storyboardId || null;
+      const board = storyboard();
+      await showRoutePreview({
+        scope: event.target.closest("[data-scope]")?.dataset.scope || "shot",
+        storyboardId: explicitBoard || board?.storyboardId || null,
+        version: explicitBoard ? null : board?.currentVersion ?? null,
+        shotIds: explicitBoard ? [] : selectedShots().map((shot) => shot.id),
+      });
+    }
+    if (action === "use-route-provider")
+      await useRouteProvider(event.target.closest("[data-provider]")?.dataset.provider);
     if (action === "assets") await showAssets();
     if (action === "usage") await showUsage();
     if (action === "refresh-storyboard")

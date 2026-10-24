@@ -1,6 +1,6 @@
 # M8 计划：供应商路由、真实样本与发布
 
-状态：**计划（2026-10-24），待 E0 冻结**。基线 `master` `b1ae8b4`（M7 E4 验收文档；产品代码 `760fed9`）。上一发布 **v0.4.0**（`65857c6`，2026-10-22），本阶段先发布 **v0.5.0**（M6 + M7 检查点），M8 交付后发布 **v0.6.0**。本文件是计划，不是契约：数字与建议值以 E0 冻结的 `docs/M8_CONTRACTS.md` 为准；[M5 计划 §6](./M5_PLAN.md) 保留为概要，本文件是其展开。
+状态：**E0 契约已冻结、E1 路由预览已交付（2026-10-25）；E2–E4 待实施**。基线 `master` `16f377b`（v0.5.0 发布后；schema 9、tools/rules 18/18、168 个契约模型）。v0.5.0 检查点已发布（2026-10-24，[发布说明](./RELEASE_0.5.0.md)），M8 交付后发布 **v0.6.0**。冻结结果见 [M8 契约](./M8_CONTRACTS.md) 与 [E0 验收](./M8_E0_ACCEPTANCE.md)，机器可读基线见 `docs/M8_E0_BASELINE.json`。本文件是计划，不是契约：数字与建议值以 E0 冻结的 `docs/M8_CONTRACTS.md` 为准；[M5 计划 §6](./M5_PLAN.md) 保留为概要，本文件是其展开。
 
 ## 1. 为什么是 M8
 
@@ -17,7 +17,9 @@ M1–M7 已完成产品域闭环：一句话/剧本 → 分集分场分镜 → �
 
 结论：**M8 只做「供应商侧 + 发布」，不扩产品域**——不新增 schema、不新增写工具、不改已冻结的成片/时间线语义。
 
-## 2. 发布检查点 v0.5.0（先做，不改产品代码）
+## 2. 发布检查点 v0.5.0（已完成，2026-10-24）
+
+> **已完成**：v0.5.0 于 2026-10-24 发布（[发布说明](./RELEASE_0.5.0.md)），本节保留为当时的门禁记录；M8 的成果将作为 v0.6.0 发布。
 
 - **内容**：M6 E1–E4（字幕、CosyVoice 适配、混音、转场/标题卡/整集渲染、720P/1080P）+ M7 E0–E4（季、批量、时间线、验收）。
 - **改动**：`pyproject.toml` 0.4.0 → 0.5.0；新增 `docs/RELEASE_0.5.0.md`；README/M1_PLAN/M5_PLAN 状态同步；`dist/python` 归档 0.4.0 产物并构建 0.5.0；保存安装态证据。
@@ -53,6 +55,8 @@ M1–M7 已完成产品域闭环：一句话/剧本 → 分集分场分镜 → �
 产出：`docs/M8_CONTRACTS.md`（路由预览、账单录入、错误码、退避与并发）、`docs/M8_E0_BASELINE.json`（能力表/价格版本/工具面 18/18 哈希）、`scripts/capture_m8_baseline.py`、`docs/M8_E0_ACCEPTANCE.md`。硬约束：不改产品代码、不改 schema、submit=0。
 
 ### 3.2 E1 路由预览与报价对比（2–3 天；submit=0）
+
+> **已完成（2026-10-25）**：`src/vagent/video/routing.py`（`provider-route-v1`）、`vagent route preview`、`GET /api/route/preview`、Web 报价对比面板；真实预览逐项复现 E0 `routeProbe.rowsSha256`，工具面、schema 与 168 个模型哈希不变。证据见 [E1 验收](./M8_E1_ACCEPTANCE.md)。
 
 - **只读预览** `provider_route`：输入分镜（`storyboardId`/版本或 `(mode, durationSeconds, aspectRatio)`），输出每个候选供应商的 `provider/model/capabilitiesVersion/priceVersion/currency/unitPrice/amount/resourceUnits/available/reason/sourceUrl/checkedAt`。
 - **排序**：先「已核实可用」，再按估算金额；并列按固定顺序（wan → kling → fal），保证可复现。
@@ -132,4 +136,4 @@ M1–M7 已完成产品域闭环：一句话/剧本 → 分集分场分镜 → �
 
 ## 9. 新对话启动方式
 
-> 基于 `master`（v0.5.0 发布后；schema 9、tools/rules 18/18、全量回归 1409 passed / 3 skipped），按 `docs/M8_PLAN.md` 执行 M8：先 E0 冻结契约（`docs/M8_CONTRACTS.md` + `docs/M8_E0_BASELINE.json`），再 E1 路由预览、E2 供应商运维与账单、E3 授权真实样本、E4 验收与 v0.6.0 发布。不做 9:16 竖屏；真实付费样本单独授权；Kling/fal/CosyVoice 在样本成功前保持「未做真实样本」标注。
+> 基于 `master`（v0.5.0 已发布；schema 9、tools/rules 18/18、168 个契约模型），**M8 E1 路由预览已交付（2026-10-25）**，现在从 **E2 供应商运维与账单**开始：按 [M8 契约](./M8_CONTRACTS.md) §4–§5 实现 `providers/gate.py`（逐 provider 提交间隔、429 冷却、`PROVIDER_BACKOFF` 只写 `runtimeBlock`）与 `billing.py`（`billing-v1` 手工账本、`vagent usage bill record|show`、`POST/GET /api/usage/bill`、`usage.billing` 汇总），随后 E3 授权真实样本、E4 验收与 v0.6.0 发布。E0 基线 `docs/M8_E0_BASELINE.json` 是全程比对基准：168 个模型哈希、`contractsSha256`、`capabilitiesSha256`、工具/规则哈希与 `routeProbe.rowsSha256` 必须不变（E1 已复现 `rowsSha256`，见 [E1 验收](./M8_E1_ACCEPTANCE.md)）。不做 9:16 竖屏；真实付费样本单独授权；Kling/fal/CosyVoice 在样本成功前保持「未做真实样本」标注。

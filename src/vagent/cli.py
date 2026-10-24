@@ -347,6 +347,27 @@ def local_storyboard(state, args) -> dict:
     return view
 
 
+def local_route(config, state, args) -> dict:
+    """Compare the frozen provider quotes of one request; no Job and no provider call."""
+    from vagent.video import routing
+
+    duration = args.duration
+    if args.storyboard_id is None and args.mode is not None and duration is None:
+        duration = 5
+    request = routing.make_request(
+        scope=args.scope,
+        mode=args.mode,
+        duration_seconds=duration,
+        aspect_ratio=args.aspect,
+        storyboard_id=args.storyboard_id,
+        storyboard_version=args.version,
+        shot_ids=tuple(args.shot_ids or ()),
+        provider=args.provider,
+    )
+    preview = routing.preview_for(config, state, request, require_available=args.require_available)
+    return preview.model_dump(mode="json", by_alias=True)
+
+
 def _episode_text(path: str) -> str:
     """Read one plain-text script; the tool contract owns length and splitting rules."""
     try:
@@ -1323,6 +1344,22 @@ def parser() -> argparse.ArgumentParser:
     web.add_argument("--port", type=int, default=3210)
     web.add_argument("--no-open", action="store_true")
     web.add_argument("--mcp-local", action="store_true", help="启用内置只读视频规划 MCP 服务")
+    route = commands.add_parser("route", help="只读路由预览：比较冻结报价，不登记任务、不调用供应商")
+    route_actions = route.add_subparsers(dest="action", required=True)
+    route_preview = route_actions.add_parser("preview", help="列出生效能力表下每个供应商的可用性与估算金额")
+    route_preview.add_argument(
+        "--storyboard", dest="storyboard_id", help="按分镜预览；省略时按 --mode/--duration"
+    )
+    route_preview.add_argument("--version", type=int, help="分镜版本；省略时用当前版本")
+    route_preview.add_argument("--shot", dest="shot_ids", action="append", help="只看指定镜头；可重复")
+    route_preview.add_argument("--mode", choices=("t2v", "i2v", "flf2v"), help="按规格预览的生成模式")
+    route_preview.add_argument("--duration", type=int, help="按规格预览的镜头秒数；省略时为 5")
+    route_preview.add_argument("--aspect", choices=("16:9",), help="画幅；文生视频固定 16:9")
+    route_preview.add_argument("--scope", choices=("shot", "episode", "batch"), default="shot")
+    route_preview.add_argument("--provider", choices=("wan", "kling", "fal"), help="显式核对一个供应商")
+    route_preview.add_argument(
+        "--require-available", action="store_true", help="没有任何可用候选时返回 ROUTE_UNAVAILABLE"
+    )
     return root
 
 
@@ -1427,6 +1464,9 @@ def main() -> None:
         elif args.command == "usage" and args.project is not None:
             with FileStore.open(config.home) as store:
                 print_json(local_usage(store.snapshot(), args.project))
+        elif args.command == "route":
+            with FileStore.open(config.home) as store:
+                print_json(local_route(config, store.snapshot(), args))
         elif args.command == "usage":
             with FileStore.open(config.home) as store:
                 runs = store.snapshot()["runs"]

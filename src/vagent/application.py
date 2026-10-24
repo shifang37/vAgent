@@ -450,6 +450,46 @@ class ApplicationService:
             },
         )
 
+    def route_preview(
+        self,
+        *,
+        scope="shot",
+        mode=None,
+        duration_seconds=None,
+        aspect_ratio=None,
+        storyboard_id=None,
+        storyboard_version=None,
+        shot_ids=(),
+        provider=None,
+        require_available=False,
+    ):
+        """Read-only provider comparison: no Job, no provider call, no storage write.
+
+        The preview reads the storyboard's frozen shots and whether each provider has
+        a key configured; it never reads credential content and never opens a provider
+        connection. It shares one pure function with the CLI and HTTP faces.
+        """
+        from vagent.video import routing
+
+        request = routing.make_request(
+            scope=scope,
+            mode=mode,
+            duration_seconds=duration_seconds,
+            aspect_ratio=aspect_ratio,
+            storyboard_id=storyboard_id,
+            storyboard_version=storyboard_version,
+            shot_ids=shot_ids,
+            provider=provider,
+        )
+        preview = routing.preview_for(
+            self.config,
+            self.store.snapshot(),
+            request,
+            capabilities=self.video_jobs.capabilities("live"),
+            require_available=require_available,
+        )
+        return preview.model_dump(mode="json", by_alias=True)
+
     def generate_shots(self, session_id, request: dict) -> dict:
         """Batch registration from the local UI, under its own client Run."""
         assert_id(session_id)

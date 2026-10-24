@@ -386,6 +386,33 @@ def create_app(config, *, port=3210, model=None, policy=None):
     async def usage(projectId: str | None = None):
         return app.state.service.usage(projectId)
 
+    @app.get("/api/route/preview")
+    async def route_preview(
+        storyboardId: str | None = None,
+        version: int | None = None,
+        shotIds: str | None = None,
+        mode: str | None = None,
+        durationSeconds: int | None = None,
+        aspectRatio: str | None = None,
+        scope: str = "shot",
+        provider: str | None = None,
+        requireAvailable: bool = False,
+    ):
+        # Read-only, local and provider-free; it reads whether keys exist, never their
+        # content, and it never registers a Job or writes storage.
+        shot_ids = [item for item in (shotIds or "").split(",") if item]
+        return app.state.service.route_preview(
+            scope=scope,
+            mode=mode,
+            duration_seconds=durationSeconds,
+            aspect_ratio=aspectRatio,
+            storyboard_id=storyboardId,
+            storyboard_version=version,
+            shot_ids=shot_ids,
+            provider=provider,
+            require_available=requireAvailable,
+        )
+
     @app.get("/api/assets")
     async def assets(projectId: str | None = None):
         return {"assets": app.state.service.assets(projectId)}
@@ -724,6 +751,7 @@ def create_app(config, *, port=3210, model=None, policy=None):
                 "season-state.js",
                 "render-state.js",
                 "timeline-state.js",
+                "route-state.js",
                 "styles.css",
                 "mark.svg",
             }

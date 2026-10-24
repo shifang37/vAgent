@@ -38,6 +38,7 @@ $env:VAGENT_HOME = Join-Path $PWD '.vagent/web'
 - 批量生成确认对话框：先请求只读估算，逐镜头列出模式/时长/估算与合计，并显示本 Run 已用与剩余额度；确认后整批登记，超出上限时服务端整批拒绝。
 - 序列连播：客户端按顺序播放各镜头本地 MP4（不做服务端拼接），可暂停、下一个或停止；尚无本地媒体的镜头在面板上明确标注并被跳过。
 - 用量面板（左栏「用量统计」）：按项目聚合任务计数与状态、登记估算与账单状态（未取得账单保持未知）、分镜与镜头版本数、素材数、模型 Token 覆盖率与按日记录；只读本地数据，不做外部调用。
+- 报价对比（M8 E1）：分镜面板工具栏「报价对比」（优先使用已勾选镜头）与分集面板逐场「集级报价对比」。对话框只读展示每个供应商一行（金额与币种、可用性与原因、Key 是否配置、`sourceUrl` 与 `checkedAt`）、推荐项与「不换汇/不合计」说明；「使用该供应商」只写既有 `PATCH /api/config` 的 `videoProvider`，不登记 Job、不改写已登记任务，也不调用供应商。
 - 编排观测：上下文字节与裁剪数、项目事实与计划、Skills 版本、MCP 状态、工具目录和事件、已知/未知 Token 用量。
 - 新版 API 可提供当前轮工具参数和结果明细；旧运行实例缺少该字段时隐藏明细区，工具事件仍可见。
 
@@ -71,6 +72,7 @@ live Job 视图包含 `lastProviderStatus`、`queryPauseReason`、冻结费用�
 | `GET /api/assets?projectId=`、`POST /api/assets` | 素材元数据列表 / multipart 上传（CSRF、`projectId` + `file`，正文上限 20 MB + 64 KiB） |
 | `GET /api/assets/{id}`、`GET/HEAD /api/assets/{id}/content` | 元数据与可用性 / 单 Range 图片内容（`?download=1` 附件）；不存在 404、文件缺失或损坏 410 |
 | `GET /api/usage?projectId=` | 读取侧聚合（任务、估算与账单状态、分镜、素材、Token 覆盖率、按日）；不调用模型或供应商 |
+| `GET /api/route/preview?storyboardId=&version=&shotIds=&mode=&durationSeconds=&aspectRatio=&scope=&provider=&requireAvailable=` | 只读供应商报价对比（`provider-route-v1`）：每个供应商一行、可用性与原因、单价/金额/币种、来源与核对日期、推荐项；不需要会话或 CSRF，不登记 Job、不调用供应商、不读凭据内容；`requireAvailable=true` 且无可用时返回 400 `ROUTE_UNAVAILABLE` |
 | `GET /api/films/{storyboardId}?projectId=` | 当前成片与历史版本、逐输入镜头、有理数时间线偏移、受控 `mediaUrl` 与 `mediaAvailable`；无成片时 `film` 为 null；跨项目 404 |
 | `POST /api/sessions/{id}/films/assemble` | CSRF + JSON `{clientRequestId, storyboardId, expectedRevision}`，202 返回成片视图；本地流复制，不登记 Job、不调用供应商；过期 revision 409、输入未交付 409/422、拼接失败 500 但状态不变；同一请求 ID 重放原结果 |
 | `GET /api/subtitles?projectId=&storyboardId=|episodeId=|trackId=` | 当前字幕轨、版本、逐条 cue、时间线来源与受控 SRT/ASS 地址；没有字幕时 `track` 为 null；跨项目不可见 |
@@ -99,7 +101,7 @@ Token 草稿不写入状态文件或事件日志。模型响应通过完成标�
 
 ## 本地访问边界
 
-仅监听 127.0.0.1，Host 限定 localhost/127.0.0.1 与指定端口；Origin 必须精确同源，拒绝 cross-site/same-site Fetch Metadata。写请求需要 CSRF Token；JSON 请求体最多 128 KiB，素材上传是 multipart 且正文最多 20 MB + 64 KiB。静态文件仅提供 `index.html`、`app.js`、`job-state.js`、`storyboard-state.js`、`film-state.js`、`episode-state.js`、`subtitle-state.js`、`season-state.js`、`render-state.js`、`styles.css`、`mark.svg`，不提供 `.env` 或数据目录。Job 提示词、结果和来源标题均作为转义后的文本显示。
+仅监听 127.0.0.1，Host 限定 localhost/127.0.0.1 与指定端口；Origin 必须精确同源，拒绝 cross-site/same-site Fetch Metadata。写请求需要 CSRF Token；JSON 请求体最多 128 KiB，素材上传是 multipart 且正文最多 20 MB + 64 KiB。静态文件仅提供 `index.html`、`app.js`、`job-state.js`、`storyboard-state.js`、`film-state.js`、`episode-state.js`、`subtitle-state.js`、`season-state.js`、`render-state.js`、`timeline-state.js`、`route-state.js`、`styles.css`、`mark.svg`，不提供 `.env` 或数据目录。Job 提示词、结果和来源标题均作为转义后的文本显示。
 
 DeepSeek 与视频 Key 分开配置，来自数据目录 `config.yml`、服务端环境或本地 `.env`，读取接口只返回是否已配置。密码框提交后清空，关闭设置时也清空，不写入 localStorage/sessionStorage。环境和启动配置优先且不可被页面覆盖；文本与视频配置保存后立即生效、无需重启——视频配置用于新登记任务，在途与历史任务按各自冻结配置恢复。运行或验证期间拒绝配置修改，验证期间拒绝新执行。受信任的本机进程仍可调用接口；本服务不是多用户鉴权系统，不支持局域网公开部署。
 

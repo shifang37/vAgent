@@ -2226,3 +2226,52 @@ footer {
 .timeline-notice {
   color: #2f7d4f;
 }
+
+/* M8 E1: read-only provider comparison. The cards keep CNY and USD side by
+   side; there is no cross-currency total and no "cheaper" claim. */
+.route-cards {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  margin: 12px 0;
+}
+.route-card {
+  border: 1px solid #e2e8f1;
+  border-radius: 10px;
+  padding: 12px;
+  background: #fafbfd;
+}
+.route-card.route-available {
+  border-color: #cfe2d6;
+  background: #f7fbf8;
+}
+.route-card.route-blocked {
+  border-color: #f0e2cf;
+  background: #fdfbf7;
+}
+.route-card-head {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 8px;
+}
+.route-amount {
+  font-size: 18px;
+  font-weight: 600;
+  color: #334a61;
+  margin: 6px 0;
+}
+.route-card .meta {
+  margin: 2px 0;
+}
+.route-card a {
+  color: #5c80b0;
+  overflow-wrap: anywhere;
+}
+.route-notes {
+  margin: 10px 0 6px;
+  padding-left: 18px;
+  font-size: 11px;
+  color: #7d8da3;
+  line-height: 1.8;
+}
