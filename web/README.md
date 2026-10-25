@@ -38,8 +38,8 @@ $env:VAGENT_HOME = Join-Path $PWD '.vagent/web'
 - 批量生成确认对话框：先请求只读估算，逐镜头列出模式/时长/估算与合计，并显示本 Run 已用与剩余额度；确认后整批登记，超出上限时服务端整批拒绝。
 - 序列连播：客户端按顺序播放各镜头本地 MP4（不做服务端拼接），可暂停、下一个或停止；尚无本地媒体的镜头在面板上明确标注并被跳过。
 - 用量面板（左栏「用量统计」）：按项目聚合任务计数与状态、登记估算与账单状态（未取得账单保持未知）、分镜与镜头版本数、素材数、模型 Token 覆盖率与按日记录；只读本地数据，不做外部调用。
-- 供应商账单（用量面板底部，M8 E2）：逐币种一行显示估算/已录入/差额与「n 条已录入 · m 个未录入」，未录入固定显示「未录入（未知，不是 0）」，CNY 与 USD 只并列、**不换汇也不合计**；下方列出账本记录（日期、供应商、金额与币种、Job ID、来源，第 2 版以上标注版本）。表单（Job ID/金额/币种/来源/日期/备注）先本地校验，再 `POST /api/usage/bill`（必须 `confirm=true`，带 CSRF）；失败按 `BILL_CONFLICT`/`BILL_RECORD_INVALID`/`INVALID_STORE` 提示，冲突需在 CLI 显式 `--replace --expected-revision` 更正。面板只读 `/api/usage` 与 `/api/usage/bill` 并写 `billing.json` 侧车账本，不登记 Job、不改 `state.json`、不调用供应商。
-- 报价对比（M8 E1）：分镜面板工具栏「报价对比」（优先使用已勾选镜头）与分集面板逐场「集级报价对比」。对话框只读展示每个供应商一行（金额与币种、可用性与原因、Key 是否配置、`sourceUrl` 与 `checkedAt`）、推荐项与「不换汇/不合计」说明；「使用该供应商」只写既有 `PATCH /api/config` 的 `videoProvider`，不登记 Job、不改写已登记任务，也不调用供应商。
+- 供应商账单（用量面板底部，M8 E2）：逐币种一行显示估算/已录入/差额与「n 条已录入 · m 个未录入」，未录入固定显示「未录入（未知，不是 0）」，CNY 与 USD 只并列、**不换汇也不合计**；下方列出账本记录（日期、供应商、金额与币种、Job ID、来源，第 2 版以上标注版本）。表单（Job ID/金额/币种/来源/日期/备注）先本地校验，再 `POST /api/usage/bill`（必须 `confirm=true`，带 CSRF）；失败按 `BILL_CONFLICT`/`BILL_RECORD_INVALID`/`INVALID_STORE` 提示，冲突需在 CLI 显式 `--replace --expected-revision` 更正。面板只读 `/api/usage` 与 `/api/usage/bill` 并写 `billing.json` 侧车账本，不登记 Job、不改 `state.json`、不调用供应商。M8 E4 的受控 Chrome 证据（USD 已录入 0.60、CNY 未录入不计 0、第 2 版、同账单重放显示「已复用」）见 `output/m8-e4-browser/billing-panel.png` 与 `billing-replayed.png`。
+- 报价对比（M8 E1）：分镜面板工具栏「报价对比」（优先使用已勾选镜头）与分集面板逐场「集级报价对比」。对话框只读展示每个供应商一行（金额与币种、可用性与原因、Key 是否配置、`sourceUrl` 与 `checkedAt`）、推荐项与「不换汇/不合计」说明；「使用该供应商」只写既有 `PATCH /api/config` 的 `videoProvider`，不登记 Job、不改写已登记任务，也不调用供应商。M8 E4 的受控 Chrome 证据（3 镜头求和 9.00 CNY / 1.26 USD / 1.68 USD·12 units、推荐 wan、零页面错误）见 `output/m8-e4-browser/route-preview.png`。
 - 编排观测：上下文字节与裁剪数、项目事实与计划、Skills 版本、MCP 状态、工具目录和事件、已知/未知 Token 用量。
 - 新版 API 可提供当前轮工具参数和结果明细；旧运行实例缺少该字段时隐藏明细区，工具事件仍可见。
 

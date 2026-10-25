@@ -1,3 +1,3 @@
 """Video creation Agent with a project-owned harness."""
 
-__version__ = "0.4.0"
+__version__ = "0.6.0"

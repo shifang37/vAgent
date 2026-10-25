@@ -376,7 +376,7 @@ E3 的实现边界：
 - **工具面**：`season_save`/`season_read`（15/15）→ `season_generate`（16/16）→ `timeline_save`/`timeline_read`（18/18）；13/13 与更早变体、15/15、16/16 全部按 `toolFeatures` 冻结。headless 仍只编排分镜，不加入季批量或时间线渲染。
 - **工作台**：Web 优先的季面板与时间线编辑器；预览是客户端按 clip 顺序播放并应用裁剪偏移，不做服务端合成；导出才是交付口径。BGM/SFX 由客户端受控上传（许可/来源必填），不作为模型工具；不实现多轨混音工作站、关键帧/变速/特效或后台批处理守护进程。
 
-### 8.9 M8 供应商路由、账单与发布（E0 已冻结、E1–E3 已交付，E4 待实施）
+### 8.9 M8 供应商路由、账单与发布（E0–E4 已完成，v0.6.0）
 
 M8 契约见 [M8 契约](./docs/M8_CONTRACTS.md)，E0 基线与路由探针见 [E0 验收](./docs/M8_E0_ACCEPTANCE.md) 与 `docs/M8_E0_BASELINE.json`。**E0 只冻结要求与基线，不改产品代码：视频 submit=0、模型调用=0、TTS 请求=0、凭据读取=0。** M8 不扩产品域：**不新增 schema、不新增工具、不改已冻结的成片/时间线/分集语义**，工具面保持 18/18、存储保持 schema 9、**168 个契约模型哈希与 `capabilitiesSha256` 全程不变**。
 
@@ -388,6 +388,7 @@ M8 契约见 [M8 契约](./docs/M8_CONTRACTS.md)，E0 基线与路由探针见 [
 - **观测（E2，已交付）**：`usage` 只报可持久推导的指标（逐 provider Job 数/状态、`error.httpStatus==429` 的 429 次数、`unknown` 提交数）；提交/查询延迟（最近 64 样本 p50/p95）、退避次数与限流命中是进程内计数器，`GET /api/usage?runtime=1` 暴露且块内固定 `"durable": false`，不进账单与验收结论。
 - **真实样本（E3，已交付 2026-10-25）**：Kling 5 秒、fal 5 秒、CosyVoice 1 集与真实 DeepSeek 1 Run 需单独授权；本轮按授权只执行 CosyVoice 1 集（19 条台词 / 19 次请求 / 估算 0.0340 CNY，19 个 48 kHz WAV、FFmpeg 解码与 Range 206 通过）与真实 DeepSeek 1 Run（4 次模型调用、`episode_plan`→`episode_save`→`episode_read`、输入 96,617 / 输出 2,176 Token），Kling/fal 因缺凭据未执行（0 请求）。真实样本暴露并修复两个缺陷：CosyVoice 流式 WAV 占位长度（新增 `normalize_streaming_wav()`）与默认 64 KiB 预算装不下 18/18 工具面（`VAGENT_CONTEXT_BYTES` 默认升到 98304）。失败不重试、不换 provider、不改冻结表；「未做真实样本」是 `routing.py` 的静态标签，不是能力表字段，因此样本成败都不改 `capabilitiesSha256`。证据见 [E3 验收](./docs/M8_E3_ACCEPTANCE.md)。
 - **结构**：新类型只进 `routing.py`/`billing.py`/`providers/gate.py` 与非哈希文件（`application.py`、`cli.py`、`web.py`、`jobs.py`、`worker.py`、`video/usage.py`、前端与文档）；这是「不新增 schema」在工程上可核对的形式，也是 E4 基线比对的硬门禁。E2 另有两处非哈希改动必须在 E4 复核时确认「只是接入」：`config.py` 的两个新配置项（§5.4 要求的新配置项只能落在 `Config`/`LocalSettings` 里）与 Kling/fal 适配器 submit 分支多传一个已解析的 `Retry-After`（错误码、`submission_outcome` 与状态机不变）。
+- **验收与发布（E4，已完成 2026-10-25）**：`scripts/evaluate_m8.py` 4 个离线用例——路由矩阵（18 行 × 三供应商、4 行冻结 `routeProbe` 逐字节复现）、拒绝矩阵（10 秒/图生/集级批量/缺 Key/过期价/未发布供应商/非法参数/`--require-available`）、账单与错误映射（受控 401/超时/429 与节流、`SUBMIT_ERROR_TABLE`/`QUERY_ERROR_TABLE`、录入/重放/冲突/替换/损坏账本、逐币种汇总）、重放不新增（预览逐字节相同、同 operationKey 只登记 1 个 Job、账单重放不写盘）。`tests/test_m8_evaluation.py` 4 项；受控 Chrome 覆盖报价对比（三行、9.00 CNY/1.26 USD/1.68 USD·12 units、推荐与「不换汇」）与账单面板（USD 已录入 0.60、CNY 未录入不计 0、第 2 版、重放提示）；安装态 wheel smoke 新增 M8 评估与 CLI/HTTP 三面。全程视频 submit=0、文本模型调用=0、TTS=0，未新增付费样本；168 个模型哈希、`contractsSha256`、`capabilitiesSha256`、工具/规则哈希与 `routeProbe.rowsSha256` 不变。证据见 [M8 验收](./docs/M8_ACCEPTANCE.md) 与 `output/m8-e4-suite.json`、`output/m8-e4-browser/`。
 
 ## 9. 首版规模边界与演进条件
 

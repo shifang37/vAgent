@@ -1298,6 +1298,168 @@ async def smoke_m7_workbench(directory, evaluation_report):
     }
 
 
+def smoke_m8_evaluation(directory):
+    output = Path(directory) / "m8-evaluation.json"
+    run_command(
+        [
+            sys.executable,
+            "-I",
+            str(Path(__file__).with_name("evaluate_m8.py").resolve()),
+            "--home",
+            str(Path(directory) / "m8-state"),
+            "--output",
+            str(output),
+        ],
+        env=isolated_environment(Path(directory) / "unused-m8-config"),
+        timeout=600,
+    )
+    report = json.loads(output.read_text(encoding="utf-8"))
+    totals = report["totals"]
+    assert report["status"] == "passed" and report["mode"] == "offline-fixture"
+    assert totals["passedCases"] == totals["plannedCases"] == 4
+    assert totals["frozenProbeRows"] == 4 and totals["matrixRows"] == 18
+    assert totals["controlledSubmits"] == 6 and totals["jobs"] == 7
+    assert totals["billWrites"] == 3 and totals["billReplays"] == 3 and totals["ledgerRecords"] == 1
+    assert totals["realProviderCalls"] == 0 and totals["textModelCalls"] == 0
+    assert not (Path(report["dataDirectory"]) / "billing-errors" / "instance.lock").exists()
+    return report
+
+
+async def smoke_m8_surface(directory, evaluation_report):
+    """Installed M8 surface: read-only route preview and the hand-entered billing ledger."""
+    home = Path(evaluation_report["dataDirectory"]) / "billing-errors"
+    ledger = json.loads((home / "billing.json").read_text(encoding="utf-8"))
+    record = next(iter(ledger["records"].values()))
+    job_id, amount = record["jobId"], record["amount"]
+    currency, source, invoiced_on = record["currency"], record["source"], record["invoicedOn"]
+    with FileStore.open(home) as store:
+        jobs_before = len(store.snapshot()["jobs"])
+    cli = Path(sysconfig.get_path("scripts")) / ("vagent.exe" if os.name == "nt" else "vagent")
+    route_env = isolated_environment(home)
+    route_env.update(
+        VAGENT_VIDEO_MODE="live",
+        VAGENT_DASHSCOPE_KEY="wheel-wan-placeholder",
+        VAGENT_KLING_API_KEY="wheel-kling-placeholder",
+        FAL_KEY="wheel-fal-placeholder",
+    )
+    preview = json.loads(
+        run_command(
+            [str(cli), "route", "preview", "--mode", "t2v", "--duration", "5"],
+            env=route_env,
+            timeout=180,
+        )
+    )
+    assert preview["contract"] == "provider-route-v1" and preview["videoMode"] == "live"
+    assert [
+        (item["provider"], item["available"], item["amount"], item["currency"])
+        for item in preview["candidates"]
+    ] == [
+        ("wan", True, "3.00", "CNY"),
+        ("fal", True, "0.42", "USD"),
+        ("kling", True, "0.56", "USD"),
+    ]
+    assert preview["recommended"] == "wan"
+    assert any("不换汇" in note for note in preview["notes"])
+    rejected = subprocess.run(
+        [str(cli), "route", "preview", "--mode", "t2v", "--duration", "10", "--require-available"],
+        env=route_env,
+        capture_output=True,
+        text=True,
+        encoding="utf-8",
+        timeout=180,
+    )
+    assert rejected.returncode != 0 and "ROUTE_UNAVAILABLE" in rejected.stdout + rejected.stderr
+
+    bill_env = isolated_environment(home)
+    view = json.loads(
+        run_command(
+            [str(cli), "usage", "bill", "show", "--project", "m8-e4"],
+            env=bill_env,
+            timeout=180,
+        )
+    )
+    assert view["ledgerStatus"] == "ok" and len(view["records"]) == 1
+    assert view["records"][0]["amount"] == amount and view["records"][0]["revision"] == record["revision"]
+    usd = next(item for item in view["billing"]["currencies"] if item["currency"] == "USD")
+    cny = next(item for item in view["billing"]["currencies"] if item["currency"] == "CNY")
+    assert (usd["reported"], cny["reported"]) == (amount, None)
+
+    config = load_config(
+        {
+            "VAGENT_HOME": str(home),
+            "VAGENT_VIDEO_MODE": "live",
+            "VAGENT_DASHSCOPE_KEY": "wheel-wan-placeholder",
+            "VAGENT_DASHSCOPE_WORKSPACE_ID": "wheel-workspace",
+            "VAGENT_KLING_API_KEY": "wheel-kling-placeholder",
+            "FAL_KEY": "wheel-fal-placeholder",
+        }
+    )
+    app = create_app(config)
+    async with app.router.lifespan_context(app):
+        async with httpx.AsyncClient(
+            transport=httpx.ASGITransport(app=app), base_url="http://127.0.0.1:3210"
+        ) as client:
+            for name in ("route-state.js", "bill-state.js", "app.js", "index.html", "styles.css"):
+                assert (await client.get(f"/{name}")).status_code == 200
+            page = (await client.get("/")).text
+            app_js = (await client.get("/app.js")).text
+            assert "供应商账单" in app_js and "报价对比" in app_js
+            assert "app.js" in page
+            http_preview = (
+                await client.get("/api/route/preview", params={"mode": "t2v", "durationSeconds": 5})
+            ).json()
+            assert [item["amount"] for item in http_preview["candidates"]] == ["3.00", "0.42", "0.56"]
+            assert http_preview["recommended"] == "wan"
+            http_bill = (await client.get("/api/usage/bill", params={"projectId": "m8-e4"})).json()
+            assert http_bill["ledgerStatus"] == "ok" and http_bill["records"][0]["amount"] == amount
+            usage = (await client.get("/api/usage", params={"projectId": "m8-e4"})).json()
+            assert usage["billing"]["ledgerStatus"] == "ok"
+            assert "runtime" not in usage
+            runtime = (await client.get("/api/usage", params={"projectId": "m8-e4", "runtime": 1})).json()
+            assert runtime["runtime"]["durable"] is False
+            client.headers["X-CSRF-Token"] = (await client.get("/api/session-token")).json()["token"]
+            replayed = await client.post(
+                "/api/usage/bill",
+                json={
+                    "jobId": job_id,
+                    "amount": amount,
+                    "currency": currency,
+                    "source": source,
+                    "invoicedOn": invoiced_on,
+                    "confirm": True,
+                },
+            )
+            assert replayed.status_code == 201, replayed.text
+            assert replayed.json()["replayed"] is True
+            assert replayed.json()["record"]["revision"] == record["revision"]
+    with FileStore.open(home) as reopened:
+        assert len(reopened.snapshot()["jobs"]) == jobs_before
+        ledger_after = json.loads((home / "billing.json").read_text(encoding="utf-8"))
+        assert len(ledger_after["records"]) == 1
+    return {
+        "routeMatrix": {
+            "amounts": [item["amount"] for item in preview["candidates"]],
+            "recommended": preview["recommended"],
+            "rejectedTenSeconds": "ROUTE_UNAVAILABLE",
+        },
+        "billing": {
+            "ledgerStatus": view["ledgerStatus"],
+            "currency": currency,
+            "amount": amount,
+            "revision": record["revision"],
+            "replayed": True,
+        },
+        "cliRoutePreview": True,
+        "cliRouteRefusal": True,
+        "cliBillShow": True,
+        "httpRoutePreview": True,
+        "httpBillRead": True,
+        "httpBillReplay": True,
+        "httpUsageBilling": True,
+        "httpRuntimeMetrics": True,
+    }
+
+
 async def smoke_m5_workbench(directory):
     """Installed M5 surface: episode state, CLI read view and the read-only Web panel."""
     from vagent.video.adaptation import plan_episode
@@ -1730,6 +1892,8 @@ async def main(output=None):
             m6_workbench = await smoke_m6_workbench(directory, m6_report)
             m7_report = smoke_m7_evaluation(directory)
             m7_workbench = await smoke_m7_workbench(directory, m7_report)
+            m8_report = smoke_m8_evaluation(directory)
+            m8_surface = await smoke_m8_surface(directory, m8_report)
             keys_only_report = await smoke_keys_only_live(directory)
             report = {
                 "status": "passed",
@@ -1757,6 +1921,8 @@ async def main(output=None):
                     "threeCaseM6Suite": True,
                     "m7SeasonTimelineWorkbenchCliAndHttp": True,
                     "threeCaseM7Suite": True,
+                    "m8RouteBillingCliAndHttp": True,
+                    "fourCaseM8Suite": True,
                     "keysOnlyLiveSharedHost": True,
                 },
                 "videoRestart": video_report,
@@ -1773,6 +1939,8 @@ async def main(output=None):
                 "m6Evaluation": m6_report,
                 "m7Workbench": m7_workbench,
                 "m7Evaluation": m7_report,
+                "m8Surface": m8_surface,
+                "m8Evaluation": m8_report,
                 "keysOnlyLive": keys_only_report,
             }
     report["temporaryDataCleaned"] = not Path(directory).exists()
@@ -1780,7 +1948,7 @@ async def main(output=None):
         output.parent.mkdir(parents=True, exist_ok=True)
         output.write_text(json.dumps(report, ensure_ascii=False, indent=2), encoding="utf-8")
     print(
-        "PASS: installed wheel, Web assets, config, streaming, text/quality, MCP, mock video tools, durable wait, original Run restart/automatic continuation, readonly delivery, unchanged budgets, CLI list/get/usage, five M1-B cases, live protocol with local media restart and CLI media evidence, seven M1-C cases, M2 storyboard/asset CLI and HTTP surface, seven M2 cases, M3 local film assembly with film media HTTP/CLI replay and provider settings, six M3 cases, M5 episode CLI/HTTP workbench and five M5 cases, M6 episode render CLI/HTTP workbench and three M6 cases, M7 season/timeline workbench with audio import and three M7 cases, keys-only live shared-host fixture with zero-cost save probe and hot registration, cleanup."
+        "PASS: installed wheel, Web assets, config, streaming, text/quality, MCP, mock video tools, durable wait, original Run restart/automatic continuation, readonly delivery, unchanged budgets, CLI list/get/usage, five M1-B cases, live protocol with local media restart and CLI media evidence, seven M1-C cases, M2 storyboard/asset CLI and HTTP surface, seven M2 cases, M3 local film assembly with film media HTTP/CLI replay and provider settings, six M3 cases, M5 episode CLI/HTTP workbench and five M5 cases, M6 episode render CLI/HTTP workbench and three M6 cases, M7 season/timeline workbench with audio import and three M7 cases, M8 route preview and billing CLI/HTTP with four M8 cases, keys-only live shared-host fixture with zero-cost save probe and hot registration, cleanup."
     )
     return report
 

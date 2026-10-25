@@ -23,7 +23,6 @@ import asyncio
 import hashlib
 import importlib
 import json
-import re
 import shutil
 import sys
 from decimal import Decimal
@@ -33,6 +32,7 @@ from pydantic import BaseModel
 
 ROOT = Path(__file__).resolve().parents[1]
 OUTPUT = ROOT / "docs" / "M8_E0_BASELINE.json"
+FROZEN_RELEASE_VERSION = "0.5.0"
 # The Store needs a writable home; keep it inside the repository's ignored tmp/.
 SCRATCH = ROOT / "tmp" / "m8-e0-baseline-store"
 
@@ -585,9 +585,14 @@ def main() -> int:
 
 
 def _release_version() -> str:
-    text = (ROOT / "pyproject.toml").read_text(encoding="utf-8")
-    match = re.search(r'^version = "([^"]+)"$', text, re.MULTILINE)
-    return match.group(1) if match else "unknown"
+    """The release the E0 baseline was frozen on, not the version regenerating it.
+
+    E0 froze these bytes on the v0.5.0 tree. The file records that release, so the
+    v0.6.0 version bump at E4 must not rewrite a single frozen byte; reading the
+    current ``pyproject.toml`` here would silently change ``releaseVersion`` and
+    invalidate the SHA-256 the acceptance documents pin.
+    """
+    return FROZEN_RELEASE_VERSION
 
 
 if __name__ == "__main__":
