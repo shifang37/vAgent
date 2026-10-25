@@ -23,7 +23,7 @@
 - **离线验收套件**：4/4 通过、0.25 秒；38 次预览、**18** 行路由矩阵、**4** 行冻结探针、**6** 次受控提交、**7** 个 Job、3 次账单写入、3 次重放、1 条账本记录；真实供应商调用=0、文本模型调用=0、TTS 请求=0（`output/m8-e4-suite.json`，`suiteId=88c283bb329a8e20`）。
 - **受控浏览器**：Chrome 155.0.8059.85 headless，6 步、3 张截图、零页面/控制台错误；报价对比显示 3 个可用候选（9.00 CNY / 1.26 USD / 1.68 USD·12 units，推荐 wan，含「不换汇」「仅有文档依据」），账单面板显示 USD 已录入 0.60、CNY 未录入（未知，不是 0）、第 2 版记录，并验证同一账单重放不新增记录（`output/m8-e4-browser/`）。
 - **安装态 wheel smoke**：**PASS**（`output/m8-e4-wheel-smoke.json`）。从 `site-packages` 导入（0.6.0），覆盖文本/质量/MCP、Mock 视频工具、持久等待与重启续接、M1-B 五用例、M1-C 七用例、M2 工作台与七用例、M3 成片拼接与六用例、M5 分集工作台与五用例、M6 渲染工作台与三用例、M7 季/时间线工作台与三用例、**M8 4 用例与 `route preview`/`usage bill show`/HTTP 三面（含账单重放）**、两 Key 零费用探测与热更新，并清理临时数据。
-- **四组 CI**：**TBD**（推送后运行；tag 与推送单独确认）。
+- **四组 CI**：四组矩阵（ubuntu/windows × Python 3.11/3.12）在 `588e1ea` 上全部 **success**（[运行 40171887390](https://github.com/shifang37/vAgent/actions/runs/40171887390)；四组均为 `completed / success`）。
 - **真实付费样本**：本版**未新增**付费样本；E3 的两条真实样本按单独授权执行，Kling/fal 未执行、0 请求。
 
 ## 构建产物

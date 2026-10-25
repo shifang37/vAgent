@@ -81,11 +81,11 @@ node --test tests/test_job_state.mjs tests/test_storyboard_state.mjs tests/test_
 
 - 4 项 skip 仍是既有的 Windows 符号链接/文件权限用例，未新增 skip；相对 E3 的 1512/4，本包新增 4 项 `test_m8_evaluation.py`。
 - 本包新增：`scripts/evaluate_m8.py`、`tests/test_m8_evaluation.py` 4 项、wheel smoke 的 M8 两段、浏览器脚本与种子；`pyproject.toml`/`__version__` 升到 0.6.0；`.github/workflows/ci.yml` 补上 E1/E2 遗漏的 `route-state.js`/`bill-state.js` 的 `node --check` 与 Node 测试，CI 前端覆盖达到 10 个状态模块 91 项。
-- 四组 CI：**TBD**（tag 与推送单独确认后运行）。
+- 四组 CI：**全部 success**（ubuntu/windows × Python 3.11/3.12，[运行 40171887390](https://github.com/shifang37/vAgent/actions/runs/40171887390)，最终代码提交 `588e1ea`；四组均为 `completed / success`）。
 
 ### 3.5 基线保护
 
-重新运行 `scripts/capture_m8_baseline.py` 后 `docs/M8_E0_BASELINE.json` 的 SHA-256 仍为 `f3dc91c1c08db59ae75347d438e5fe44a6c0ac54b53da0ffaa12f4e8cbcb3706`：**168 个 `schemaSha256`、`contractsSha256`、`capabilitiesSha256`、两套工具/规则哈希与 `routeProbe.rowsSha256` 全部逐字节不变**。E4 只新增 `evaluate_m8.py`、测试、浏览器脚本与文档，并修改 `pyproject.toml`、`src/vagent/__init__.py`（版本号）、`scripts/wheel_smoke.py` 与 `scripts/capture_m8_baseline.py`（把 `releaseVersion` 固定为冻结时的 0.5.0，见 §6.6），均不在 9 个已哈希契约模块内。
+重新运行 `scripts/capture_m8_baseline.py` 后 `docs/M8_E0_BASELINE.json` 的 SHA-256 仍为 `f3dc91c1c08db59ae75347d438e5fe44a6c0ac54b53da0ffaa12f4e8cbcb3706`：**168 个 `schemaSha256`、`contractsSha256`、`capabilitiesSha256`、两套工具/规则哈希与 `routeProbe.rowsSha256` 全部逐字节不变**。E4 只新增 `evaluate_m8.py`、测试、浏览器脚本与文档，并修改 `pyproject.toml`、`src/vagent/__init__.py`（版本号）、`scripts/wheel_smoke.py` 与 `scripts/capture_m8_baseline.py`（把 `releaseVersion` 固定为冻结时的 0.5.0，见 §6.7），均不在 9 个已哈希契约模块内。
 
 工具面仍是 **18/18**、schema 仍是 **9**、新增模型工具 **0 个**、新增 schema 集合 **0 个**。
 
@@ -126,4 +126,4 @@ node --test tests/test_job_state.mjs tests/test_storyboard_state.mjs tests/test_
 2. 浏览器：运行 `scripts/evaluate_m8.py` 后执行 `tmp/m8-e4-browser/seed.py` 复制 `billing-errors` 数据目录并添加分镜；以 `VAGENT_VIDEO_MODE=live` 与占位 `VAGENT_DASHSCOPE_KEY`/`VAGENT_KLING_API_KEY`/`FAL_KEY` 启动 `vagent web --port 3315 --no-open`，再运行 `node tmp/m8-e4-browser/check.mjs`；报告与截图写入 `output/m8-e4-browser/`。
 3. 安装态：构建 wheel、在独立环境安装后运行 `scripts/wheel_smoke.py --output output/m8-e4-wheel-smoke.json`。
 4. 基线：`.\.venv\Scripts\python.exe scripts/capture_m8_baseline.py`，比较 `docs/M8_E0_BASELINE.json` 的 SHA-256 与 §3.5。
-5. 发布：`pyproject.toml` 0.6.0、`docs/RELEASE_0.6.0.md`、`dist/python/` 的 wheel/sdist；tag 与推送单独确认。
+5. 发布：`pyproject.toml` 0.6.0、`docs/RELEASE_0.6.0.md`、`dist/python/` 的 wheel/sdist；代码提交 `df9eb74`、CI 证据提交 `588e1ea`，tag 为 **v0.6.0**。
