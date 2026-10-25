@@ -56,6 +56,8 @@ MAX_SUBMIT_BYTES = 1024 * 1024
 MAX_AUDIO_BYTES = 25 * 1024 * 1024
 TTS_TIMEOUT_SECONDS = 60.0
 WAV_MIME_TYPES = {"audio/wav", "audio/x-wav", "audio/wave", "application/octet-stream"}
+# Streaming WAV placeholders: a real CosyVoice object declared 0x7FFFFFxx sizes.
+STREAMING_SIZE_SENTINEL = 0x7F000000
 
 MESSAGES = {
     "TTS_PROVIDER_UNKNOWN": "供应商、模型或音色未在 tts-providers-v1 中核实。",
@@ -281,6 +283,38 @@ class WavFacts:
     size_bytes: int
 
 
+def normalize_streaming_wav(data: bytes) -> bytes:
+    """Rewrite the unknown-length sentinels of a streamed WAV to its real sizes.
+
+    DashScope hands out the object before its length is known, so a real sample
+    returned ``RIFF``/``data`` sizes of ``0x7FFFFFxx`` (2,147,483,583 and
+    2,147,483,547 in the 2026-10-25 run). The downloaded object is complete; the
+    two sizes are rewritten and every other header byte is preserved, so the
+    stored fixture is a canonical PCM WAV. A payload whose sizes are merely too
+    large for the file (a truncated download) is left untouched and keeps failing
+    ``inspect_wav``.
+    """
+    if len(data) < 44 or data[:4] != b"RIFF" or data[8:12] != b"WAVE":
+        return data
+    riff_size = int.from_bytes(data[4:8], "little")
+    offset = 12
+    while offset + 8 <= len(data):
+        chunk_id = data[offset : offset + 4]
+        size = int.from_bytes(data[offset + 4 : offset + 8], "little")
+        body = offset + 8
+        if chunk_id == b"data":
+            if riff_size < STREAMING_SIZE_SENTINEL or size < STREAMING_SIZE_SENTINEL:
+                return data
+            buffer = bytearray(data)
+            buffer[4:8] = (len(data) - 8).to_bytes(4, "little")
+            buffer[offset + 4 : offset + 8] = (len(data) - body).to_bytes(4, "little")
+            return bytes(buffer)
+        if body + size > len(data):
+            return data
+        offset = body + size + (size % 2)
+    return data
+
+
 def inspect_wav(data: bytes) -> WavFacts:
     """Parse a canonical PCM RIFF/WAVE payload; reject anything the mixer cannot use."""
     if len(data) < 44 or data[:4] != b"RIFF" or data[8:12] != b"WAVE":
@@ -475,7 +509,7 @@ class CosyVoiceAdapter:
             raise TtsError("PROVIDER_NETWORK", "（超时）") from None
         except httpx.HTTPError:
             raise TtsError("PROVIDER_NETWORK", "（连接失败）") from None
-        data = b"".join(chunks)
+        data = normalize_streaming_wav(b"".join(chunks))
         facts = inspect_wav(data)
         characters = body.get("usage", {}).get("characters")
         if not isinstance(characters, int) or characters < 1:

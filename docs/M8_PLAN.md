@@ -1,6 +1,6 @@
 # M8 计划：供应商路由、真实样本与发布
 
-状态：**E0 契约已冻结、E1 路由预览已交付、E2 供应商运维与账单已交付（2026-10-25）；E3–E4 待实施**。基线 `master` `16102dd`（v0.5.0 发布后；schema 9、tools/rules 18/18、168 个契约模型）。v0.5.0 检查点已发布（2026-10-24，[发布说明](./RELEASE_0.5.0.md)），M8 交付后发布 **v0.6.0**。冻结结果见 [M8 契约](./M8_CONTRACTS.md) 与 [E0 验收](./M8_E0_ACCEPTANCE.md)，机器可读基线见 `docs/M8_E0_BASELINE.json`。本文件是计划，不是契约：数字与建议值以 E0 冻结的 `docs/M8_CONTRACTS.md` 为准；[M5 计划 §6](./M5_PLAN.md) 保留为概要，本文件是其展开。
+状态：**E0 契约已冻结、E1 路由预览已交付、E2 供应商运维与账单已交付、E3 真实样本已交付（2026-10-25）；E4 待实施**。基线 `master` `eddc5d8`（v0.5.0 发布后；schema 9、tools/rules 18/18、168 个契约模型）。v0.5.0 检查点已发布（2026-10-24，[发布说明](./RELEASE_0.5.0.md)），M8 交付后发布 **v0.6.0**。冻结结果见 [M8 契约](./M8_CONTRACTS.md) 与 [E0 验收](./M8_E0_ACCEPTANCE.md)，E1–E3 证据见 [E1](./M8_E1_ACCEPTANCE.md)、[E2](./M8_E2_ACCEPTANCE.md)、[E3](./M8_E3_ACCEPTANCE.md) 验收，机器可读基线见 `docs/M8_E0_BASELINE.json`。本文件是计划，不是契约：数字与建议值以 E0 冻结的 `docs/M8_CONTRACTS.md` 为准；[M5 计划 §6](./M5_PLAN.md) 保留为概要，本文件是其展开。
 
 ## 1. 为什么是 M8
 
@@ -80,6 +80,8 @@ M1–M7 已完成产品域闭环：一句话/剧本 → 分集分场分镜 → �
 
 按 §5 清单执行，每条留证：请求/任务 ID、结果主机、字节数、SHA-256、分辨率/编码/时长、浏览器播放与 Range、账单（或 `unknown`）。失败不重试、不换 provider、不改写既有证据；能力表维持「未做真实样本」标注直到样本成功。
 
+> **已完成（2026-10-25）**：按单独授权执行可跑的**两项**——CosyVoice v2 配音 1 集（19 条台词 / 170 字符 / 19 次请求 / 19 个 48 kHz WAV / 估算 0.0340 CNY）与真实 DeepSeek 编排 1 Run（4 次模型调用、`episode_plan`→`episode_save`→`episode_read`、输入 96,617 / 输出 2,176 Token）；Kling/fal 因缺凭据未执行（0 请求）。两条真实样本各暴露一个产品缺陷并已修复：CosyVoice 返回流式 WAV 占位长度、默认 64 KiB 预算装不下 18/18 工具面（默认升到 96 KiB）。视频 submit=0，168 个模型哈希与 `routeProbe.rowsSha256` 不变。证据见 [E3 验收](./M8_E3_ACCEPTANCE.md)。
+
 ### 3.5 E4 验收与发布（2 天）
 
 - `scripts/evaluate_m8.py` 离线 3–4 用例（路由矩阵、账单与错误映射、拒绝矩阵、重放不新增）与 `tests/test_m8_evaluation.py`。
@@ -138,4 +140,4 @@ M1–M7 已完成产品域闭环：一句话/剧本 → 分集分场分镜 → �
 
 ## 9. 新对话启动方式
 
-> 基于 `master`（v0.5.0 已发布；schema 9、tools/rules 18/18、168 个契约模型），**M8 E1 路由预览（2026-10-25）与 E2 供应商运维与账单（2026-10-25）均已交付**，现在从 **E3 真实样本**开始（[E1 验收](./M8_E1_ACCEPTANCE.md)、[E2 验收](./M8_E2_ACCEPTANCE.md)）：E3 必须先取得**单独授权**，按 §5 清单执行 Kling 5 秒、fal 5 秒、CosyVoice 1 集与真实 DeepSeek 编排 1 Run，每条留证任务 ID、结果主机、字节数、SHA-256、时长/编码、播放与 Range、账单或 `unknown`，失败不重试、不换 provider；随后 E4 完成离线套件、门禁与 **v0.6.0** 发布。E0 基线 `docs/M8_E0_BASELINE.json` 是全程比对基准：168 个模型哈希、`contractsSha256`、`capabilitiesSha256`、工具/规则哈希与 `routeProbe.rowsSha256` 必须不变。不做 9:16 竖屏；Kling/fal/CosyVoice 在样本成功前保持「未做真实样本」标注。
+> 基于 `master`（v0.5.0 已发布；schema 9、tools/rules 18/18、168 个契约模型），**M8 E1 路由预览、E2 供应商运维与账单、E3 真实样本（2026-10-25）均已交付**，现在从 **E4 验收与发布**开始（[E1](./M8_E1_ACCEPTANCE.md)、[E2](./M8_E2_ACCEPTANCE.md)、[E3 验收](./M8_E3_ACCEPTANCE.md)）：E3 按单独授权只执行了 CosyVoice 1 集与真实 DeepSeek 1 Run，Kling/fal 因缺 Key 未执行（0 请求），保持「未做真实样本」标注；E4 完成 `scripts/evaluate_m8.py` 离线套件、全量回归、Ruff、前端八模块、受控浏览器（报价对比 + 账单）、安装态 wheel smoke、四组 CI 与 **v0.6.0** 发布，**不新增付费样本**。E0 基线 `docs/M8_E0_BASELINE.json` 是全程比对基准：168 个模型哈希、`contractsSha256`、`capabilitiesSha256`、工具/规则哈希与 `routeProbe.rowsSha256` 必须不变。不做 9:16 竖屏。

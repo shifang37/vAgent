@@ -255,7 +255,9 @@ async def test_existing_checkpoint_uses_legacy_layout_then_new_run_uses_v2(store
         model=ScriptedModel(respond),
         tools=registry,
         skills=catalog.list(),
-        context=ContextBuilder(format_version=1),
+        # The legacy checkpoint was recorded with the pre-M8 default budget, so the
+        # signature below must keep using it rather than today's Config default.
+        context=ContextBuilder(65536, format_version=1),
     )
     first = await previous.run("coffee", "读取项目")
     expected_signature = hashlib.sha256(
@@ -285,7 +287,13 @@ async def test_existing_checkpoint_uses_legacy_layout_then_new_run_uses_v2(store
             return AIMessage(content="完成")
 
         resumed = AgentRunner(
-            store=reopened, model=ScriptedModel(finish), tools=registry, skills=catalog.list()
+            store=reopened,
+            model=ScriptedModel(finish),
+            tools=registry,
+            skills=catalog.list(),
+            # Resuming a legacy checkpoint keeps its recorded budget, otherwise the
+            # signature check would reject every pre-M8 Run on the new default.
+            context=ContextBuilder(65536, format_version=1),
         )
         final = await resumed.resume(first["id"])
         assert final["status"] == "completed" and final["modelSteps"] == 3

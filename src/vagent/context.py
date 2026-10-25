@@ -88,6 +88,8 @@ class ContextReport:
 
 
 class ContextBuilder:
+    # The fallback keeps the pre-M8 value: persisted v1/v2 Runs were signed with it,
+    # and the product always passes Config.context_bytes (98304 since M8 E3).
     def __init__(self, max_input_bytes: int = 65536, *, format_version: int = CONTEXT_VERSION):
         if type(max_input_bytes) is not int or max_input_bytes < 1024:
             raise AppError("INVALID_CONTEXT_BUDGET", "上下文预算必须是至少 1024 字节的整数。")

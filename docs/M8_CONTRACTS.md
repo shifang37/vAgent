@@ -399,7 +399,7 @@ M7 的 31 个错误码全部保留；M8 新增 **4** 个：
 |---|---|---|
 | E1 路由预览 | **已完成（2026-10-25）**：`routing.py`、`vagent route preview`、`GET /api/route/preview`、Web 报价对比面板；无 schema、无工具变化 | 预览逐项复现 `routeProbe`（金额/单位/顺序/`rowsSha256`）；拒绝矩阵与 Key 缺失正确；`submit=0`、存储不变。证据见 [E1 验收](./M8_E1_ACCEPTANCE.md) |
 | E2 供应商运维与账单 | **已完成（2026-10-25）**：`providers/gate.py`（逐 provider 间隔 2.0 秒与 429 冷却 60 秒、`Retry-After` 只延长且 900 秒上限）、`RuntimeBlock` 退避记录、`billing.py` + `vagent usage bill record\|show` + `POST/GET /api/usage/bill`、`usage.billing` 汇总、`SUBMIT_ERROR_TABLE`/`QUERY_ERROR_TABLE` 统一错误表常量、`GET /api/usage?runtime=1` 内存指标；无 schema、无工具变化 | 错误映射反例矩阵、固定时钟下的间隔/冷却时序、`PROVIDER_BACKOFF` 不消耗提交次数、未知不重投、账单幂等/冲突/汇总（USD 不并入 CNY）——证据见 [E2 验收](./M8_E2_ACCEPTANCE.md) |
-| E3 真实样本 | **待做（需单独授权）**：Kling 5s、fal 5s、CosyVoice 1 集、真实 DeepSeek 1 Run | 每条留证（任务 ID、结果主机、字节数、SHA-256、时长/编码、播放与 Range、账单或 `unknown`）；失败不重试、不换 provider、不改冻结表 |
+| E3 真实样本 | **已完成（2026-10-25，按单独授权只执行可跑的两项）**：CosyVoice v2 配音 1 集（19 条台词 / 170 字符 / 19 次请求 / 估算 0.0340 CNY；19 个 48 kHz 单声道 WAV、FFmpeg 解码通过、Range 206）、真实 DeepSeek 编排 1 Run（4 次模型调用、`episode_plan`→`episode_save`→`episode_read`、输入 96,617 / 输出 2,176 Token、保存 8 场 / 19 镜头 / 90 秒）；Kling/fal 因缺 `VAGENT_KLING_API_KEY`/`FAL_KEY` 未执行（0 请求）；两条真实样本各触发一个产品缺陷并已修复（CosyVoice 流式 WAV 占位长度、默认 64 KiB 预算装不下 18/18 工具面）；视频 submit=0、基线 168 个模型哈希与 `routeProbe.rowsSha256` 不变。证据见 [E3 验收](./M8_E3_ACCEPTANCE.md) | 每条留证（任务 ID、结果主机、字节数、SHA-256、时长/编码、播放与 Range、账单或 `unknown`）；失败不重试、不换 provider、不改冻结表 |
 | E4 验收与发布 | **待做**：`scripts/evaluate_m8.py` 离线 3–4 用例、`tests/test_m8_evaluation.py`、受控浏览器（报价对比 + 账单）、安装态 wheel smoke、v0.6.0 发布 | 全量回归、Ruff、前端 8 模块、四组 CI；168 个 `schemaSha256`、`contractsSha256`、`capabilitiesSha256` 与 `routeProbe.rowsSha256` 不变；未新增付费样本 |
 
 ## 10. 明确不做

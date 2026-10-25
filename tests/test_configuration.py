@@ -38,6 +38,32 @@ def validation_response(request):
     )
 
 
+def test_default_context_budget_fits_the_published_tool_surface(tmp_path):
+    """M8 E3: 18/18 needs ~64.5 KiB in the first turn, so the old 64 KiB default could not run."""
+    from vagent.context import compact_json
+    from vagent.storage import FileStore
+    from vagent.tools import create_project_tools
+    from vagent.video.jobs import JobService
+    from vagent.video.providers.mock import MockVideoAdapter
+    from vagent.video.tools import register_video_tools
+
+    home = tmp_path / "surface"
+    with FileStore.open(home) as store:
+        store.ensure_session("surface")
+        registry = register_video_tools(
+            create_project_tools(), JobService(store, [MockVideoAdapter(store)]), mode="mock"
+        )
+        specs = registry.specs()
+        tools_bytes = len(compact_json(sorted(specs, key=lambda tool: tool["function"]["name"])).encode())
+    rules_bytes = len(registry.instructions.encode())
+    budget = load_config({"VAGENT_HOME": str(home)}).context_bytes
+    assert budget == 98304
+    # Keep at least 8 KiB for the demand, skills, project facts and the first tool result.
+    assert tools_bytes + rules_bytes < budget - 8192
+    explicit = load_config({"VAGENT_HOME": str(home), "VAGENT_CONTEXT_BYTES": "65536"})
+    assert explicit.context_bytes == 65536
+
+
 def test_local_config_persists_and_environment_has_precedence(tmp_path):
     env = {"VAGENT_HOME": str(tmp_path / "new-home")}
     config = load_config(env)

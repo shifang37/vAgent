@@ -79,7 +79,10 @@ class Config:
     home: Path
     api_key: str | None = field(repr=False)
     model: str = "deepseek-flash"
-    context_bytes: int = 65536
+    # M8 E3: the frozen 18/18 tool surface needs ~64.5 KiB before the first turn, so
+    # the old 64 KiB default could not start a Run at all. 96 KiB is the budget the
+    # acceptance fixtures already used since M6 E1.
+    context_bytes: int = 98304
     skills_root: Path | None = None
     redis_url: str | None = field(default=None, repr=False)
     cache_ttl: int = 3600
@@ -276,7 +279,7 @@ def load_config(env: Mapping[str, str] | None = None) -> Config:
     environment_key = env.get("VAGENT_DEEPSEEK_KEY") or env.get("DEEPSEEK_API_KEY")
     environment_model = env.get("VAGENT_DEEPSEEK_MODEL")
     try:
-        budget = int(env.get("VAGENT_CONTEXT_BYTES") or "65536")
+        budget = int(env.get("VAGENT_CONTEXT_BYTES") or "98304")
     except ValueError:
         raise AppError("INVALID_CONTEXT_BUDGET", "上下文预算必须是至少 1024 字节的整数。") from None
     if budget < 1024:

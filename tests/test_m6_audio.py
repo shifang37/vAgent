@@ -28,6 +28,7 @@ from vagent.video.tts import (
     capability_for,
     inspect_wav,
     local_duration_seconds,
+    normalize_streaming_wav,
     synthesize_local_wav,
     tts_capabilities,
 )
@@ -166,6 +167,47 @@ async def test_cosyvoice_adapter_uses_the_official_shape_and_downloads_the_audio
     assert result.duration_seconds == 2.0
     assert [call.method for call in calls] == ["POST", "GET"]
     assert adapter.endpoint() == "https://dashscope.aliyuncs.com/api/v1/services/audio/tts/SpeechSynthesizer"
+
+
+def _streaming_wav(audio: bytes) -> bytes:
+    """The 2026-10-25 real CosyVoice object: placeholder RIFF/data sizes."""
+    buffer = bytearray(audio)
+    buffer[4:8] = (2147483583).to_bytes(4, "little")
+    data_at = audio.index(b"data")
+    buffer[data_at + 4 : data_at + 8] = (2147483547).to_bytes(4, "little")
+    return bytes(buffer)
+
+
+def test_normalize_streaming_wav_rewrites_only_the_placeholder_sizes():
+    audio = synthesize_local_wav("你好，世界。", "local-narrator")
+    streamed = _streaming_wav(audio)
+    with pytest.raises(TtsError) as error:
+        inspect_wav(streamed)
+    assert error.value.code == "AUDIO_FORMAT_UNSUPPORTED"
+    assert normalize_streaming_wav(streamed) == audio
+    assert normalize_streaming_wav(audio) == audio
+    # A truncation keeps its real declared size and must stay rejected.
+    assert normalize_streaming_wav(audio[:-1000]) == audio[:-1000]
+    with pytest.raises(TtsError):
+        inspect_wav(audio[:-1000])
+
+
+async def test_cosyvoice_adapter_normalizes_the_streamed_wav_it_downloads():
+    audio = synthesize_local_wav("你好，世界。", "local-narrator")
+    streamed = _streaming_wav(audio)
+    handler, _calls = _cosy_handler(streamed, characters=6)
+    adapter = CosyVoiceAdapter(api_key="sk-test", transport=httpx.MockTransport(handler))
+    request = TtsRequestV1(
+        provider="cosyvoice",
+        model=COSYVOICE_MODEL,
+        voice_id="longxiaochun_v2",
+        text="你好，世界。",
+    )
+    result = await adapter.synthesize(request)
+    assert result.audio == audio
+    assert result.sha256 == hashlib.sha256(audio).hexdigest()
+    assert result.size_bytes == len(audio)
+    assert result.duration_seconds == 2.0
 
 
 def test_workspace_endpoint_uses_the_workspace_domain():

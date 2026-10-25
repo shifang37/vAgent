@@ -10,7 +10,8 @@ from conftest import ScriptedModel, tool_call
 from langchain_core.messages import AIMessage, ToolMessage, messages_from_dict
 
 from vagent.checkpoints import open_checkpointer
-from vagent.context import assert_complete_protocol
+from vagent.config import load_config
+from vagent.context import ContextBuilder, assert_complete_protocol
 from vagent.errors import AppError
 from vagent.journal import RunJournal
 from vagent.models import DemoModel
@@ -316,11 +317,15 @@ async def test_cli_resume_offline_run_without_key_or_source_cwd(store, tmp_path)
     cancelled = asyncio.Event()
     cancelled.set()
     catalog = SkillCatalog.discover()
+    # The CLI resumes through ApplicationService, so the Run must be recorded with
+    # the same context budget the product configuration uses (M8 E3: 96 KiB).
+    budget = load_config({"VAGENT_HOME": str(store.home)}).context_bytes
     first = await AgentRunner(
         store=store,
         model=DemoModel(),
         tools=register_skill_tool(create_project_tools(), catalog),
         skills=catalog.list(),
+        context=ContextBuilder(budget),
     ).run("demo", "test", cancelled=cancelled)
     home = store.home
     store.close()
