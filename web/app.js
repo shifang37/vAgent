@@ -1,5 +1,18 @@
 import { mediaContentPath, mergeJobs, upsertJob } from "./job-state.js";
 import {
+  BILL_CURRENCIES,
+  billCurrencyLabel,
+  billErrorText,
+  billLedgerPath,
+  billLedgerStatusText,
+  billRecordBody,
+  billRecordRows,
+  billValidationError,
+  billingCurrencyRows,
+  billingHeadline,
+  billingNotes,
+} from "./bill-state.js";
+import {
   assembleBody,
   filmDownloadUrl,
   filmErrorLabel,
@@ -214,6 +227,13 @@ let panelMode = null,
   usageReport = null,
   assetsScopeOnly = false,
   uploadingImage = false;
+// M8 E2 billing: the ledger view and one local write buffer. Recording a charge only
+// touches the billing.json sidecar; no Job, no provider and no estimate changes.
+let billLedger = null,
+  billBusy = false,
+  billError = null,
+  billNotice = null,
+  billDraft = null;
 let shotSelection = new Set(),
   shotBusy = new Set(),
   pendingBatch = null,
@@ -507,10 +527,12 @@ function jobCard(job, expanded) {
   } : jobStatusNames;
   const paused = job.queryState === "paused", retrying = job.queryState === "retrying";
   const repairing = job.download?.repair && ["pending", "writing", "prepared"].includes(job.download.phase);
-  const state = job.runtimeBlock ? "需要处理" : paused ? "查询已暂停" : retrying ? "查询重试中"
+  // M8 E2 §5.5: a throttled submit is normal waiting, never a configuration error.
+  const throttled = job.runtimeBlock?.code === "PROVIDER_BACKOFF";
+  const state = throttled ? "等待节流" : job.runtimeBlock ? "需要处理" : paused ? "查询已暂停" : retrying ? "查询重试中"
     : repairing ? "正在修复下载" : live && job.status === "succeeded" && !job.mediaAvailable ? "媒体不可用"
     : statusNames[job.status] || job.status;
-  const tone = paused || retrying || job.status === "unknown" || (live && job.status === "succeeded" && !job.mediaAvailable) ? "attention" : job.status;
+  const tone = throttled ? "pending_submit" : paused || retrying || job.status === "unknown" || (live && job.status === "succeeded" && !job.mediaAvailable) ? "attention" : job.status;
   const sources = (request.sourceRefs || []).map((ref) => {
     const artifact = snapshot?.artifacts.find((item) => item.id === ref.artifactId);
     const title = artifact?.versions.find((item) => item.version === ref.version)?.title || ref.artifactId;
@@ -536,7 +558,7 @@ function jobCard(job, expanded) {
     ${notice ? `<p class="job-notice">${escapeHTML(notice)}</p>` : ""}
     ${job.download ? `<p class="job-notice">累计下载 ${job.download.attempts} 次${job.download.nextAttemptAt ? ` · 下次尝试 ${escapeHTML(new Date(job.download.nextAttemptAt).toLocaleString())}` : ""}${repairing ? " · 沿用原媒体 ID，校验原文件哈希" : ""}</p>` : ""}
     ${job.error ? `<p class="job-error">${escapeHTML({ submit: "提交", query: "查询", generate: "生成", download: "下载" }[job.error.stage] || job.error.stage)} · ${escapeHTML(job.error.code)}<br>${escapeHTML(job.error.message)}</p>` : ""}
-    ${job.runtimeBlock ? `<p class="job-error">${escapeHTML(job.runtimeBlock.code)} · ${escapeHTML(job.runtimeBlock.message)}</p>` : ""}
+    ${throttled ? `<p class="job-notice">等待节流 · ${escapeHTML(job.runtimeBlock.message)}</p>` : job.runtimeBlock ? `<p class="job-error">${escapeHTML(job.runtimeBlock.code)} · ${escapeHTML(job.runtimeBlock.message)}</p>` : ""}
     ${downloadError && downloadError.code !== job.error?.code ? `<p class="job-error">下载 · ${escapeHTML(downloadError.code)}<br>${escapeHTML(downloadError.message)}</p>` : ""}
     <div class="job-footer"><small>更新于 ${escapeHTML(new Date(job.updatedAt).toLocaleString())}</small>${job.canRetryQuery ? `<button class="secondary" data-retry-job="${escapeHTML(job.jobId)}" ${retryingJobs.has(job.jobId) ? "disabled" : ""}>${retryingJobs.has(job.jobId) ? "正在恢复…" : "恢复查询"}</button>` : ""}${job.canRetryDownload ? `<button class="secondary" data-retry-download="${escapeHTML(job.jobId)}" ${retryingJobs.has(job.jobId) ? "disabled" : ""}>${retryingJobs.has(job.jobId) ? "正在恢复…" : "重试原下载"}</button>` : ""}</div>
   </article>`;
@@ -825,8 +847,65 @@ async function showUsage() {
     return;
   }
   usageReport = report;
+  billError = null;
+  billNotice = null;
   openInspector("usage");
   renderUsagePanel();
+  await loadBillLedger();
+}
+
+// The ledger is read from its own sidecar so the panel never guesses from estimates.
+async function loadBillLedger() {
+  try {
+    billLedger = await api(billLedgerPath({ projectId: activeId }));
+  } catch (error) {
+    billError = error.code || "BILL_RECORD_INVALID";
+    billLedger = null;
+  }
+  if (panelMode === "usage") renderUsagePanel();
+}
+
+async function recordBill() {
+  if (billBusy) return;
+  const draft = readBillDraft();
+  const invalid = billValidationError(draft);
+  if (invalid) {
+    billError = null;
+    billNotice = null;
+    toast(invalid);
+    return;
+  }
+  billBusy = true;
+  billError = null;
+  billNotice = null;
+  renderUsagePanel();
+  try {
+    const result = await post("/api/usage/bill", billRecordBody(draft));
+    billNotice = result.replayed
+      ? "这条账单与账本中的记录完全相同，已复用，没有重复写入。"
+      : `已录入 ${result.record.amount} ${result.record.currency}（第 ${result.record.revision} 版）。`;
+    const query = activeId ? `?projectId=${encodeURIComponent(activeId)}` : "";
+    usageReport = await api(`/api/usage${query}`);
+    billLedger = await api(billLedgerPath({ projectId: activeId }));
+  } catch (error) {
+    billError = error.code || "BILL_RECORD_INVALID";
+    billNotice = billErrorText(billError);
+  } finally {
+    billBusy = false;
+    if (panelMode === "usage") renderUsagePanel();
+  }
+}
+
+function readBillDraft() {
+  const value = (id) => $(`#${id}`)?.value ?? "";
+  return {
+    jobId: value("bill-job"),
+    amount: value("bill-amount"),
+    currency: $("#bill-currency")?.value || "USD",
+    source: value("bill-source"),
+    invoicedOn: value("bill-invoiced-on"),
+    note: value("bill-note"),
+  };
 }
 
 // M6 E4 episode film: the rendered whole-episode MP4 and its sidecar SRT. The
@@ -2373,6 +2452,65 @@ function bindAssetTiles(root) {
   }
 }
 
+// M8 E2 billing section of the usage panel: per-currency estimate vs reported,
+// the recorded charges, and one form that writes only the billing.json sidecar.
+function renderBillingSection() {
+  const billing = usageReport?.billing || null;
+  const rows = billingCurrencyRows(billing);
+  const records = billRecordRows(billLedger);
+  const status = billLedger?.ledgerStatus || billing?.ledgerStatus || "missing";
+  const rowText = rows.length
+    ? rows
+        .map(
+          (row) =>
+            `<div>${escapeHTML(row.label)} · 估算 ${escapeHTML(row.estimateText)} · 已录入 ${escapeHTML(
+              row.reportedText,
+            )} · 差额 ${escapeHTML(row.deltaText)} · ${escapeHTML(row.countText)}</div>`,
+        )
+        .join("")
+    : "<div>还没有带冻结报价的任务，因此没有可录入的账单。</div>";
+  const recordText = records.length
+    ? records
+        .map(
+          (record) =>
+            `<div>${escapeHTML(record.invoicedOn)} · ${escapeHTML(record.provider || "")} · ${escapeHTML(
+              record.amountText,
+            )} · 任务 ${escapeHTML(record.jobId)}${record.replaced ? `（第 ${record.revision} 版）` : ""} · ${escapeHTML(
+              record.source,
+            )}</div>`,
+        )
+        .join("")
+    : "<div>账本里还没有记录。</div>";
+  const notice = billNotice
+    ? `<p class="meta">${escapeHTML(billNotice)}</p>`
+    : billError
+      ? `<p class="meta">${escapeHTML(billErrorText(billError))}（${escapeHTML(billError)}）</p>`
+      : "";
+  return `<h3>供应商账单 <small>手工录入实际扣费</small></h3>
+    <p class="meta">${escapeHTML(billLedgerStatusText(status))} · ${escapeHTML(
+      billingHeadline(billing),
+    )}</p>
+    <div class="daily-list">${rowText}</div>
+    <p class="meta">${billingNotes(billing)
+      .map((note) => escapeHTML(note))
+      .join(" ")} 未录入账单的 Job 保持未知，未知不计作 0。</p>
+    <h3>已录入记录</h3><div class="daily-list">${recordText}</div>
+    ${notice}
+    <div class="bill-form">
+      <label>任务 ID<input id="bill-job" placeholder="本地 Job ID" autocomplete="off" /></label>
+      <label>金额<input id="bill-amount" placeholder="0.56" inputmode="decimal" autocomplete="off" /></label>
+      <label>币种<select id="bill-currency">${BILL_CURRENCIES.map(
+        (currency) => `<option value="${currency}">${escapeHTML(billCurrencyLabel(currency))}</option>`,
+      ).join("")}</select></label>
+      <label>来源<input id="bill-source" placeholder="Kling 控制台 2026-10-25 账单" autocomplete="off" /></label>
+      <label>日期<input id="bill-invoiced-on" placeholder="YYYY-MM-DD" autocomplete="off" /></label>
+      <label>备注<input id="bill-note" placeholder="可选" autocomplete="off" /></label>
+      <button data-action="record-bill" ${billBusy ? "disabled" : ""}>${
+        billBusy ? "正在写入…" : "录入账单"
+      }</button>
+    </div>`;
+}
+
 function renderUsagePanel() {
   if (panelMode !== "usage") return;
   const panel = $("#artifact-panel");
@@ -2418,7 +2556,8 @@ function renderUsagePanel() {
             )
             .join("")
         : "暂无记录"
-    }</div>`;
+    }</div>
+    ${renderBillingSection()}`;
   icons(panel);
 }
 
@@ -3254,6 +3393,7 @@ document.addEventListener("click", async (event) => {
     if (action === "batch-selected") await confirmBatch();
     if (action === "confirm-batch") await submitBatch();
     if (action === "confirm-season-batch") await submitSeasonBatch();
+    if (action === "record-bill") await recordBill();
     if (action === "redo-shot") await redoShot(shotIdOf(event));
     if (action === "play-shot")
       startSequence(shotIdOf(event), event.target.closest("[data-media-url]")?.dataset.mediaUrl);

@@ -31,7 +31,7 @@ def clip_response(request):
 
 async def delivered_clip(store, clock, *, run_id: str, prompt: str):
     """Submit, query and download one clip through the frozen live pipeline."""
-    # Live submissions are spaced by one second on the frozen clock.
+    # Live submissions are spaced past the frozen per-provider submit interval (2 s).
     clock.advance(5)
     context = live_run(store, run_id)
     async with live_service(store, clock, provider_handler) as (service, _provider):

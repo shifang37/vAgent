@@ -5,6 +5,7 @@ import re
 import sys
 from contextlib import AsyncExitStack
 from dataclasses import asdict, replace
+from datetime import UTC, datetime
 from pathlib import Path
 from uuid import uuid4
 
@@ -678,13 +679,53 @@ def local_assets(config, store, args) -> int:
     return 1 if failed else 0
 
 
-def local_usage(state, selector: str) -> dict:
-    if selector == "all":
-        return summarize_records(state)
-    assert_id(selector)
-    if selector not in state["projects"]:
-        raise AppError("NOT_FOUND", "当前数据目录中没有这个项目。")
-    return summarize_records(state, project_id=selector)
+def local_usage(config, store, selector: str) -> dict:
+    from vagent.video.providers.gate import metrics_for
+
+    project_id = None
+    if selector != "all":
+        assert_id(selector)
+        if selector not in store.snapshot()["projects"]:
+            raise AppError("NOT_FOUND", "当前数据目录中没有这个项目。")
+        project_id = selector
+    return summarize_records(
+        store.snapshot(),
+        project_id=project_id,
+        home=store.home,
+        runtime=metrics_for(store).snapshot(),
+    )
+
+
+def local_bill(config, store, args) -> int:
+    """The hand-entered billing ledger: a local write or a read, never a provider call."""
+    from vagent.video import billing
+
+    if args.bill_action == "record":
+        if not args.confirm:
+            raise AppError("CONFIRMATION_REQUIRED", "录入账单需要显式 --confirm，未写入任何内容。")
+        result = billing.record_bill(
+            store.snapshot(),
+            store.home,
+            job_id=args.job_id,
+            amount=args.amount,
+            currency=args.currency,
+            source=args.source,
+            invoiced_on=args.invoiced_on,
+            note=args.note,
+            replace=args.replace,
+            expected_revision=args.expected_revision,
+            clock=lambda: datetime.now(UTC),
+            store=store,
+        )
+        print_json(result)
+        return 0
+    project_id = None if args.project in {None, "all"} else args.project
+    if project_id is not None:
+        assert_id(project_id)
+    print_json(
+        billing.ledger_view(store.snapshot(), store.home, project_id=project_id, currency=args.currency)
+    )
+    return 0
 
 
 async def local_redo(config, store, args) -> int:
@@ -1098,6 +1139,28 @@ def parser() -> argparse.ArgumentParser:
         metavar="PROJECT",
         help="按项目（省略取值时汇总整个数据目录）聚合 Job、估算与 Token 用量",
     )
+    usage_actions = usage.add_subparsers(dest="action")
+    bill = usage_actions.add_parser(
+        "bill", help="供应商实际扣费账本：手工录入或只读查看；不调用供应商、不登记任务"
+    )
+    bill_actions = bill.add_subparsers(dest="bill_action", required=True)
+    bill_record = bill_actions.add_parser("record", help="录入一条已核对的供应商实际扣费")
+    bill_record.add_argument("--job", dest="job_id", required=True, help="已终态的本地 Job ID")
+    bill_record.add_argument("--amount", required=True, help="实际扣费金额，两位小数，不换汇")
+    bill_record.add_argument("--currency", choices=("CNY", "USD"), required=True)
+    bill_record.add_argument("--source", required=True, help="账单来源，例如「Kling 控制台 2026-10-25」")
+    bill_record.add_argument("--invoiced-on", dest="invoiced_on", help="账单日期 YYYY-MM-DD；省略时用今天")
+    bill_record.add_argument("--note", help="可选的备注，最多 500 字符")
+    bill_record.add_argument("--replace", action="store_true", help="显式更正现有记录")
+    bill_record.add_argument(
+        "--expected-revision", dest="expected_revision", type=int, help="替换时的当前版本号"
+    )
+    bill_record.add_argument("--confirm", action="store_true", help="确认写入账本，未给出时不写任何内容")
+    bill_show = bill_actions.add_parser("show", help="读取账本记录与逐币种汇总；只读")
+    bill_show.add_argument(
+        "--project", nargs="?", const="all", default=None, metavar="PROJECT", help="只显示一个项目"
+    )
+    bill_show.add_argument("--currency", choices=("CNY", "USD"), help="只看一种币种（不换汇）")
     for command in (run, chat, inspect):
         command.add_argument("-s", "--session", default="default")
     demo.add_argument("-s", "--session", default="demo")
@@ -1461,9 +1524,12 @@ def main() -> None:
         elif args.command == "audio":
             with FileStore.open(config.home) as store:
                 raise SystemExit(asyncio.run(local_audio(config, store, args)))
+        elif args.command == "usage" and getattr(args, "action", None) == "bill":
+            with FileStore.open(config.home) as store:
+                raise SystemExit(local_bill(config, store, args))
         elif args.command == "usage" and args.project is not None:
             with FileStore.open(config.home) as store:
-                print_json(local_usage(store.snapshot(), args.project))
+                print_json(local_usage(config, store, args.project))
         elif args.command == "route":
             with FileStore.open(config.home) as store:
                 print_json(local_route(config, store.snapshot(), args))

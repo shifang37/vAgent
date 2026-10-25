@@ -25,7 +25,7 @@ from vagent.skills import discover_for, register_skill_tool
 from vagent.storage import FileStore, now
 from vagent.tools import create_project_tools
 from vagent.usage import summarize_usage
-from vagent.video import clients
+from vagent.video import billing, clients
 from vagent.video.assets import asset_reference_loader
 from vagent.video.contracts import ImageInputRule
 from vagent.video.episodes import episode_summaries, read_episode
@@ -34,6 +34,7 @@ from vagent.video.media import file_io
 from vagent.video.media_http import MediaHttpClient
 from vagent.video.media_worker import MediaWorker
 from vagent.video.providers.fal import FalAdapter
+from vagent.video.providers.gate import metrics_for
 from vagent.video.providers.kling import KlingAdapter
 from vagent.video.providers.mock import MockVideoAdapter
 from vagent.video.providers.wan import WanAdapter
@@ -646,11 +647,47 @@ class ApplicationService:
         suffix = "srt" if kind == "srt" else "ass"
         return text, f"subtitles-{track.id}-v{frozen.version}.{suffix}"
 
-    def usage(self, project_id=None):
-        """Local aggregation of Jobs, estimates, tokens and the asset library."""
+    def usage(self, project_id=None, *, runtime=False):
+        """Local aggregation of Jobs, estimates, tokens, the asset library and bills.
+
+        ``runtime=True`` adds the in-memory provider metrics (latencies, backoff and
+        rate-limit counters); they are explicitly non-durable and never feed billing.
+        """
         if project_id is not None:
             assert_id(project_id)
-        return summarize_records(self.store.snapshot(), project_id=project_id)
+        metrics = metrics_for(self.store).snapshot() if runtime else None
+        return summarize_records(
+            self.store.snapshot(), project_id=project_id, home=self.store.home, runtime=metrics
+        )
+
+    def record_bill(self, request: dict) -> dict:
+        """Trusted local action: one reported actual charge, never a provider call.
+
+        The ledger is the ``billing.json`` sidecar, so this neither writes
+        ``state.json`` nor touches a Job's frozen ``unknown`` actual cost.
+        """
+        return billing.record_bill(
+            self.store.snapshot(),
+            self.store.home,
+            job_id=request["jobId"],
+            amount=request["amount"],
+            currency=request["currency"],
+            source=request["source"],
+            invoiced_on=request.get("invoicedOn"),
+            note=request.get("note"),
+            replace=request.get("replace", False),
+            expected_revision=request.get("expectedRevision"),
+            clock=self.video_jobs.clock,
+            store=self.store,
+        )
+
+    def bills(self, project_id=None, currency=None) -> dict:
+        """Read-only view of the hand-entered ledger, per currency, never converted."""
+        if project_id is not None:
+            assert_id(project_id)
+        return billing.ledger_view(
+            self.store.snapshot(), self.store.home, project_id=project_id, currency=currency
+        )
 
     async def work(self):
         """Keep the shared background services alive without creating a new Run."""

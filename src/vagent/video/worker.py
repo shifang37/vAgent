@@ -2,6 +2,7 @@
 
 import asyncio
 import math
+import time
 from contextlib import suppress
 from datetime import datetime
 from uuid import uuid4
@@ -26,6 +27,13 @@ from vagent.video.contracts import (
     parse_job,
 )
 from vagent.video.jobs import JobService, after_seconds, changed_job, query_failed
+from vagent.video.providers.gate import (
+    COOLDOWN_CODES,
+    cooldown_seconds,
+    gate_for,
+    metrics_for,
+    submit_interval_seconds,
+)
 
 
 class JobWorker:
@@ -40,8 +48,14 @@ class JobWorker:
         # Multiple owners must still share the one serial Worker boundary for
         # this Store, including when lifecycle code replaces a Worker instance.
         self._turn_lock = self._store_locks.setdefault(service.store, asyncio.Lock())
+        # M8 E2: one in-memory gate and metric table per Store, never durable state.
+        self.gate = gate_for(service.store, clock=self._clock(), config=service.config)
+        self.metrics = metrics_for(service.store)
         self._stopping = asyncio.Event()
         self._task: asyncio.Task | None = None
+
+    def _clock(self):
+        return lambda: datetime.fromisoformat(self.service.timestamp())
 
     def start(self) -> asyncio.Task:
         if self._task is None or self._task.done():
@@ -74,6 +88,12 @@ class JobWorker:
         async with self._turn_lock:
             if self._stopping.is_set():
                 return None
+            # Saved settings take effect without a restart; both stay inside the
+            # frozen 2.0–60.0 s interval and 60–900 s cooldown ranges.
+            self.gate.configure(
+                interval_seconds=submit_interval_seconds(self.service.config),
+                cooldown_seconds=cooldown_seconds(self.service.config),
+            )
             timestamp = self.service.timestamp()
             current_time = datetime.fromisoformat(timestamp)
             due = []
@@ -112,6 +132,20 @@ class JobWorker:
                 live = isinstance(job, LiveJob)
                 if live and current_time < self._store_next_calls.get(self.service.store, current_time):
                     continue
+                if live and job.status == "pending_submit":
+                    # M8 E2 §5.3: only a not-yet-sent schedule is delayed. A blocked
+                    # submit keeps pending_submit and submitAttempts=0, sends nothing,
+                    # and records one PROVIDER_BACKOFF diagnostic in runtimeBlock.
+                    decision = self.gate.check(job.request.provider)
+                    if not decision.allowed:
+                        blocked = self.service.block(
+                            job, AppError("PROVIDER_BACKOFF", decision.message), stage="submit"
+                        )
+                        if blocked.revision != job.revision:
+                            # One count per blocked episode, not one per idle scan.
+                            self.metrics.record_backoff(job.request.provider)
+                            return blocked
+                        continue
                 try:
                     if job.status == "pending_submit":
                         return await self._submit(job, adapter)
@@ -216,6 +250,18 @@ class JobWorker:
             **extra,
         )
 
+    def _record_submit_limit(self, job: Job, error: ProviderCallError) -> None:
+        """A proven 429 opens (or extends) that provider's cooldown (§5.1, §5.4).
+
+        Only a proven limitation starts a cooldown: authentication, billing and
+        parameter rejections need a human and already leave their own trail.
+        """
+        if not isinstance(job, LiveJob) or error.error.code not in COOLDOWN_CODES:
+            return
+        provider = job.request.provider
+        self.gate.record_rate_limit(provider, error.retry_after_at)
+        self.metrics.record_rate_limit_hit(provider)
+
     async def _submit(self, job: Job, adapter: VideoProviderAdapter) -> Job:
         extra = {}
         if isinstance(job, LiveJob):
@@ -226,6 +272,12 @@ class JobWorker:
                 "runtimeBlock": None,
             }
         job = self.service.update(job, status="submitting", submitAttempts=1, **extra)
+        live = isinstance(job, LiveJob)
+        if live:
+            # The interval is measured from the moment this one request starts; a
+            # crash after this point can only make the next submit wait a little.
+            self.gate.record_submit(job.request.provider)
+        started = time.monotonic()
         try:
             raw = await asyncio.wait_for(
                 adapter.submit(job.request, job.operation_key), timeout=job.policy.submit_timeout_seconds
@@ -259,6 +311,7 @@ class JobWorker:
             raise
         except ProviderCallError as error:
             if error.error.stage == "submit":
+                self._record_submit_limit(job, error)
                 return self._submit_error(
                     job, error.error, rejected=error.submission_outcome == "not_accepted"
                 )
@@ -267,6 +320,9 @@ class JobWorker:
             # Includes timeouts, malformed handles and unclassified provider
             # failures. None prove that a paid upstream did not accept a request.
             return self._submit_error(job)
+        finally:
+            if live:
+                self.metrics.record_submit_latency(time.monotonic() - started)
 
         if isinstance(job, LiveJob):
             # Once committed, even a crash while interpreting the optional snapshot
@@ -310,6 +366,8 @@ class JobWorker:
             queryStartedAt=timestamp,
             nextPollAt=after_seconds(timestamp, job.policy.query_timeout_seconds),
         )
+        live = isinstance(job, LiveJob)
+        started = time.monotonic()
         try:
             profile_args = (
                 {"endpoint_profile": job.request.endpoint_profile} if isinstance(job, LiveJob) else {}
@@ -359,5 +417,8 @@ class JobWorker:
             return self._query_error(
                 job, JobError(stage="query", code="QUERY_ERROR", message="上游查询失败，生成状态保持不变。")
             )
+        finally:
+            if live:
+                self.metrics.record_query_latency(time.monotonic() - started)
         # Persistence errors escape; the recorded query intent remains recoverable.
         return self.service.save(completed, expected_revision=job.revision)

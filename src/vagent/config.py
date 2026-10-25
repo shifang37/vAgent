@@ -22,7 +22,18 @@ def _integer_setting(value):
     return value
 
 
+def _seconds_setting(value):
+    """Submit interval/cooldown arrive as strings from the settings form or YAML."""
+    if isinstance(value, str):
+        try:
+            return float(value.strip())
+        except ValueError:
+            return value
+    return value
+
+
 IntegerSetting = Annotated[int, BeforeValidator(_integer_setting)]
+SecondsSetting = Annotated[float, BeforeValidator(_seconds_setting)]
 
 # Public configuration name -> (runtime attribute, environment name, default).
 VIDEO_SETTINGS = {
@@ -47,6 +58,17 @@ VIDEO_SETTINGS = {
     "klingMaxRunUnits": ("kling_max_run_units", "VAGENT_KLING_MAX_RUN_UNITS", 16),
     "falMaxJobCost": ("fal_max_job_cost", "VAGENT_FAL_MAX_JOB_COST", "0.50"),
     "falMaxRunCost": ("fal_max_run_cost", "VAGENT_FAL_MAX_RUN_COST", "2.00"),
+    # M8 E2 submit throttling (§5.4): local settings may only extend these values.
+    "videoSubmitIntervalSeconds": (
+        "video_submit_interval_seconds",
+        "VAGENT_VIDEO_SUBMIT_INTERVAL_SECONDS",
+        2.0,
+    ),
+    "videoRateLimitCooldownSeconds": (
+        "video_rate_limit_cooldown_seconds",
+        "VAGENT_VIDEO_RATE_LIMIT_COOLDOWN_SECONDS",
+        60.0,
+    ),
 }
 _SECRET_VIDEO_SETTINGS = frozenset({"videoApiKey", "klingApiKey", "falApiKey"})
 _SETTINGS = {"apiKey": ("api_key", None, None), "model": ("model", None, "deepseek-flash"), **VIDEO_SETTINGS}
@@ -81,6 +103,8 @@ class Config:
     kling_max_run_units: int = 16
     fal_max_job_cost: str = "0.50"
     fal_max_run_cost: str = "2.00"
+    video_submit_interval_seconds: float = 2.0
+    video_rate_limit_cooldown_seconds: float = 60.0
 
     def __post_init__(self):
         if self.video_mode not in {"off", "mock", "live"}:
@@ -121,6 +145,8 @@ class LocalSettings(BaseModel):
     klingMaxRunUnits: IntegerSetting | None = Field(default=None, ge=0, le=16)
     falMaxJobCost: Money | None = None
     falMaxRunCost: Money | None = None
+    videoSubmitIntervalSeconds: SecondsSetting | None = Field(default=None, ge=2.0, le=60.0)
+    videoRateLimitCooldownSeconds: SecondsSetting | None = Field(default=None, ge=60.0, le=900.0)
 
 
 class ConfigUpdate(LocalSettings):

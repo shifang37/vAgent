@@ -121,7 +121,7 @@ class KlingAdapter(ProviderHttpAdapter):
     async def submit(self, request, operation_key: str) -> ProviderTaskHandleV3:
         request = VideoRequestV6.model_validate(request)
         self.check_configuration(request)
-        status, payload, _ = await self._request(
+        status, payload, retry_after_at = await self._request(
             "POST", SUBMIT_PATH, stage="submit", body=self._body(request, operation_key)
         )
         data = payload.get("data")
@@ -130,9 +130,12 @@ class KlingAdapter(ProviderHttpAdapter):
             return ProviderTaskHandleV3(task_id=task_id)
         code = self._rejection(status, payload)
         if code:
+            # M8 E2: a proven 429 (or Kling 1302/1303) also reports Retry-After so the
+            # local submit gate can only extend the frozen cooldown, never shorten it.
             raise ProviderCallError(
                 self._error("submit", code, status=status, payload=payload),
                 submission_outcome="not_accepted",
+                retry_after_at=retry_after_at,
             )
         raise self._call_error("submit", "SUBMISSION_UNKNOWN", status=status, payload=payload)
 

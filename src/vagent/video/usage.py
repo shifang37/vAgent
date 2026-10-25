@@ -3,11 +3,17 @@
 Nothing here contacts a provider or a model: these numbers are the local record of
 what was registered, estimated and observed. An actual bill that was never
 reported stays unknown, and unknown usage is never counted as zero.
+
+M8 E2 appends two read-only blocks: ``billing`` (the hand-entered sidecar ledger,
+per currency, never converted) and — only when asked for — ``runtime`` (in-memory
+provider latencies and throttling counters, labelled ``durable: false``).
 """
 
 from collections import defaultdict
 from datetime import UTC, datetime
 from decimal import Decimal
+
+from vagent.video.billing import read_ledger, summarize_billing
 
 TERMINAL_JOB_STATUSES = {"succeeded", "failed", "unknown", "download_failed"}
 DAILY_LIMIT = 31
@@ -54,8 +60,16 @@ def summarize_runs(runs) -> dict:
     }
 
 
-def summarize_records(state: dict, *, project_id: str | None = None) -> dict:
-    """Aggregate one project (or the whole data directory) without any external call."""
+def summarize_records(
+    state: dict, *, project_id: str | None = None, home=None, runtime: dict | None = None
+) -> dict:
+    """Aggregate one project (or the whole data directory) without any external call.
+
+    ``home`` is the Store directory holding the ``billing.json`` sidecar; without it
+    the billing block honestly reports ``ledgerStatus="missing"``. ``runtime`` is the
+    optional in-memory metrics snapshot (never durable) exposed by
+    ``GET /api/usage?runtime=1``.
+    """
     jobs = [
         raw
         for raw in state["jobs"].values()
@@ -117,7 +131,8 @@ def summarize_records(state: dict, *, project_id: str | None = None) -> dict:
     project_assets = [raw for raw in assets.values() if project_id is None or raw["projectId"] == project_id]
     runs = [raw for raw in state["runs"].values() if project_id is None or raw["sessionId"] == project_id]
     timeline = sorted(daily.values(), key=lambda item: item["date"])[-DAILY_LIMIT:]
-    return {
+    ledger, ledger_status = (None, "missing") if home is None else read_ledger(home)
+    report = {
         "projectId": project_id,
         "generatedAt": datetime.now(UTC).isoformat(),
         "jobs": {
@@ -162,3 +177,7 @@ def summarize_records(state: dict, *, project_id: str | None = None) -> dict:
         "runs": summarize_runs(runs),
         "daily": [{**item, "estimated": money(item["estimated"])} for item in timeline],
     }
+    report["billing"] = summarize_billing(state, ledger, ledger_status=ledger_status, project_id=project_id)
+    if runtime is not None:
+        report["runtime"] = runtime
+    return report

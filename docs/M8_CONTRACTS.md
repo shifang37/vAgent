@@ -324,6 +324,13 @@
 
 这样 M1-C 的「每个 Job 至多一次提交、未知永不重投」在 M8 里逐字保留，退避只是**节流**，不是重试机制。
 
+> **E2 已实施（2026-10-25）**，实现中对本节的细化（不改冻结语义，证据见 [E2 验收](./M8_E2_ACCEPTANCE.md)）：
+>
+> - **配置项名称**：逐 provider 提交间隔为 `videoSubmitIntervalSeconds`（`VAGENT_VIDEO_SUBMIT_INTERVAL_SECONDS`，默认 2.0），429 冷却为 `videoRateLimitCooldownSeconds`（`VAGENT_VIDEO_RATE_LIMIT_COOLDOWN_SECONDS`，默认 60.0）；两者在保存/启动时按 §5.4 的区间校验，读入后再按同区间收紧，因此环境变量也无法把间隔压到 2 秒以下。
+> - **`Retry-After` 的来源**：Kling/fal 适配器原先在 submit 分支丢弃了这个响应头（只用于查询）。E2 在 submit 拒绝路径上把它一并交给 `ProviderCallError`，冷却据此「只延长、不缩短」并受 900 秒上限约束；错误码、`submission_outcome` 与状态机不变。
+> - **统一错误表常量**：§5.1/§5.2 的映射落在 `providers/gate.py` 的 `SUBMIT_ERROR_TABLE`/`QUERY_ERROR_TABLE`，供验收用例与实现对照，不新增错误码。
+> - **观测**：`GET /api/usage?runtime=1` 暴露每 Store 的提交/查询延迟 p50/p95 与退避/限流计数，块内固定 `"durable": false`；默认 `/api/usage` 不含该块。
+
 ### 5.4 并发、间隔与冷却
 
 | 项 | 冻结值 | 范围 | 说明 |
@@ -391,7 +398,7 @@ M7 的 31 个错误码全部保留；M8 新增 **4** 个：
 | 包 | 交付 | 验收 |
 |---|---|---|
 | E1 路由预览 | **已完成（2026-10-25）**：`routing.py`、`vagent route preview`、`GET /api/route/preview`、Web 报价对比面板；无 schema、无工具变化 | 预览逐项复现 `routeProbe`（金额/单位/顺序/`rowsSha256`）；拒绝矩阵与 Key 缺失正确；`submit=0`、存储不变。证据见 [E1 验收](./M8_E1_ACCEPTANCE.md) |
-| E2 供应商运维与账单 | **待做**：`providers/gate.py`（间隔/冷却）、`RuntimeBlock` 退避记录、`billing.py` + `vagent usage bill record\|show` + `POST/GET /api/usage/bill`、`usage.billing` 汇总、统一错误表常量 | 错误映射反例矩阵、固定时钟下的间隔/冷却时序、`PROVIDER_BACKOFF` 不消耗提交次数、未知不重投、账单幂等/冲突/汇总（USD 不并入 CNY） |
+| E2 供应商运维与账单 | **已完成（2026-10-25）**：`providers/gate.py`（逐 provider 间隔 2.0 秒与 429 冷却 60 秒、`Retry-After` 只延长且 900 秒上限）、`RuntimeBlock` 退避记录、`billing.py` + `vagent usage bill record\|show` + `POST/GET /api/usage/bill`、`usage.billing` 汇总、`SUBMIT_ERROR_TABLE`/`QUERY_ERROR_TABLE` 统一错误表常量、`GET /api/usage?runtime=1` 内存指标；无 schema、无工具变化 | 错误映射反例矩阵、固定时钟下的间隔/冷却时序、`PROVIDER_BACKOFF` 不消耗提交次数、未知不重投、账单幂等/冲突/汇总（USD 不并入 CNY）——证据见 [E2 验收](./M8_E2_ACCEPTANCE.md) |
 | E3 真实样本 | **待做（需单独授权）**：Kling 5s、fal 5s、CosyVoice 1 集、真实 DeepSeek 1 Run | 每条留证（任务 ID、结果主机、字节数、SHA-256、时长/编码、播放与 Range、账单或 `unknown`）；失败不重试、不换 provider、不改冻结表 |
 | E4 验收与发布 | **待做**：`scripts/evaluate_m8.py` 离线 3–4 用例、`tests/test_m8_evaluation.py`、受控浏览器（报价对比 + 账单）、安装态 wheel smoke、v0.6.0 发布 | 全量回归、Ruff、前端 8 模块、四组 CI；168 个 `schemaSha256`、`contractsSha256`、`capabilitiesSha256` 与 `routeProbe.rowsSha256` 不变；未新增付费样本 |
 

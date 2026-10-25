@@ -2275,3 +2275,32 @@ footer {
   color: #7d8da3;
   line-height: 1.8;
 }
+
+/* M8 E2: the hand-entered billing ledger inside the usage panel. */
+.bill-form {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
+  gap: 8px 10px;
+  align-items: end;
+  margin-top: 10px;
+}
+.bill-form label {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  font-size: 11px;
+  color: #7d8da3;
+}
+.bill-form input,
+.bill-form select {
+  border: 1px solid rgba(148, 163, 184, 0.4);
+  border-radius: 8px;
+  padding: 6px 8px;
+  font-size: 12px;
+  color: #334a61;
+  background: #fff;
+}
+.bill-form button {
+  justify-self: start;
+}
+

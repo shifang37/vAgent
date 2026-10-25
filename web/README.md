@@ -38,6 +38,7 @@ $env:VAGENT_HOME = Join-Path $PWD '.vagent/web'
 - 批量生成确认对话框：先请求只读估算，逐镜头列出模式/时长/估算与合计，并显示本 Run 已用与剩余额度；确认后整批登记，超出上限时服务端整批拒绝。
 - 序列连播：客户端按顺序播放各镜头本地 MP4（不做服务端拼接），可暂停、下一个或停止；尚无本地媒体的镜头在面板上明确标注并被跳过。
 - 用量面板（左栏「用量统计」）：按项目聚合任务计数与状态、登记估算与账单状态（未取得账单保持未知）、分镜与镜头版本数、素材数、模型 Token 覆盖率与按日记录；只读本地数据，不做外部调用。
+- 供应商账单（用量面板底部，M8 E2）：逐币种一行显示估算/已录入/差额与「n 条已录入 · m 个未录入」，未录入固定显示「未录入（未知，不是 0）」，CNY 与 USD 只并列、**不换汇也不合计**；下方列出账本记录（日期、供应商、金额与币种、Job ID、来源，第 2 版以上标注版本）。表单（Job ID/金额/币种/来源/日期/备注）先本地校验，再 `POST /api/usage/bill`（必须 `confirm=true`，带 CSRF）；失败按 `BILL_CONFLICT`/`BILL_RECORD_INVALID`/`INVALID_STORE` 提示，冲突需在 CLI 显式 `--replace --expected-revision` 更正。面板只读 `/api/usage` 与 `/api/usage/bill` 并写 `billing.json` 侧车账本，不登记 Job、不改 `state.json`、不调用供应商。
 - 报价对比（M8 E1）：分镜面板工具栏「报价对比」（优先使用已勾选镜头）与分集面板逐场「集级报价对比」。对话框只读展示每个供应商一行（金额与币种、可用性与原因、Key 是否配置、`sourceUrl` 与 `checkedAt`）、推荐项与「不换汇/不合计」说明；「使用该供应商」只写既有 `PATCH /api/config` 的 `videoProvider`，不登记 Job、不改写已登记任务，也不调用供应商。
 - 编排观测：上下文字节与裁剪数、项目事实与计划、Skills 版本、MCP 状态、工具目录和事件、已知/未知 Token 用量。
 - 新版 API 可提供当前轮工具参数和结果明细；旧运行实例缺少该字段时隐藏明细区，工具事件仍可见。
@@ -71,7 +72,10 @@ live Job 视图包含 `lastProviderStatus`、`queryPauseReason`、冻结费用�
 | `POST /api/sessions/{id}/shots/{shotId}/redo` | CSRF + JSON `{clientRequestId, storyboardId, storyboardVersion, expectedRevision}`，202 重做；过期 revision 返回 409 `VERSION_CONFLICT` |
 | `GET /api/assets?projectId=`、`POST /api/assets` | 素材元数据列表 / multipart 上传（CSRF、`projectId` + `file`，正文上限 20 MB + 64 KiB） |
 | `GET /api/assets/{id}`、`GET/HEAD /api/assets/{id}/content` | 元数据与可用性 / 单 Range 图片内容（`?download=1` 附件）；不存在 404、文件缺失或损坏 410 |
-| `GET /api/usage?projectId=` | 读取侧聚合（任务、估算与账单状态、分镜、素材、Token 覆盖率、按日）；不调用模型或供应商 |
+| `GET /api/usage?projectId=` | 读取侧聚合（任务、估算与账单状态、分镜、素材、Token 覆盖率、按日）；不调用模型或供应商。追加 `billing` 块（逐币种估算/已录入/差额，未录入为 `null`、不换汇） |
+| `GET /api/usage?runtime=1` | 追加内存态 `runtime` 块：提交/查询延迟 p50/p95、`backoffCount`、`rateLimitHits`，固定 `"durable": false`，重启归零；不进账单也不作验收结论 |
+| `GET /api/usage/bill?projectId=&currency=` | 只读账单账本（`billing-v1`）：记录、`ledgerStatus`（`ok`/`missing`/`invalid`）与逐币种汇总；不写盘、不调用供应商 |
+| `POST /api/usage/bill` | 本地受控写（需 CSRF 与 `confirm=true`，返回 201）：录入一条已核对的供应商实际扣费；幂等重放 `replayed=true`，不同金额/日期/来源为 409 `BILL_CONFLICT`，字段或 Job 状态非法为 400 `BILL_RECORD_INVALID`，账本损坏为 `INVALID_STORE` |
 | `GET /api/route/preview?storyboardId=&version=&shotIds=&mode=&durationSeconds=&aspectRatio=&scope=&provider=&requireAvailable=` | 只读供应商报价对比（`provider-route-v1`）：每个供应商一行、可用性与原因、单价/金额/币种、来源与核对日期、推荐项；不需要会话或 CSRF，不登记 Job、不调用供应商、不读凭据内容；`requireAvailable=true` 且无可用时返回 400 `ROUTE_UNAVAILABLE` |
 | `GET /api/films/{storyboardId}?projectId=` | 当前成片与历史版本、逐输入镜头、有理数时间线偏移、受控 `mediaUrl` 与 `mediaAvailable`；无成片时 `film` 为 null；跨项目 404 |
 | `POST /api/sessions/{id}/films/assemble` | CSRF + JSON `{clientRequestId, storyboardId, expectedRevision}`，202 返回成片视图；本地流复制，不登记 Job、不调用供应商；过期 revision 409、输入未交付 409/422、拼接失败 500 但状态不变；同一请求 ID 重放原结果 |

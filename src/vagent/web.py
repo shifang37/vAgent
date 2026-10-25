@@ -198,6 +198,21 @@ class FilmRenderInput(BaseModel):
     confirm: bool = True
 
 
+class BillRecordInput(BaseModel):
+    """One hand-entered provider charge; ``confirm`` is required by contract §4.5."""
+
+    model_config = ConfigDict(extra="forbid", strict=True)
+    jobId: Identifier
+    amount: str = Field(pattern=r"^(?:0|[1-9][0-9]*)(?:\.[0-9]{1,2})?$", max_length=32)
+    currency: Literal["CNY", "USD"]
+    source: str = Field(min_length=1, max_length=1000)
+    invoicedOn: str | None = Field(default=None, pattern=r"^[0-9]{4}-[0-9]{2}-[0-9]{2}$")
+    note: str | None = Field(default=None, max_length=500)
+    replace: bool = False
+    expectedRevision: int | None = Field(default=None, ge=1)
+    confirm: bool = False
+
+
 def create_app(config, *, port=3210, model=None, policy=None):
     token = secrets.token_urlsafe(32)
     allowed_hosts = {f"127.0.0.1:{port}", f"localhost:{port}"}
@@ -292,6 +307,7 @@ def create_app(config, *, port=3210, model=None, policy=None):
                 "BATCH_CONFLICT",
                 "BATCH_INTERRUPTED",
                 "TIMELINE_VERSION_CONFLICT",
+                "BILL_CONFLICT",
             }
             else 400
         )
@@ -383,8 +399,21 @@ def create_app(config, *, port=3210, model=None, policy=None):
         )
 
     @app.get("/api/usage")
-    async def usage(projectId: str | None = None):
-        return app.state.service.usage(projectId)
+    async def usage(projectId: str | None = None, runtime: bool = False):
+        # ``runtime=1`` adds the in-memory (non-durable) provider metrics of §5.6.
+        return app.state.service.usage(projectId, runtime=runtime)
+
+    @app.get("/api/usage/bill")
+    async def bills(projectId: str | None = None, currency: str | None = None):
+        # Read-only local view of the hand-entered ledger; no provider, no Job.
+        return app.state.service.bills(projectId, currency)
+
+    @app.post("/api/usage/bill", status_code=201)
+    async def record_bill(body: BillRecordInput):
+        # A local trusted write next to /api/audio/import, never a model tool.
+        if not body.confirm:
+            raise AppError("CONFIRMATION_REQUIRED", "录入账单需要显式确认（confirm=true），未写入任何内容。")
+        return await file_io(app.state.service.record_bill, body.model_dump())
 
     @app.get("/api/route/preview")
     async def route_preview(
@@ -752,6 +781,7 @@ def create_app(config, *, port=3210, model=None, policy=None):
                 "render-state.js",
                 "timeline-state.js",
                 "route-state.js",
+                "bill-state.js",
                 "styles.css",
                 "mark.svg",
             }

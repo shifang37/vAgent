@@ -421,9 +421,17 @@ async def test_live_worker_serial_spacing_is_shared_by_owners(store, video_clock
         assert sum(result is not None for result in results) == 1 and len(calls) == 1
         video_clock.advance(0.99)
         assert await workers[1].run_once() is None
-        video_clock.advance(0.01)
+        # M8 E2 §5.4: the frozen per-provider submit interval (2.0 s) now dominates
+        # the global 1.0 s call interval, so the second submit waits for the gate and
+        # only records a PROVIDER_BACKOFF diagnostic while it does.
+        video_clock.advance(0.51)
+        blocked = await workers[1].run_once()
+        assert blocked.status == "pending_submit" and blocked.submit_attempts == 0
+        assert blocked.runtime_block.code == "PROVIDER_BACKOFF"
+        assert len(calls) == 1
+        video_clock.advance(0.51)
         assert (await workers[1].run_once()).provider_task_id == "task-2"
-        assert (calls[1] - calls[0]).total_seconds() >= 1
+        assert (calls[1] - calls[0]).total_seconds() >= 2
 
 
 async def test_download_state_waits_without_delivering_a_cloud_url(store, video_clock):
