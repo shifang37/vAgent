@@ -302,3 +302,38 @@ def test_audio_import_requires_a_license_and_deduplicates(store):
         )
     assert error.value.code == "AUDIO_FORMAT_UNSUPPORTED"
     assert store.snapshot()["audio"][first["audioId"]]["kind"] == "sfx"
+
+
+def test_a_timeline_whose_only_audio_falls_outside_the_edit_names_the_cause(store):
+    """Dropping every audio entry must name the cause instead of shipping silence."""
+    import asyncio
+
+    from vagent.video.renders import RenderError
+
+    fixture_value = asyncio.run(fixture(store))
+    clips = clips_for(store.snapshot(), fixture_value["boards"])
+    voice = fixture_value["audio"]["assets"][0]
+    timeline = save(
+        fixture_value["registry"],
+        store,
+        fixture_value,
+        clips[-1:],
+        key="m7e3-outside-save",
+        audio=[
+            {
+                "audioId": voice["audioId"],
+                "audioVersion": voice["audioVersion"],
+                "kind": "voice",
+            }
+        ],
+    )
+    args = canonical(render_args(timeline["timelineId"]))
+    with pytest.raises(RenderError) as error:
+        asyncio.run(
+            fixture_value["service"].renders.render(
+                args, project_id=PROJECT, operation_key="m7e3-outside-render", args=args
+            )
+        )
+    assert error.value.code == "RENDER_SOURCE_MISSING"
+    assert "剪辑窗口外" in str(error.value)
+    assert store.snapshot()["films"] == {}

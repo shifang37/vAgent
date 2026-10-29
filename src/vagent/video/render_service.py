@@ -185,6 +185,10 @@ class AudioPlan:
     rendered: list[RenderAudioTrack] = field(default_factory=list)
     assets: list[str] = field(default_factory=list)
     ducking: RenderDucking = field(default_factory=RenderDucking)
+    # Entries the edit dropped (cue outside the timeline, or a window shorter than
+    # 1 ms). Kept for diagnostics so a silent mix names its cause instead of
+    # surfacing later as LOUDNESS_OUT_OF_RANGE.
+    dropped: list[dict] = field(default_factory=list)
 
 
 @dataclass
@@ -953,6 +957,20 @@ class RenderService:
                 start = self._timeline_cue_start(cue, plan) if cue is not None else None
                 if start is None:
                     # The cue is entirely outside the edit: it contributes no audio.
+                    result.dropped.append(
+                        {
+                            "audioId": asset.id,
+                            "audioVersion": version.version,
+                            "kind": entry.kind,
+                            "reason": (
+                                "no-dialogue-line"
+                                if index is None
+                                else "no-cue"
+                                if cue is None
+                                else "outside-edit"
+                            ),
+                        }
+                    )
                     continue
                 gain = entry.gain_db
                 ducking = False
@@ -989,6 +1007,16 @@ class RenderService:
             )
         if len(result.tracks) > MAX_RENDER_AUDIO_TRACKS:
             raise RenderError("RENDER_SOURCE_MISSING", "（音频轨超过上限）", stage="audio")
+        if plan.timeline_audio and not result.tracks:
+            # Every declared entry fell outside the edit. Without this the render
+            # would deliver a silent film (or fail later as LOUDNESS_OUT_OF_RANGE),
+            # hiding the real cause.
+            reasons = ", ".join(sorted({item["reason"] for item in result.dropped})) or "unknown"
+            raise RenderError(
+                "RENDER_SOURCE_MISSING",
+                f"（时间线的音频全部落在剪辑窗口外：{len(result.dropped)} 条，{reasons}）",
+                stage="audio",
+            )
         return result
 
     def _timeline_cue_start(self, cue: SubtitleCue, plan: RenderPlan) -> Fraction | None:
@@ -1379,7 +1407,11 @@ class RenderService:
                         work_root=work,
                     )
                 except MixError as error:
-                    raise RenderError(error.code, f"（{error}）", stage=error.stage) from None
+                    detail = error.detail
+                    if plan.audio.dropped:
+                        reasons = ", ".join(f"{item['kind']}:{item['reason']}" for item in plan.audio.dropped)
+                        detail = f"{detail}（音频落空 {len(plan.audio.dropped)} 条：{reasons}）"
+                    raise RenderError(error.code, detail, stage=error.stage) from None
             derived = (
                 remap_timeline_cues(
                     list(plan.track_version.cues),

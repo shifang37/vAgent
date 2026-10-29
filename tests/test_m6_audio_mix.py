@@ -19,6 +19,7 @@ from vagent.video.mixer import (
     mix_tracks,
     parse_ebur128,
     parse_loudnorm,
+    parse_volume_peak,
 )
 from vagent.video.tts import inspect_wav, synthesize_local_wav
 
@@ -174,6 +175,43 @@ async def test_silent_mix_is_rejected_by_the_loudness_gate(tmp_path):
         await mix_tracks(tracks=tracks, output=output, duration_seconds=Fraction(3))
     assert error.value.code in {"LOUDNESS_OUT_OF_RANGE", "RENDER_ENCODE_FAILED", "RENDER_VALIDATION_FAILED"}
     assert not output.exists()
+
+
+async def test_digital_silence_is_refused_before_the_loudnorm_passes(tmp_path):
+    """A silent premix can never reach the target, so it must fail deterministically."""
+    silent = write_silence(tmp_path / "silent.wav", 2.0)
+    output = tmp_path / "silent-mix.wav"
+    with pytest.raises(MixError) as error:
+        await mix_tracks(
+            tracks=[track(silent, "voice", 0.0, 0.0)],
+            output=output,
+            duration_seconds=Fraction(2),
+        )
+    assert error.value.code == "LOUDNESS_OUT_OF_RANGE"
+    assert "混音为静音" in str(error.value)
+    assert error.value.stage == "validate"
+    assert not output.exists()
+
+
+async def test_a_very_quiet_but_audible_premix_still_reaches_the_target(tmp_path):
+    """The silence probe only refuses digital silence, not a quiet real signal."""
+    quiet = write_voice(tmp_path / "quiet.wav", "很轻的台词")
+    output = tmp_path / "quiet-mix.wav"
+    result = await mix_tracks(
+        tracks=[track(quiet, "voice", 0.0, -60.0)],
+        output=output,
+        duration_seconds=Fraction(2),
+    )
+    assert output.exists()
+    assert abs(result.loudness_verification["integratedLufs"] - (-16.0)) <= 0.5
+
+
+def test_volume_peak_parser_reads_the_silence_floor():
+    silence = "[Parsed_volumedetect_0 @ 0x1] max_volume: -91.0 dB\n"
+    assert parse_volume_peak(silence) == -91.0
+    assert parse_volume_peak("max_volume: -inf dB\n") == float("-inf")
+    assert parse_volume_peak("max_volume: -3.2 dB\n") == -3.2
+    assert parse_volume_peak("no level here\n") is None
 
 
 async def test_missing_file_and_empty_tracks_are_source_errors(tmp_path):

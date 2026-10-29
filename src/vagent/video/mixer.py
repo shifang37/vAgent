@@ -39,6 +39,11 @@ DUCKING_ATTACK_MS = 20.0
 DUCKING_RELEASE_MS = 400.0
 MIX_SAMPLE_RATE = 48000
 MIX_CHANNELS = 2
+# A digital-silence premix can never reach the loudness target, and the retry plus
+# correction passes below only amplify a file with no signal. Detect it up front on
+# the premix so the failure is immediate and deterministic instead of depending on
+# how loudnorm happens to report silence.
+SILENCE_PEAK_DB = -90.0
 RENDER_TIMEOUT_SECONDS = 120.0
 RENDER_JOB_TIMEOUT_SECONDS = 600.0
 MESSAGES = {
@@ -49,6 +54,7 @@ MESSAGES = {
     "RENDER_VALIDATION_FAILED": "混音产物未通过结构、时长或响度校验。",
 }
 _JSON_BLOCK = re.compile(r"\{[^{}]*\"input_i\"[^{}]*\}", re.DOTALL)
+_SILENCE_PEAK = re.compile(r"max_volume:\s*(-?(?:\d+(?:\.\d+)?|inf))\s*dB")
 _EBU_SUMMARY = re.compile(r"Summary:\s*(?P<body>.*)\Z", re.DOTALL)
 _EBU_I = re.compile(r"Integrated loudness:\s*I:\s*(-?\d+(?:\.\d+)?) LUFS")
 _EBU_LRA = re.compile(r"LRA:\s*(-?\d+(?:\.\d+)?) LU")
@@ -60,6 +66,9 @@ class MixError(AppError):
         message = MESSAGES[code]
         super().__init__(code, f"{message}{detail}" if detail else message)
         self.stage = stage
+        # The detail alone, so a caller wrapping this error does not repeat the
+        # frozen message (M8-era code produced "（…（…））").
+        self.detail = detail
 
 
 @dataclass(frozen=True)
@@ -223,6 +232,21 @@ def parse_ebur128(text: str) -> dict | None:
     }
 
 
+def parse_volume_peak(text: str) -> float | None:
+    """The premix sample peak in dBFS; ``None`` when FFmpeg reported no level.
+
+    ``volumedetect`` clamps digital silence to ``-91.0 dB`` on FFmpeg 7.1, so the
+    silence probe below compares against :data:`SILENCE_PEAK_DB` instead of ``-inf``.
+    """
+    match = _SILENCE_PEAK.search(text)
+    if match is None:
+        return None
+    value = match.group(1)
+    if value.lstrip("-") == "inf":
+        return float("-inf")
+    return float(value)
+
+
 def loudness_in_tolerance(measurement: dict) -> bool:
     if measurement.get("method") == "ebur128":
         lufs = _number(measurement.get("integratedLufs"))
@@ -299,6 +323,19 @@ async def mix_tracks(
     deadline = asyncio.get_running_loop().time() + RENDER_JOB_TIMEOUT_SECONDS
     try:
         graph, premix = build_filter_graph(tracks, duration_seconds)
+        probe = await _run(
+            engine,
+            tracks,
+            f"{graph};[{premix}]volumedetect[out]",
+            None,
+            cancelled=cancelled,
+            deadline=deadline,
+        )
+        peak = parse_volume_peak(probe)
+        if peak is None or peak <= SILENCE_PEAK_DB:
+            # Deterministic fast failure: no loudnorm pass can lift silence to the
+            # target, so do not spend the encode/verify/retry passes on it.
+            raise MixError("LOUDNESS_OUT_OF_RANGE", "（混音为静音，未交付）", stage="validate")
         first = await _run(
             engine,
             tracks,
