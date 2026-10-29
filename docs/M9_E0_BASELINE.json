@@ -1,0 +1,1413 @@
+{
+  "baseline": "m9-e0",
+  "capabilities": {
+    "capabilitiesSha256": "da6aa7b7889a616bc944d965739deacab91288b02b8d07c892c260301a52d1bb",
+    "entriesPerProvider": {
+      "fal": [
+        "fal-ai/kling-video/v3/standard/text-to-video"
+      ],
+      "kling": [
+        "kling-3.0-turbo"
+      ],
+      "wan": [
+        "wan2.7-i2v-2026-04-25",
+        "wan2.7-t2v-2026-06-12"
+      ]
+    },
+    "live": [
+      {
+        "adapterVersion": "fal-http-v1",
+        "audioMode": "silent",
+        "capabilitiesVersion": "multi-provider-v3",
+        "endpointProfile": "fal-queue-v1",
+        "inputTypes": [
+          "text"
+        ],
+        "maxPromptCharacters": 2500,
+        "mode": "live",
+        "model": "fal-ai/kling-video/v3/standard/text-to-video",
+        "priceVersion": "fal-kling30-standard-silent-20261021",
+        "provider": "fal",
+        "rate": {
+          "checkedAt": "2026-10-21",
+          "currency": "USD",
+          "priceVersion": "fal-kling30-standard-silent-20261021",
+          "sourceUrl": "https://fal.ai/models/fal-ai/kling-video/v3/standard/text-to-video",
+          "unit": "output_second",
+          "unitPrice": "0.084"
+        },
+        "region": "global",
+        "resource": null,
+        "shotModes": [
+          "t2v"
+        ],
+        "sourcePolicyVersion": "fal-auth-result-origin-v1",
+        "specs": [
+          {
+            "aspectRatio": "16:9",
+            "durationSeconds": 5,
+            "mode": "t2v",
+            "resolution": "720P"
+          }
+        ],
+        "supportsCancel": false,
+        "supportsIdempotentSubmit": false,
+        "supportsResultUrlRefresh": false
+      },
+      {
+        "adapterVersion": "kling-http-v1",
+        "audioMode": "native",
+        "capabilitiesVersion": "multi-provider-v3",
+        "endpointProfile": "kling-singapore-v1",
+        "inputTypes": [
+          "text"
+        ],
+        "maxPromptCharacters": 2500,
+        "mode": "live",
+        "model": "kling-3.0-turbo",
+        "priceVersion": "kling30-turbo-720p-20261021",
+        "provider": "kling",
+        "rate": {
+          "checkedAt": "2026-10-21",
+          "currency": "USD",
+          "priceVersion": "kling30-turbo-720p-20261021",
+          "sourceUrl": "https://kling.ai/document-api/pricing/base/video.md",
+          "unit": "output_second",
+          "unitPrice": "0.112"
+        },
+        "region": "singapore",
+        "resource": {
+          "priceVersion": "kling30-turbo-720p-20261021",
+          "unit": "VIDEO_UNIT",
+          "unitsPerSecond": "0.8"
+        },
+        "shotModes": [
+          "t2v"
+        ],
+        "sourcePolicyVersion": "kling-auth-result-origin-v1",
+        "specs": [
+          {
+            "aspectRatio": "16:9",
+            "durationSeconds": 5,
+            "mode": "t2v",
+            "resolution": "720P"
+          }
+        ],
+        "supportsCancel": false,
+        "supportsIdempotentSubmit": false,
+        "supportsResultUrlRefresh": false
+      },
+      {
+        "audioMode": "auto",
+        "capabilitiesVersion": "wan27-shot-beijing-v2",
+        "imageInput": {
+          "allowsAlpha": false,
+          "maxAspect": 8,
+          "maxBytes": 20971520,
+          "maxSide": 8000,
+          "mimeTypes": [
+            "image/png",
+            "image/jpeg",
+            "image/webp"
+          ],
+          "minAspect": 1,
+          "minSide": 240
+        },
+        "inputTypes": [
+          "text",
+          "image"
+        ],
+        "maxPromptCharacters": 4991,
+        "mode": "live",
+        "model": "wan2.7-i2v-2026-04-25",
+        "price": {
+          "amount": "0.60",
+          "checkedAt": "2026-10-16",
+          "currency": "CNY",
+          "priceVersion": "wan27-i2v-beijing-720p-20261016",
+          "quantity": "1",
+          "sourceUrl": "https://help.aliyun.com/zh/model-studio/model-pricing#ba6f7744d5e0o",
+          "unit": "output_second",
+          "unitPrice": "0.60"
+        },
+        "promptExtend": false,
+        "provider": "wan",
+        "region": "cn-beijing",
+        "seed": 0,
+        "shotMode": "single",
+        "shotModes": [
+          "i2v",
+          "flf2v"
+        ],
+        "specs": [
+          {
+            "aspectRatio": null,
+            "durationSeconds": 2,
+            "mode": "i2v",
+            "resolution": "720P"
+          },
+          {
+            "aspectRatio": null,
+            "durationSeconds": 3,
+            "mode": "i2v",
+            "resolution": "720P"
+          },
+          {
+            "aspectRatio": null,
+            "durationSeconds": 4,
+            "mode": "i2v",
+            "resolution": "720P"
+          },
+          {
+            "aspectRatio": null,
+            "durationSeconds": 5,
+            "mode": "i2v",
+            "resolution": "720P"
+          },
+          {
+            "aspectRatio": null,
+            "durationSeconds": 6,
+            "mode": "i2v",
+            "resolution": "720P"
+          },
+          {
+            "aspectRatio": null,
+            "durationSeconds": 7,
+            "mode": "i2v",
+            "resolution": "720P"
+          },
+          {
+            "aspectRatio": null,
+            "durationSeconds": 8,
+            "mode": "i2v",
+            "resolution": "720P"
+          },
+          {
+            "aspectRatio": null,
+            "durationSeconds": 9,
+            "mode": "i2v",
+            "resolution": "720P"
+          },
+          {
+            "aspectRatio": null,
+            "durationSeconds": 10,
+            "mode": "i2v",
+            "resolution": "720P"
+          },
+          {
+            "aspectRatio": null,
+            "durationSeconds": 11,
+            "mode": "i2v",
+            "resolution": "720P"
+          },
+          {
+            "aspectRatio": null,
+            "durationSeconds": 12,
+            "mode": "i2v",
+            "resolution": "720P"
+          },
+          {
+            "aspectRatio": null,
+            "durationSeconds": 13,
+            "mode": "i2v",
+            "resolution": "720P"
+          },
+          {
+            "aspectRatio": null,
+            "durationSeconds": 14,
+            "mode": "i2v",
+            "resolution": "720P"
+          },
+          {
+            "aspectRatio": null,
+            "durationSeconds": 15,
+            "mode": "i2v",
+            "resolution": "720P"
+          },
+          {
+            "aspectRatio": null,
+            "durationSeconds": 2,
+            "mode": "flf2v",
+            "resolution": "720P"
+          },
+          {
+            "aspectRatio": null,
+            "durationSeconds": 3,
+            "mode": "flf2v",
+            "resolution": "720P"
+          },
+          {
+            "aspectRatio": null,
+            "durationSeconds": 4,
+            "mode": "flf2v",
+            "resolution": "720P"
+          },
+          {
+            "aspectRatio": null,
+            "durationSeconds": 5,
+            "mode": "flf2v",
+            "resolution": "720P"
+          },
+          {
+            "aspectRatio": null,
+            "durationSeconds": 6,
+            "mode": "flf2v",
+            "resolution": "720P"
+          },
+          {
+            "aspectRatio": null,
+            "durationSeconds": 7,
+            "mode": "flf2v",
+            "resolution": "720P"
+          },
+          {
+            "aspectRatio": null,
+            "durationSeconds": 8,
+            "mode": "flf2v",
+            "resolution": "720P"
+          },
+          {
+            "aspectRatio": null,
+            "durationSeconds": 9,
+            "mode": "flf2v",
+            "resolution": "720P"
+          },
+          {
+            "aspectRatio": null,
+            "durationSeconds": 10,
+            "mode": "flf2v",
+            "resolution": "720P"
+          },
+          {
+            "aspectRatio": null,
+            "durationSeconds": 11,
+            "mode": "flf2v",
+            "resolution": "720P"
+          },
+          {
+            "aspectRatio": null,
+            "durationSeconds": 12,
+            "mode": "flf2v",
+            "resolution": "720P"
+          },
+          {
+            "aspectRatio": null,
+            "durationSeconds": 13,
+            "mode": "flf2v",
+            "resolution": "720P"
+          },
+          {
+            "aspectRatio": null,
+            "durationSeconds": 14,
+            "mode": "flf2v",
+            "resolution": "720P"
+          },
+          {
+            "aspectRatio": null,
+            "durationSeconds": 15,
+            "mode": "flf2v",
+            "resolution": "720P"
+          }
+        ],
+        "supportsCancel": false,
+        "supportsIdempotentSubmit": false,
+        "supportsResultUrlRefresh": false,
+        "watermark": true
+      },
+      {
+        "audioMode": "auto",
+        "capabilitiesVersion": "wan27-shot-beijing-v2",
+        "imageInput": null,
+        "inputTypes": [
+          "text"
+        ],
+        "maxPromptCharacters": 4991,
+        "mode": "live",
+        "model": "wan2.7-t2v-2026-06-12",
+        "price": {
+          "amount": "0.60",
+          "checkedAt": "2026-10-16",
+          "currency": "CNY",
+          "priceVersion": "wan27-beijing-720p-20261010",
+          "quantity": "1",
+          "sourceUrl": "https://help.aliyun.com/zh/model-studio/model-pricing#ba6f7744d5e0o",
+          "unit": "output_second",
+          "unitPrice": "0.60"
+        },
+        "promptExtend": false,
+        "provider": "wan",
+        "region": "cn-beijing",
+        "seed": 0,
+        "shotMode": "single",
+        "shotModes": [
+          "t2v"
+        ],
+        "specs": [
+          {
+            "aspectRatio": "16:9",
+            "durationSeconds": 2,
+            "mode": "t2v",
+            "resolution": "720P"
+          },
+          {
+            "aspectRatio": "16:9",
+            "durationSeconds": 3,
+            "mode": "t2v",
+            "resolution": "720P"
+          },
+          {
+            "aspectRatio": "16:9",
+            "durationSeconds": 4,
+            "mode": "t2v",
+            "resolution": "720P"
+          },
+          {
+            "aspectRatio": "16:9",
+            "durationSeconds": 5,
+            "mode": "t2v",
+            "resolution": "720P"
+          },
+          {
+            "aspectRatio": "16:9",
+            "durationSeconds": 6,
+            "mode": "t2v",
+            "resolution": "720P"
+          },
+          {
+            "aspectRatio": "16:9",
+            "durationSeconds": 7,
+            "mode": "t2v",
+            "resolution": "720P"
+          },
+          {
+            "aspectRatio": "16:9",
+            "durationSeconds": 8,
+            "mode": "t2v",
+            "resolution": "720P"
+          },
+          {
+            "aspectRatio": "16:9",
+            "durationSeconds": 9,
+            "mode": "t2v",
+            "resolution": "720P"
+          },
+          {
+            "aspectRatio": "16:9",
+            "durationSeconds": 10,
+            "mode": "t2v",
+            "resolution": "720P"
+          },
+          {
+            "aspectRatio": "16:9",
+            "durationSeconds": 11,
+            "mode": "t2v",
+            "resolution": "720P"
+          },
+          {
+            "aspectRatio": "16:9",
+            "durationSeconds": 12,
+            "mode": "t2v",
+            "resolution": "720P"
+          },
+          {
+            "aspectRatio": "16:9",
+            "durationSeconds": 13,
+            "mode": "t2v",
+            "resolution": "720P"
+          },
+          {
+            "aspectRatio": "16:9",
+            "durationSeconds": 14,
+            "mode": "t2v",
+            "resolution": "720P"
+          },
+          {
+            "aspectRatio": "16:9",
+            "durationSeconds": 15,
+            "mode": "t2v",
+            "resolution": "720P"
+          }
+        ],
+        "supportsCancel": false,
+        "supportsIdempotentSubmit": false,
+        "supportsResultUrlRefresh": false,
+        "watermark": true
+      }
+    ],
+    "mock": [
+      {
+        "capabilitiesVersion": "v1",
+        "inputTypes": [
+          "text"
+        ],
+        "mode": "mock",
+        "model": "mock-t2v",
+        "provider": "mock",
+        "specs": [
+          {
+            "aspectRatio": "16:9",
+            "durationSeconds": 5.0,
+            "resolution": "720p"
+          },
+          {
+            "aspectRatio": "9:16",
+            "durationSeconds": 10.0,
+            "resolution": "1080p"
+          }
+        ],
+        "supportsCancel": false,
+        "supportsIdempotentSubmit": false
+      }
+    ]
+  },
+  "contracts": {
+    "byModule": {
+      "vagent.storage": 26,
+      "vagent.video.audio": 8,
+      "vagent.video.contracts": 75,
+      "vagent.video.episodes": 13,
+      "vagent.video.films": 26,
+      "vagent.video.renders": 6,
+      "vagent.video.storyboards": 7,
+      "vagent.video.subtitles": 4,
+      "vagent.video.tts": 3
+    },
+    "contractsSha256": "ba9d8d7b4888f4c21ec58b269836f813bf7cbf850ada9881a7f77751301b2e27",
+    "modelCount": 168,
+    "schemaSha256": {
+      "vagent.storage": {
+        "Artifact": "94e5f1ddf057f1dce9d0d340e651a10d11e288523949e61160ed1aea70a935ec",
+        "ArtifactVersion": "0a103780c0ab11f9945a1a656db69f4557182b89b4df0c7ce4d382fb5ac6a19e",
+        "ContentCheck": "60fa919b06c418f5ea9ec9bbecc33a8e105ffd4f56f0113b63f6e58c81538b45",
+        "Database": "577570482cdf4ec13fa7d9ba4394c2a474ae0af17ca181723c6cd335682f7f69",
+        "DatabaseV1": "a535912d6aff0268e71123cfa9a577b95e89410890a9807579e54e7b2b2ade11",
+        "DatabaseV2": "5ff285275729c25e4f29945b34a564c7e9890b9c3f0db56845c1dafaa1592603",
+        "DatabaseV3": "d499e15db5f81fc18b0ba59eb5e56f4f7da97f0fffa64edbf65e539a459024ec",
+        "DatabaseV4": "8e4504fbd25805dc7ec64dcac91c0d6ec0a48fb28a0be28a2c91854aa93b45cc",
+        "DatabaseV5": "2afe61eb0221024e021591b565ac7b2dfef00f045327433419aba3ca9dc643c1",
+        "DatabaseV7": "e1efe07d20173b8359c482a5e487c749355b0e1f894640225a9be26a66ede4d6",
+        "DatabaseV8": "d2903740e7011dde89bd0bdf453bdb383675fd9fbfcfd8a5ba12a0308f82c3b4",
+        "DatabaseV9": "134a012d5243b7d01a2f4e4cee3c5ed240f30a25e98f9d3d1ba9eb79c76afefe",
+        "ErrorDetail": "fb3b409b0f6cf861aa6019d0ae601bbb90af22820156cb9bec69678eb54506ca",
+        "Failure": "185732956bd40a56cfba80f8342ef7569bccee9d47d8fb9e42b66385f3449ea8",
+        "ModelCall": "af88f9e1f39868d4b8dad93742876b09acf3895cd68c41f2267a1ef6504de10c",
+        "Operation": "18c143f7a47f4d163b9b2bd267d1b461c3ffc22b4ed68ddde9cedb46f370e3ca",
+        "PlanStep": "cc333bea6f24e7a844f43af08f75ad96e9daa13a1c40866666a64a5ee4bdb22f",
+        "Project": "0493a6db906452dffd4bcc97a7d846d11a4d498fa3bb2d2c333b1a728705b128",
+        "Record": "748cb42a2e3ee881bcf40915290ebea2513b8ff5a9cfeb4e310a0b5be5c41fcb",
+        "RunRecord": "2260d7954463841e4c9edb86210e9abd8d2d67c5d61183607e7819979cc0adcc",
+        "RunRecordV1": "0716f2cd795a748eddc125218f2e50c8b45497d7d3e3cffba1486c5e40cb1b88",
+        "RunRecordV2": "abac4acffbdbb1b0606e300c89c23756ef89a31bc76e5ab0ad959abe8540d079",
+        "SavedPolicy": "aad15de662b9b522f2c95fe35562dc62c775bb3e4db2119552e8934309dba6a8",
+        "Session": "b308b3c295d18133046ed49f369eeaa814320118714dc11e064ba6d922103d5b",
+        "StoredMessage": "ea82f3565b1711af93e84ba694c4bbbb8ed14ba862a0afb3f5121b57378fc2ef",
+        "Success": "bfadd28a3a011404fc5d14748039711562d4a1ba41cb6c66c0f5f2fa4e045db5"
+      },
+      "vagent.video.audio": {
+        "AudioAsset": "94431ac2bc70e9b581a30e270d33fd9b0255de5b32518fb688a2bc8018b199e7",
+        "AudioAssetVersion": "9f959f585075ab03cba5009943b6ce9810594b37e2f83e0607402e10ea70c9e4",
+        "AudioGenerateArgs": "340a23c36ff553ae50343b1094dfbba475436683cbfd274aca534db6345cf315",
+        "AudioLineRef": "a58e13ef382cdedf7663b1a79a6df80c0427afa79b813e41b2d8c2b0c1cb9a9b",
+        "AudioMedia": "35f4ddbb9718ea4ec9ef31441d37d880afa2be39a4bbb541696da2bf23c7eb89",
+        "AudioVoice": "c96708c9089dd06e0f13a20228ebfd7bdb274a58cf7a0aa071f6fdb6b44dd950",
+        "ImportedAudioSource": "4006b16fa00a042061267940d7fb87dc4711724f1d5b3115e4ebf32b9d21efd7",
+        "ProviderAudioSource": "5602cb9ffe9dd7004fec54a0612c0c1a4118c54132464638d10cf523584138e4"
+      },
+      "vagent.video.contracts": {
+        "ActualCost": "25a9c270260467cf292e104f637959b27dbb09e0d4c5eaede30e4cdbf643fc2d",
+        "AmountLimit": "2a2f935d56047b6a4a99755a6cab4fe463821bb7d7702d80cd3a91ebecda61d0",
+        "ArtifactRef": "631971f9602ac4fc846b0880d39c273467e93b96588a0eddcfc6e6e1890a3786",
+        "CostEstimate": "6378622aac8af1bb320cbd4cde5961ef753f523fc781115696ba8283ad89a036",
+        "CostRecord": "161a4bad50ceebddcf53cf326dd75a2e1cb2918f8b4314ce7315813950ed3ed8",
+        "CostRecordV3": "ed667bc1ee12e6d8a6d535362d1774abab7df936fe53a1e95421d97f4cc9437e",
+        "DownloadPolicy": "2b048af500b1cbe5c05e69d39f22dbb178e9a3f4d479aa8ee73b2af84b337fa3",
+        "DownloadRecord": "34a3eff3ca9e989175528168a427f0a9b610b9582997a282b4068f408ddb7b99",
+        "EpisodeGenerationArgs": "659e6e99551ed28e1774091e7ab9290adb733d6288347d17f18d2b9f081dfaab",
+        "FalParameters": "b2d4dedcb31112daf77a359bddc158ba812d77ddb38cada721f7ee5726dcab70",
+        "FrameRate": "d0d9aabec8a9d98e882f7d29359cf5254606edef973995f6237ece039adbef8b",
+        "ImageInputRule": "5da0c4ba01da3fdb224d0b6e4921ed0ae2e1a6472bd46a0fc18a5af7178e49eb",
+        "ImageSize": "3f08e52ea23ee6a8ba6e0b9571b0abd824c98d8a2d8fcf1709a9f5525930bbbe",
+        "Job": "1f0df0c375d3b752b355019d867bdabea17a7e68079cf98c0d91073c69626f77",
+        "JobCostV6": "febd21e2c4337221849f33e6a491da04ec86db11afc6a6e5e2fc2913f3509d5c",
+        "JobError": "46822661110fe79f54230c64a97fd495b99c7933e1ff45f9db5eed8695965bfc",
+        "JobErrorV2": "7096a56236661586ffab315168ad93b81a41cd8183f3565d1222fd9fd119fd0a",
+        "JobResult": "958ca7e7e36162344be7962da4c969920799408bdde9f2f84a0ed32eea0366dd",
+        "JobResultV2": "3be0f192ae10f1371ba65a7e1718be54e21b5a8f29e13db881ac6b203722226d",
+        "JobResultV3": "bb6e9c1fc6275e9748491cc51d5728c1b41a454ae445693a830b87feccde2dd6",
+        "JobV2": "f41fe15334ea353f3fb96cd12b3735e7d41b2c5f26983b2daf6ee38df3807ea6",
+        "JobV3": "0f23c2af9b11b1e2eb29258608b93b526e1764ee7a2bc2bd0595e8014dd60836",
+        "JobV4": "e4eea30af7325c5232ce3741cc9dd679a4073ff94549903f8801ef1eba20fe31",
+        "JobV5": "90ec7895f87ccbb732b2a7c5454070694b3186d53f2850acbbaf8a0f196a4787",
+        "JobV6": "e7c0b8993a148d04ad8f6c459b99edc1aab46865563e613272fbf785ff8ec431",
+        "KlingParameters": "836ffa15c157da8b467038b0c48e7e118c283babc147e5bd2b227199c2cb248c",
+        "MediaAsset": "df8d310290a1145b1afb0a9964915eb027ce6ab66282c78c3d9997985a74ec38",
+        "MediaAvailability": "ae9812b1f5fb6c4d460fdf0b60d7da8748abbdd14d6d9e2e7c1ba9e6c166f1d1",
+        "MediaMetadata": "861e0d22e1bafdc59d0f1dd0e1b3b55fba12f5226783dd743f5396b4a96840ec",
+        "MediaRef": "4fd6602fa2b7cd0a5c83239ec9da22a865c9e480e7276ea90c3d3d5f802997cc",
+        "PollingPolicy": "47bffded24da40dce31ffb52e6847617bb5dd141ec40cf4a48abd605c158b5c2",
+        "PreparedMedia": "8975ded3e88187cf09d02b74a4034d1dc183605625f22acc3bcf90336f286292",
+        "ProviderActualCost": "4c70b2fab3f133d7d50c9ac225104f0935de68d6feae0c82a6289b73620e9e17",
+        "ProviderOutput": "a1e8208346257d0d152c6b65f827f008e6fd7d09b572c0590087f7ed31fa4b05",
+        "ProviderOutputV2": "8a43ab48ce18374a538729b303b7e64fc5338545124feebc13e7ad3093c65894",
+        "ProviderPrice": "f53acf64331eb67b908285a6105df5c28e3f3d0f580d837a65a91385334f4eef",
+        "ProviderRate": "c5c9e063ed7394af3835a73313c5e8cb76cf92334b7fcb7e5af34c999328258c",
+        "ProviderTaskHandle": "f073bd7552e89e7eb5177ed9158da84df07ddb9166e41befb0250c4e271afe73",
+        "ProviderTaskHandleV2": "9673424b61e5c027dfb10e68527a9c4aba8cf21b1506f88592cf3bf4f9640c0f",
+        "ProviderTaskHandleV3": "cbecd418aa095653ac8d67375c2aad9ad273ff93512a80af40f839ea07c4189e",
+        "ProviderTaskSnapshot": "0cfa386128430003e7e1e1608d3683e13daf1efe7a46e6901b4b332562c2673e",
+        "ProviderTaskSnapshotV2": "4d70435f82ce55aca095eb38b3eda1e62888d37998ee5db42b97a43d1c270875",
+        "ProviderTaskSnapshotV3": "feb2b5c4721ec0ca4632156ec62380dab1971c967a8df9f5753580141fb4784a",
+        "ProviderTimes": "85ff7b8a4fbe2264846bd8f613e7a15f66c883473762c3a4ed1ac70b0c9cc842",
+        "ProviderUsage": "142090eafd68ddfe7a8a33b15bd0423180940ecc166506edb72b6f64c0786182",
+        "ResourceEstimate": "5de18ef7160c3ce63cc94144010624822aee7caa6dd9262435813ecd9196773b",
+        "ResourceRate": "34060fe3969ab7c86645934d2426a1fa271e60e58d01496c607379815fd284e7",
+        "ResultSource": "c49ac8028695cbea43b3c4cb83f52435d9b36de0c1ad7381147f7203c3838ad0",
+        "RunLimitsSnapshot": "6c40cdecd4366e5ae668fe6df14e35f66daf309e04d1dd80c2afefeaf1c6d0b9",
+        "RunLimitsSnapshotV2": "d8d06e42204c98cefe6823b20dbf1821820eeee965e42d08d76581e09a390d04",
+        "RuntimeBlock": "fe13b06568f24df3253b4e3a4af20021d6f72882993b863d45779f929846048b",
+        "SeasonGenerationArgs": "5e4129e80f2c6020ae91e8c2cdb4f98fbab4bd3ed07343b1b43fb7acd488d2ce",
+        "ShotGenerationArgs": "1e6d284ac42e52236b4d29ca28839ac1bbb5d4b05606ca5ecc8dc7ca1c45942c",
+        "ShotMediaInput": "74ba15e81089b77d9ce98ce6945cea10534fbb4d3a1cb54ee098047daa913da3",
+        "ShotRedoArgs": "d28cfabfdc85aa094a5e18a12bddc908f08bd1397bc3b8a2dc0d233c2dd33e6c",
+        "ShotRedoToolArgs": "523a1b5e034eb913f9a171c341235dc6145aa59b2a5000ea6dc0f2292b92d416",
+        "ShotRef": "47f386f1f6455fc35e8c8ae50f24be6c9df40880a1f2759b4900eff9aafab9c0",
+        "ShotSpecV3": "1e9d31ac0a9b3b5c662cbc03b0c16c2323d3bef93b2e83cef6e265892c24c94b",
+        "VideoCapabilities": "c9800c1fbf7936b26970f98bbd521085315a92525332b27aef0c96e252700eff",
+        "VideoCapabilitiesV2": "f00b17e2d2abb3cf840173b876e19787085021da62d2ab3e997cabd7c1adca74",
+        "VideoCapabilitiesV3": "397f65df3aeb5ef5552bb1bcddb46113b348a0b54e31e5353dd3245a4c08fa42",
+        "VideoCapabilitiesV4": "8de13551ddcf0c2e1e33f70c80d1d7588bd1b678982f602403d0cba041666397",
+        "VideoIntentV2": "ea64359d6b912d0fda56ff903413fc5c15a55e5723dc0f77a67cc73a757a8b04",
+        "VideoIntentV6": "5272ba385c7987979cef89230c28fdc9706db2e92a6db3b0ca96819ded1e4c58",
+        "VideoPrice": "16971511ed41d8f9d5370d682eaf54fd8f3873c796ee1e51e9a0da121b32fef4",
+        "VideoRequest": "2ddac1ea4b750010d9551d4261e091444feca230fb321baaf318f4050714619d",
+        "VideoRequestV2": "a47bc531bb260cbedeadc3959ca86ca129db6cdb10e5f1f6828f3522c95d8cfc",
+        "VideoRequestV3": "7f1d8bb0b0fbc92f1de6fe108daab9dbe367cfc2795c061d8d11270161198227",
+        "VideoRequestV4": "8a9a0980ab9ef8fef1b9e27563e3d083683627506ea68056e595056467e77090",
+        "VideoRequestV5": "1ff290f9dd194ef227cb07dca1869e8827f95f358d360044a9f424bc7973d06a",
+        "VideoRequestV6": "a207f8a12245262c0d8444306e35d1cfc1ce4676526ddc2b0e908ecbaaf446bb",
+        "VideoSpec": "c828756ece14e49b3ddd36c9f1d2e6c0b5915ded0ba302673625d603ce2b976c",
+        "VideoSpecV2": "3de9767d3650172a4cda58ee29ec009c137a9c04ca15a10abf5f927e1c004947",
+        "WanParameters": "e3de47177359ddf1f99d1939782b0096b6a7fcf66b46bd0e94f4fa0b0d56e096",
+        "WanParametersV3": "8ba300326e08259d60687f82ed0a1c94a9a3c17975d0b0f4be885f56ea731a84"
+      },
+      "vagent.video.episodes": {
+        "Character": "69daaa098b102b7f1a0eb64e43894668fc870e3742fe1925766cce7704628974",
+        "CharacterLink": "51cafaf198ed5c1ad27fdfe636caaaab5ff13d145a2a4b37f1d68f9c3e9f6c96",
+        "CharacterVersion": "d23f621ff88135e1f0090dbb93d443ea210dbbeaf38feb89ae928b5a89a567b7",
+        "Episode": "115f9efb3e7f8906bf75dabb793a663e87c3cc31e4a167130ceaf76246129b00",
+        "EpisodeVersion": "93d01b99ff35b348ec9f901d1d1d66e36882849a76d34c385544fe350a5fef7f",
+        "Scene": "1608ed987ebbfd992d1600dc4d51c43dc32cb04431311d7e53142c61133d7a8b",
+        "SceneDialogue": "811ce3e319b6832d095748a5a884064676a26f5651d951e60bdade7727bf612f",
+        "SceneRef": "f1dc29a975af5b521615c99c673c8c92c1f24f929a8b962719d834b9827b34f3",
+        "SceneVersion": "e7302c1b622b5f958c2818163bace18bae55ba7057392a8f40921b87a47c1254",
+        "ShotBudget": "fcc3106974aca11c04aa694d08347bc4abbf95e4dff668930905fe16b34d163e",
+        "Style": "c5b182fcf5396dc92e684ce00cf810e9d5676dd1e5acc5c6dceb6e7a978d1e9e",
+        "StyleVersion": "9a0513a69d1c122b9275bdebe0739a25f29313f34a5e6d9e50686f8e24e6a36c",
+        "VoiceProfile": "9307773f7955f00f2305a275b439647fe67c4e10131e37091f844fe4ed4e2db5"
+      },
+      "vagent.video.films": {
+        "ExportProfile": "a8cc7778414bf94d90796f9a763484b8b48abe92813935909f769417a493f2ca",
+        "Film": "3df6cd3e10597ea44ab0466e63d0a868f088ebbfdf767292b8e9a8ca0d870c15",
+        "FilmAssembly": "52b06dc0f8803d9b99bf3ea7e7a776729b7d879281a6dbd63e54d522e040e39f",
+        "FilmEngine": "f560c04ce2cdb36592cac7077e537fe956c530d27d33082188e5e9adcb15e7d8",
+        "FilmInput": "5632db79268307e0a1da8e5f7f443531e09f63a45b78c53cf839e8f2f6711172",
+        "FilmMedia": "4b46f4d89b59bd2114c8cda55ca02a9083c1466696a2a39e057b067b68625708",
+        "FilmNormalization": "ce48f04b73c281b805716b3d0677ef4f4a110d5b98d15cb7ee7715ccd09c6c78",
+        "FilmRender": "6f3805c70e9d606ca9d5deafb3fc099587c3ffa290d496ee2e0e69dc075a73d0",
+        "FilmSegment": "ef5b4eebd87398975bc01a5446c365c9110f3bfb904db02247fa7cfafc31f96e",
+        "FilmVersion": "5bfc42c368007a688dcaf0172abb4188c0e3defb3c2e33bf6ed78d7e3a1a8092",
+        "Rational": "cce0defbbd41c9ddb04340875163516dd801ae7a9fa16b6a3b03b528b9b2dcd0",
+        "RenderAudio": "49f46c9263d073057ab7fe986840967ec28bbea0623a7a43e0711c8dd79f2226",
+        "RenderAudioFacts": "4eaa8e51122e1b66bcb5f84ffa8ff2b6d0475d65024b82c66442ba20a657954e",
+        "RenderAudioTrack": "92e5ce4c85fea131498e9118c062c16d15e85003316cdecb8c97e9f835ee79ef",
+        "RenderDucking": "e2f38ac3dac7582c461a50c4a14ec5136c7043c96bf282cf448b315fdca97b33",
+        "RenderEngine": "051a512412fd17651cb86812a7117c2eea5f0de79d6bbf7a4b1fa097706b088a",
+        "RenderLoudness": "bb1929dff415a67284faee6323f0183e86887db7800f6377cb043f36459a4d03",
+        "RenderMeasurements": "59b0c0db46bf7a657afa059c4672bd6e56aa7bfe9885bb32ef537793c2af19f7",
+        "RenderSources": "8f6dd11916fe00556562916ead1402fdc710f689f5dc541d56a68ebc6d1b3e86",
+        "RenderSubtitle": "ab8a5c2c3e72c367870ebdd45e5d668a1e24d99b1094c3f9d5ad2c1712297001",
+        "RenderSubtitleSource": "da35cc32a676ef4c6e5fc60ce4802860b55b24b912298581bb4f4cd0f56cfe61",
+        "RenderTimelineSource": "e6b6b468899470c7b3a26784c38159668047884fbd29d300559f1319c7c3ba6c",
+        "RenderTitleCard": "348f5f835b171dcf3525c004a8c860d70ca8edffce477a8ee4b2c6d7abc457e3",
+        "RenderTransition": "3b686e442aa07226b7637ee42cc3f75a6f36c37edb3d6a3cc9b7de59d7cfa758",
+        "RenderVideoFacts": "087bae3a287a9c8988178cf0c0f41d2d816040b9373805e744c0fec07de325d1",
+        "RenderWatermark": "032b3fb610587541abb86c43c4d1beadb879a5b78ca2d1bee47823db2e9e768a"
+      },
+      "vagent.video.renders": {
+        "FilmRenderArgs": "afebe17eceab8e9baaf38a3ef0d210ffc171a10a723ef6515d821ab513f46e57",
+        "RenderReadArgs": "7145db393e90e1c3caaa2a9187719ecbc6b0ac4a6d3186cf90e124c972da065d",
+        "RenderSceneProgress": "e643d6ef3eb34aefb5fe829e9a7b0cb60d6dfd6bdbcca2be267aeee3080f7d3d",
+        "RenderTask": "43a467698f3a604b38729ddbf88555186b1f9cb93684e51e27104167fa18b259",
+        "RenderTitleCardArg": "7418ade9d17f919b7849c5584f9fc0305a1b51d4c2588c660d3667e5917c3d81",
+        "RenderTransitionArg": "acbd79ca95fe5250352a1c98ec8f2c1fe488e7e3e9f243df31c006b07e4f4988"
+      },
+      "vagent.video.storyboards": {
+        "Asset": "6a6b13647d1d71a92e2a28ca1ab271809cdd34ff738e950532bac1e0c85716a5",
+        "CharacterRef": "b72221b343e6d01180369939cdb50cd3000d9ec3ca53fea435934f87965ad2ef",
+        "ImageDimensions": "1ea4f7f77a5e7e45334cbf910e2f8459a54b46d0810af3788e6dd40dd46de7dd",
+        "Shot": "cb3ad83a585ce75e73fbc6074dabb0abbde77934d516377a27b22b552c425973",
+        "ShotVersion": "acc5a7d2e5f8cbc304415aa724305a909f4d598f59a7a0281b8afef8941ee04f",
+        "Storyboard": "e1e67267543234369054e2046ff12c263e757cadfd1e7149816f2099bea6402c",
+        "StoryboardVersion": "cf6f9328dc641da0a03066593715db36e48ab1e76c63bfc904150cae20f5577b"
+      },
+      "vagent.video.subtitles": {
+        "SubtitleCue": "5f13324f7d5461cd1afea4d5def2481569c830a0a2029ae8b74e48772c621760",
+        "SubtitleTimelineEntry": "809327dce68b1adee8ad5134fb55981a669a99819d99219b22412fb0a9cf93f8",
+        "SubtitleTrack": "2a1e5bba681aff59efdbfbf2b6e0495e547ca0febe9625a1a8e4480da8003c97",
+        "SubtitleTrackVersion": "2debaae5c5a40eeeceab6229b3884fa47b6e5a7868838e2c1b82e3043fb97ebd"
+      },
+      "vagent.video.tts": {
+        "TtsRequestV1": "67c4787f18ccfacf98e7dd4dcb3c050fb4f708b4a4354692609714540b77722d",
+        "TtsResultV1": "17caa7c1a207a81d976b3c9f1f9f547fa365c000a50cb0d09fe88385665dd53e",
+        "VoiceBinding": "9dc51799035da3386756e30dfda1f262393d5931b69182b16f22d7ba60087142"
+      }
+    }
+  },
+  "frames": {
+    "horizontal": {
+      "exportProfiles": {
+        "1080p-h264-aac-v1": {
+          "height": 1080,
+          "upscaled": true,
+          "width": 1920
+        },
+        "720p-h264-aac-v1": {
+          "height": 720,
+          "upscaled": false,
+          "width": 1280
+        }
+      },
+      "mediaGeometry": {
+        "checkedIn": "src/vagent/video/media.py:295",
+        "height": 720,
+        "width": 1280
+      },
+      "normalizationProfile": "h264-1280x720-30fps-aac-48k-stereo-v1",
+      "shotSpec": {
+        "i2vAspectRatio": null,
+        "model": "ShotSpecV3",
+        "t2vAspectRatio": "16:9",
+        "t2vDurations": [
+          2,
+          3,
+          4,
+          5,
+          6,
+          7,
+          8,
+          9,
+          10,
+          11,
+          12,
+          13,
+          14,
+          15
+        ]
+      },
+      "subtitleStyle": {
+        "assStyle": {
+          "back_colour": "&H80000000",
+          "font_size": 52,
+          "margin_lr": 40,
+          "margin_v": 54,
+          "outline": 2.5,
+          "outline_colour": "&H00101010",
+          "primary_colour": "&H00FFFFFF",
+          "shadow": 1.0
+        },
+        "lineMaxChars": 24,
+        "profile": "subtitle-zh-v1"
+      },
+      "videoRequest": {
+        "capabilitiesVersion": "multi-provider-v3",
+        "model": "VideoRequestV6",
+        "publishedSpec": {
+          "aspectRatio": "16:9",
+          "durationSeconds": 5,
+          "mode": "t2v",
+          "resolution": "720p"
+        },
+        "ratio": "16:9"
+      }
+    },
+    "verticalTargets": {
+      "config": {
+        "env": "VAGENT_VIDEO_FRAME",
+        "key": "videoFrame",
+        "values": [
+          "16:9",
+          "9:16"
+        ]
+      },
+      "contracts": {
+        "capabilitiesVersion": "multi-provider-v4",
+        "historicalKept": [
+          "ShotSpecV3",
+          "VideoRequestV6",
+          "JobV6",
+          "multi-provider-v3"
+        ],
+        "job": "JobV7",
+        "shotSpec": "ShotSpecV4",
+        "videoRequest": "VideoRequestV7"
+      },
+      "frames": {
+        "default": "16:9",
+        "onePerProject": true,
+        "supported": [
+          "16:9",
+          "9:16"
+        ]
+      },
+      "geometry": {
+        "normalizationProfile": "h264-1080x1920-30fps-aac-48k-stereo-v1",
+        "notSupported": [
+          "720x1280",
+          "1:1",
+          "5:4"
+        ],
+        "vertical": {
+          "fps": 30,
+          "height": 1920,
+          "profile": "1080p-vertical-h264-aac-v1",
+          "width": 1080
+        }
+      },
+      "mixHardening": {
+        "allAudioDroppedErrorCode": "RENDER_SOURCE_MISSING",
+        "droppedAudioReasons": [
+          "no-dialogue-line",
+          "no-cue",
+          "outside-edit"
+        ],
+        "silencePeakDb": -90.0,
+        "silentPremixDetail": "（混音为静音，未交付）",
+        "silentPremixErrorCode": "LOUDNESS_OUT_OF_RANGE"
+      },
+      "newCollections": [],
+      "newErrorCodes": [
+        "FRAME_UNSUPPORTED",
+        "CHARACTER_ASSET_FRAME_MISMATCH",
+        "TIMELINE_FRAME_MISMATCH",
+        "SUBTITLE_STYLE_FRAME_MISMATCH"
+      ],
+      "priceRule": {
+        "crossCurrencyConversion": false,
+        "unverifiedVerticalProvider": "ROUTE_UNAVAILABLE",
+        "verticalPricesPublishedOnlyAfterOfficialCheck": true
+      },
+      "schemaVersion": 9,
+      "subtitle": {
+        "bottomSafeAreaRatio": 0.12,
+        "lineMaxChars": 14,
+        "sideMarginRatio": 0.06,
+        "srtLineMaxCharsUnchanged": 24,
+        "verticalProfile": "subtitle-zh-v2"
+      },
+      "toolSurface": {
+        "newVideoTools": [],
+        "promptChanged": false,
+        "rulesVersion": 18,
+        "toolsVersion": 18
+      }
+    }
+  },
+  "limits": {
+    "batch": {
+      "amount": "180.00",
+      "episodes": 3,
+      "jobs": 60,
+      "perEpisodeJobs": 20,
+      "perProjectBatches": 64
+    },
+    "episode": {
+      "costCap": "60.00",
+      "jobCap": 20,
+      "maxSeconds": 90,
+      "maxShots": 20,
+      "shotEstimateAmount": "3.00"
+    },
+    "liveJobsPerRun": 4,
+    "providerCeilings": {
+      "fal": {
+        "currency": "USD",
+        "maxJobAmount": "0.50",
+        "maxRunAmount": "2.00"
+      },
+      "kling": {
+        "currency": "USD",
+        "maxJobAmount": "0.60",
+        "maxJobUnits": 4,
+        "maxRunAmount": "2.40",
+        "maxRunUnits": 16
+      },
+      "wan": {
+        "currency": "CNY",
+        "maxJobAmount": "3.00",
+        "maxRunAmount": "12.00"
+      }
+    },
+    "storageSchemaVersion": 9,
+    "tts": {
+      "episodeCharacters": 2000,
+      "episodeCostLimit": "0.40",
+      "episodeRequests": 40,
+      "requestCharacters": 500,
+      "requestCostLimit": "0.10",
+      "rpm": 180
+    },
+    "wait": {
+      "setLimit": 20,
+      "timeoutSeconds": 600
+    }
+  },
+  "prices": {
+    "fal": {
+      "capabilitiesVersion": "multi-provider-v3",
+      "checkedAt": "2026-10-21",
+      "currency": "USD",
+      "fiveSecondAmount": "0.42",
+      "model": "fal-ai/kling-video/v3/standard/text-to-video",
+      "priceVersion": "fal-kling30-standard-silent-20261021",
+      "region": "global",
+      "sourceUrl": "https://fal.ai/models/fal-ai/kling-video/v3/standard/text-to-video",
+      "unit": "output_second",
+      "unitPrice": "0.084"
+    },
+    "kling": {
+      "capabilitiesVersion": "multi-provider-v3",
+      "checkedAt": "2026-10-21",
+      "currency": "USD",
+      "fiveSecondAmount": "0.56",
+      "fiveSecondUnits": 4,
+      "model": "kling-3.0-turbo",
+      "priceVersion": "kling30-turbo-720p-20261021",
+      "region": "singapore",
+      "resourceUnitsPerSecond": "0.8",
+      "sourceUrl": "https://kling.ai/document-api/pricing/base/video.md",
+      "unit": "output_second",
+      "unitPrice": "0.112"
+    },
+    "tts": {
+      "checkedAt": "2026-10-22",
+      "currency": "CNY",
+      "model": "cosyvoice-v2",
+      "priceVersion": "cosyvoice-v2-beijing-20261022",
+      "provider": "cosyvoice",
+      "providerVersion": "tts-providers-v1",
+      "realSample": false,
+      "rpm": 180,
+      "sourceUrl": "https://help.aliyun.com/zh/model-studio/cosyvoice-v2",
+      "unit": "thousand_characters",
+      "unitPrice": "0.20"
+    },
+    "wan": {
+      "i2v": {
+        "checkedAt": "2026-10-16",
+        "currency": "CNY",
+        "fiveSecondAmount": "3.00",
+        "model": "wan2.7-i2v-2026-04-25",
+        "priceVersion": "wan27-i2v-beijing-720p-20261016",
+        "sourceUrl": "https://help.aliyun.com/zh/model-studio/model-pricing#ba6f7744d5e0o",
+        "unit": "output_second",
+        "unitPrice": "0.60"
+      },
+      "t2v": {
+        "capabilitiesVersion": "wan27-t2v-beijing-v1",
+        "checkedAt": "2026-10-16",
+        "currency": "CNY",
+        "fiveSecondAmount": "3.00",
+        "model": "wan2.7-t2v-2026-06-12",
+        "priceVersion": "wan27-beijing-720p-20261010",
+        "region": "cn-beijing",
+        "shotCapabilitiesVersion": "wan27-shot-beijing-v2",
+        "sourceUrl": "https://help.aliyun.com/zh/model-studio/model-pricing#ba6f7744d5e0o",
+        "unit": "output_second",
+        "unitPrice": "0.60"
+      }
+    }
+  },
+  "purpose": "Pin the post-M8 16:9 contract schemas, published tool surfaces, capability and price tables, accounting ceilings, route ordering and mix gates, plus the frozen 9:16 targets M9 E1-E4 must add without changing any of the pinned bytes.",
+  "releaseVersion": "0.6.0",
+  "routeProbe": {
+    "currencyOrder": [
+      "CNY",
+      "USD"
+    ],
+    "jobCeilings": {
+      "fal": {
+        "amount": "0.50",
+        "currency": "USD",
+        "units": null
+      },
+      "kling": {
+        "amount": "0.60",
+        "currency": "USD",
+        "units": 4
+      },
+      "wan": {
+        "amount": "3.00",
+        "currency": "CNY",
+        "units": null
+      }
+    },
+    "jobCeilingsNote": "默认本地设置下的有效单 Job 上限；真实预览用实际配置计算",
+    "keysConfigured": {
+      "fal": true,
+      "kling": true,
+      "wan": true
+    },
+    "providerOrder": [
+      "wan",
+      "kling",
+      "fal"
+    ],
+    "rows": [
+      {
+        "candidates": [
+          {
+            "audioMode": "auto",
+            "available": true,
+            "capabilitiesVersion": "wan27-shot-beijing-v2",
+            "model": "wan2.7-t2v-2026-06-12",
+            "provider": "wan",
+            "quote": {
+              "amount": "3.00",
+              "currency": "CNY",
+              "priceVersion": "wan27-beijing-720p-20261010",
+              "quantity": "5",
+              "sourceUrl": "https://help.aliyun.com/zh/model-studio/model-pricing#ba6f7744d5e0o",
+              "unitPrice": "0.60"
+            },
+            "reason": null
+          },
+          {
+            "audioMode": "silent",
+            "available": true,
+            "capabilitiesVersion": "multi-provider-v3",
+            "model": "fal-ai/kling-video/v3/standard/text-to-video",
+            "provider": "fal",
+            "quote": {
+              "amount": "0.42",
+              "currency": "USD",
+              "priceVersion": "fal-kling30-standard-silent-20261021",
+              "quantity": "5",
+              "sourceUrl": "https://fal.ai/models/fal-ai/kling-video/v3/standard/text-to-video",
+              "unitPrice": "0.084"
+            },
+            "reason": null
+          },
+          {
+            "audioMode": "native",
+            "available": true,
+            "capabilitiesVersion": "multi-provider-v3",
+            "model": "kling-3.0-turbo",
+            "provider": "kling",
+            "quote": {
+              "amount": "0.56",
+              "currency": "USD",
+              "priceVersion": "kling30-turbo-720p-20261021",
+              "quantity": "5",
+              "resource": {
+                "unit": "VIDEO_UNIT",
+                "units": 4
+              },
+              "sourceUrl": "https://kling.ai/document-api/pricing/base/video.md",
+              "unitPrice": "0.112"
+            },
+            "reason": null
+          }
+        ],
+        "recommended": "wan",
+        "request": {
+          "aspectRatio": "16:9",
+          "durationSeconds": 5,
+          "mode": "t2v",
+          "scope": "shot"
+        }
+      },
+      {
+        "candidates": [
+          {
+            "audioMode": "auto",
+            "available": false,
+            "capabilitiesVersion": "wan27-shot-beijing-v2",
+            "model": "wan2.7-t2v-2026-06-12",
+            "provider": "wan",
+            "quote": null,
+            "reason": "VIDEO_COST_LIMIT"
+          },
+          {
+            "audioMode": "native",
+            "available": false,
+            "capabilitiesVersion": "multi-provider-v3",
+            "model": "kling-3.0-turbo",
+            "provider": "kling",
+            "quote": null,
+            "reason": "VIDEO_UNSUPPORTED_SPEC"
+          },
+          {
+            "audioMode": "silent",
+            "available": false,
+            "capabilitiesVersion": "multi-provider-v3",
+            "model": "fal-ai/kling-video/v3/standard/text-to-video",
+            "provider": "fal",
+            "quote": null,
+            "reason": "VIDEO_UNSUPPORTED_SPEC"
+          }
+        ],
+        "recommended": null,
+        "request": {
+          "aspectRatio": "16:9",
+          "durationSeconds": 10,
+          "mode": "t2v",
+          "scope": "shot"
+        }
+      },
+      {
+        "candidates": [
+          {
+            "audioMode": "auto",
+            "available": true,
+            "capabilitiesVersion": "wan27-shot-beijing-v2",
+            "model": "wan2.7-i2v-2026-04-25",
+            "provider": "wan",
+            "quote": {
+              "amount": "3.00",
+              "currency": "CNY",
+              "priceVersion": "wan27-i2v-beijing-720p-20261016",
+              "quantity": "5",
+              "sourceUrl": "https://help.aliyun.com/zh/model-studio/model-pricing#ba6f7744d5e0o",
+              "unitPrice": "0.60"
+            },
+            "reason": null
+          },
+          {
+            "audioMode": "native",
+            "available": false,
+            "capabilitiesVersion": "multi-provider-v3",
+            "model": "kling-3.0-turbo",
+            "provider": "kling",
+            "quote": null,
+            "reason": "VIDEO_UNSUPPORTED_MODE"
+          },
+          {
+            "audioMode": "silent",
+            "available": false,
+            "capabilitiesVersion": "multi-provider-v3",
+            "model": "fal-ai/kling-video/v3/standard/text-to-video",
+            "provider": "fal",
+            "quote": null,
+            "reason": "VIDEO_UNSUPPORTED_MODE"
+          }
+        ],
+        "recommended": "wan",
+        "request": {
+          "aspectRatio": null,
+          "durationSeconds": 5,
+          "mode": "i2v",
+          "scope": "shot"
+        }
+      },
+      {
+        "candidates": [
+          {
+            "audioMode": "auto",
+            "available": true,
+            "capabilitiesVersion": "wan27-shot-beijing-v2",
+            "model": "wan2.7-t2v-2026-06-12",
+            "provider": "wan",
+            "quote": {
+              "amount": "3.00",
+              "currency": "CNY",
+              "priceVersion": "wan27-beijing-720p-20261010",
+              "quantity": "5",
+              "sourceUrl": "https://help.aliyun.com/zh/model-studio/model-pricing#ba6f7744d5e0o",
+              "unitPrice": "0.60"
+            },
+            "reason": null
+          },
+          {
+            "audioMode": "native",
+            "available": false,
+            "capabilitiesVersion": "multi-provider-v3",
+            "model": "kling-3.0-turbo",
+            "provider": "kling",
+            "quote": null,
+            "reason": "EPISODE_COST_LIMIT"
+          },
+          {
+            "audioMode": "silent",
+            "available": false,
+            "capabilitiesVersion": "multi-provider-v3",
+            "model": "fal-ai/kling-video/v3/standard/text-to-video",
+            "provider": "fal",
+            "quote": null,
+            "reason": "EPISODE_COST_LIMIT"
+          }
+        ],
+        "recommended": "wan",
+        "request": {
+          "aspectRatio": "16:9",
+          "durationSeconds": 5,
+          "mode": "t2v",
+          "scope": "episode"
+        }
+      }
+    ],
+    "rowsSha256": "3817d19141f1e73b075722328b645be08e6a3ac2d4748caeea1e819c21f06413",
+    "sortKey": [
+      "available",
+      "currencyOrder",
+      "amount",
+      "providerOrder"
+    ],
+    "videoMode": "live"
+  },
+  "tools": {
+    "groupedVideoToolNames": [
+      "asset_read",
+      "audio_generate",
+      "bible_read",
+      "bible_save",
+      "consistency_review",
+      "episode_generate",
+      "episode_plan",
+      "episode_read",
+      "episode_save",
+      "film_assemble",
+      "film_read",
+      "film_render",
+      "render_read",
+      "season_generate",
+      "season_read",
+      "season_save",
+      "shot_generate",
+      "shot_redo",
+      "storyboard_read",
+      "storyboard_save",
+      "subtitle_save",
+      "timeline_read",
+      "timeline_save"
+    ],
+    "groups": {
+      "M2": [
+        "storyboard_read",
+        "storyboard_save",
+        "shot_generate",
+        "asset_read"
+      ],
+      "M3": [
+        "film_assemble",
+        "film_read"
+      ],
+      "M5": [
+        "episode_plan",
+        "episode_save",
+        "episode_read",
+        "bible_save",
+        "bible_read"
+      ],
+      "M5E2": [
+        "consistency_review"
+      ],
+      "M5E3": [
+        "episode_generate",
+        "shot_redo"
+      ],
+      "M6E1": [
+        "subtitle_save"
+      ],
+      "M6E2": [
+        "audio_generate"
+      ],
+      "M6E3": [
+        "film_render",
+        "render_read"
+      ],
+      "M7E1": [
+        "season_save",
+        "season_read"
+      ],
+      "M7E2": [
+        "season_generate"
+      ],
+      "M7E3": [
+        "timeline_save",
+        "timeline_read"
+      ]
+    },
+    "liveVideoRulesVersion": 18,
+    "liveVideoToolsVersion": 18,
+    "modes": {
+      "live": {
+        "capabilityEntries": 4,
+        "instructionsCharacters": 7263,
+        "instructionsSha256": "e81a2ef76978afacc64270c210f302b8d3af68ee3a7c2eb186865dd73503e060",
+        "names": [
+          "artifact_read",
+          "artifact_save",
+          "asset_read",
+          "audio_generate",
+          "await_job",
+          "bible_read",
+          "bible_save",
+          "consistency_review",
+          "episode_generate",
+          "episode_plan",
+          "episode_read",
+          "episode_save",
+          "film_assemble",
+          "film_read",
+          "film_render",
+          "job_get",
+          "plan_update",
+          "project_read",
+          "project_update",
+          "render_read",
+          "season_generate",
+          "season_read",
+          "season_save",
+          "shot_generate",
+          "shot_redo",
+          "storyboard_read",
+          "storyboard_save",
+          "subtitle_save",
+          "timeline_read",
+          "timeline_save",
+          "video_capabilities",
+          "video_generate"
+        ],
+        "rulesVersion": 18,
+        "specsSha256": "1efcb3f955f83d98e9d556a66a382531513bca79bc174b2ec917a0e539bbebe4",
+        "toolCount": 32,
+        "toolFeaturesSha256": "4baecd025a57a575e4a7cec5f72314a64c0befa8b5806a2409eabf1865b711a4",
+        "toolsVersion": 18,
+        "ttsEntries": 1,
+        "videoToolNames": [
+          "asset_read",
+          "audio_generate",
+          "await_job",
+          "bible_read",
+          "bible_save",
+          "consistency_review",
+          "episode_generate",
+          "episode_plan",
+          "episode_read",
+          "episode_save",
+          "film_assemble",
+          "film_read",
+          "film_render",
+          "job_get",
+          "render_read",
+          "season_generate",
+          "season_read",
+          "season_save",
+          "shot_generate",
+          "shot_redo",
+          "storyboard_read",
+          "storyboard_save",
+          "subtitle_save",
+          "timeline_read",
+          "timeline_save",
+          "video_capabilities",
+          "video_generate"
+        ]
+      },
+      "mock": {
+        "capabilityEntries": 1,
+        "instructionsCharacters": 6723,
+        "instructionsSha256": "9e66254b3e76b994a3f528c0db3bd951f9465f2df0c9364d2eafbf954624e33d",
+        "names": [
+          "artifact_read",
+          "artifact_save",
+          "asset_read",
+          "audio_generate",
+          "await_job",
+          "bible_read",
+          "bible_save",
+          "consistency_review",
+          "episode_generate",
+          "episode_plan",
+          "episode_read",
+          "episode_save",
+          "film_assemble",
+          "film_read",
+          "film_render",
+          "job_get",
+          "plan_update",
+          "project_read",
+          "project_update",
+          "render_read",
+          "season_generate",
+          "season_read",
+          "season_save",
+          "shot_generate",
+          "shot_redo",
+          "storyboard_read",
+          "storyboard_save",
+          "subtitle_save",
+          "timeline_read",
+          "timeline_save",
+          "video_capabilities",
+          "video_generate"
+        ],
+        "rulesVersion": 18,
+        "specsSha256": "1e222b2195d8150b2eaec06c7fd31d4b93f37988f1611a95e436bd0a95a51039",
+        "toolCount": 32,
+        "toolFeaturesSha256": "c8c65f3d5af32a87f484a1c50c2bea331f24d88d05c1c913126d86fb9945e797",
+        "toolsVersion": 18,
+        "ttsEntries": 1,
+        "videoToolNames": [
+          "asset_read",
+          "audio_generate",
+          "await_job",
+          "bible_read",
+          "bible_save",
+          "consistency_review",
+          "episode_generate",
+          "episode_plan",
+          "episode_read",
+          "episode_save",
+          "film_assemble",
+          "film_read",
+          "film_render",
+          "job_get",
+          "render_read",
+          "season_generate",
+          "season_read",
+          "season_save",
+          "shot_generate",
+          "shot_redo",
+          "storyboard_read",
+          "storyboard_save",
+          "subtitle_save",
+          "timeline_read",
+          "timeline_save",
+          "video_capabilities",
+          "video_generate"
+        ]
+      }
+    },
+    "services": {
+      "coreToolCount": 5,
+      "coreToolNames": [
+        "artifact_read",
+        "artifact_save",
+        "plan_update",
+        "project_read",
+        "project_update"
+      ]
+    },
+    "videoRulesVersion": 18,
+    "videoToolsVersion": 18
+  },
+  "zeroSpend": {
+    "credentialsRead": false,
+    "jobsRegistered": 0,
+    "modelCalls": 0,
+    "providerRequests": 0,
+    "submit": 0,
+    "ttsRequests": 0
+  }
+}

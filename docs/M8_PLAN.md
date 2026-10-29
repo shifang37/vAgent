@@ -142,4 +142,4 @@ M1–M7 已完成产品域闭环：一句话/剧本 → 分集分场分镜 → �
 
 ## 9. 新对话启动方式
 
-> M8 **E0–E4 已全部完成**（schema 9、tools/rules 18/18、168 个契约模型），v0.6.0 构建与安装态验证完成，打 tag/推送单独确认。结论与复现见 [M8 验收](./M8_ACCEPTANCE.md)：离线 4 用例（路由矩阵/拒绝矩阵/账单与错误映射/重放不新增）、受控浏览器报价对比 + 账单重放、安装态 wheel smoke、全量回归与 Ruff；E3 的真实样本证据见 [E3 验收](./M8_E3_ACCEPTANCE.md)。E0 基线 `docs/M8_E0_BASELINE.json` 是全程比对基准：168 个模型哈希、`contractsSha256`、`capabilitiesSha256`、工具/规则哈希与 `routeProbe.rowsSha256` 必须不变。M8 不做 9:16 竖屏、不换汇、不自动重投；下一阶段另列。
+> M8 **E0–E4 已全部完成**（schema 9、tools/rules 18/18、168 个契约模型），v0.6.0 构建与安装态验证完成，打 tag/推送单独确认。结论与复现见 [M8 验收](./M8_ACCEPTANCE.md)：离线 4 用例（路由矩阵/拒绝矩阵/账单与错误映射/重放不新增）、受控浏览器报价对比 + 账单重放、安装态 wheel smoke、全量回归与 Ruff；E3 的真实样本证据见 [E3 验收](./M8_E3_ACCEPTANCE.md)。E0 基线 `docs/M8_E0_BASELINE.json` 是全程比对基准：168 个模型哈希、`contractsSha256`、`capabilitiesSha256`、工具/规则哈希与 `routeProbe.rowsSha256` 必须不变。M8 不做 9:16 竖屏、不换汇、不自动重投；下一阶段曾定为 [M9 竖屏计划](./M9_PLAN.md)，**2026-10-29 产品方确认本轮只用横屏 720p，竖屏方向暂缓**（E0 契约与基线保留，将来从 E1 续做），真实付费样本仍单独授权。
