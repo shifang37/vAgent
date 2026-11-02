@@ -227,7 +227,3 @@ node --test tests/test_job_state.mjs          # 其余 9 个 *-state 测试同�
 - 单用户、单写进程的本地工具：同一数据目录同时只允许一个 CLI / Web 写进程；JSON 存储面向小规模使用。
 - 没有自动摘要、跨项目偏好记忆，也不做发送后的自动重投或换汇。
 - 未发布到 PyPI，需从仓库构建安装；文本模型尚无价格表与费用估算。
-
-## 许可
-
-仓库代码尚未声明开源许可证。包内随字幕功能分发的中文字体遵循 [SIL Open Font License](./src/vagent/video/fonts/LICENSE-OFL.txt)；FFmpeg 通过 `imageio-ffmpeg` 分发，相关材料见 [第三方组件说明](./docs/THIRD_PARTY_ASSEMBLY.md)。
