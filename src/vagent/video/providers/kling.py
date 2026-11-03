@@ -7,7 +7,8 @@ the exact HTTPS origin of its video URL for the download source policy (contract
 """
 
 import hashlib
-from datetime import UTC
+import math
+from datetime import UTC, datetime
 from urllib.parse import quote
 
 from vagent.errors import AppError
@@ -30,7 +31,7 @@ from vagent.video.contracts import (
     bound_result_source,
     kling_capabilities,
 )
-from vagent.video.providers.protocol import ProviderHttpAdapter, safe_identifier
+from vagent.video.providers.protocol import ProviderHttpAdapter, safe_identifier, safe_provider_code
 
 BASE_URL = "https://api-singapore.klingai.com"
 SUBMIT_PATH = "/text-to-video/kling-3.0-turbo"
@@ -38,18 +39,26 @@ QUERY_PATH = "/tasks"
 
 # Kling answers a business rejection with HTTP 200 plus a non-zero `code`. Only
 # responses listed here prove the request was refused; anything else is ambiguous.
+# Service codes and their meanings: https://kling.ai/document-api/api/get-started/error-codes
 _REJECTIONS = {
+    "1000": "PROVIDER_AUTH_FAILED",
+    "1001": "PROVIDER_AUTH_FAILED",
+    "1002": "PROVIDER_AUTH_FAILED",
+    "1003": "PROVIDER_AUTH_FAILED",
+    "1004": "PROVIDER_AUTH_FAILED",
+    "1100": "PROVIDER_BILLING_BLOCKED",
     "1101": "PROVIDER_BILLING_BLOCKED",
     "1102": "PROVIDER_BILLING_BLOCKED",
-    "1201": "PROVIDER_CONTENT_REJECTED",
+    "1103": "PROVIDER_ACCESS_DENIED",
+    "1200": "PROVIDER_INVALID_REQUEST",
+    "1201": "PROVIDER_INVALID_REQUEST",
+    "1202": "PROVIDER_INVALID_REQUEST",
+    "1203": "PROVIDER_MODEL_UNAVAILABLE",
+    "1300": "PROVIDER_CONTENT_REJECTED",
     "1301": "PROVIDER_CONTENT_REJECTED",
     "1302": "PROVIDER_RATE_LIMITED",
     "1303": "PROVIDER_RATE_LIMITED",
     "1304": "PROVIDER_ACCESS_DENIED",
-    "1001": "PROVIDER_AUTH_FAILED",
-    "1002": "PROVIDER_AUTH_FAILED",
-    "1003": "PROVIDER_AUTH_FAILED",
-    "1004": "PROVIDER_ACCESS_DENIED",
 }
 
 _STATUS_MAP = {"submitted": "queued", "processing": "running", "succeeded": "succeeded", "failed": "failed"}
@@ -61,6 +70,43 @@ def _payload_code(payload: dict) -> str | None:
     if type(value) is int:
         return str(value)
     return value if isinstance(value, str) else None
+
+
+_FAILURE_BASE = "上游已确认视频生成失败，不会自动修改内容或重新提交。"
+_FAILURE_REASON_LIMIT = 400
+
+
+def _epoch_millis_text(value) -> str | None:
+    """create_time/update_time are Unix milliseconds, not ISO strings."""
+    if isinstance(value, bool) or not isinstance(value, (int, float)) or value <= 0:
+        return None
+    try:
+        return datetime.fromtimestamp(value / 1000, UTC).isoformat(timespec="milliseconds")
+    except (OSError, OverflowError, ValueError):
+        return None
+
+
+def _seconds(value) -> float | None:
+    """The delivered duration arrives as a decimal string such as "5"."""
+    if isinstance(value, bool):
+        return None
+    try:
+        seconds = float(value)
+    except (TypeError, ValueError):
+        return None
+    return seconds if math.isfinite(seconds) and seconds >= 0 else None
+
+
+def _failure_message(entry: dict) -> str:
+    """Kling reports the human failure reason in `message`; it is never a code.
+
+    provider_code has to stay a code-shaped token, so the vendor sentence is carried on
+    the user-facing message instead of being dropped or mistaken for a status code.
+    """
+    reason = entry.get("message")
+    if isinstance(reason, str) and reason.strip():
+        return f"{_FAILURE_BASE}供应商原因：{reason.strip()[:_FAILURE_REASON_LIMIT]}"
+    return _FAILURE_BASE
 
 
 class KlingAdapter(ProviderHttpAdapter):
@@ -199,8 +245,8 @@ class KlingAdapter(ProviderHttpAdapter):
                 error=JobErrorV2(
                     stage="generate",
                     code="PROVIDER_GENERATION_FAILED",
-                    message="上游已确认视频生成失败，不会自动修改内容或重新提交。",
-                    provider_code=_payload_code(entry.get("error") or {}) or None,
+                    message=_failure_message(entry),
+                    provider_code=safe_provider_code(entry.get("code")),
                 ),
             )
         outputs = entry.get("outputs")
@@ -216,25 +262,18 @@ class KlingAdapter(ProviderHttpAdapter):
             source = bound_result_source(task_id, url, KLING_SOURCE_POLICY_VERSION)
         except ValueError:
             raise self._call_error("query", "QUERY_PROTOCOL_ERROR", status=status, payload=payload) from None
-        usage = entry.get("usage")
-        provider_usage = None
-        if isinstance(usage, dict):
-            duration = usage.get("duration")
-            if isinstance(duration, (int, float)) and not isinstance(duration, bool) and duration >= 0:
-                provider_usage = ProviderUsage(duration=float(duration))
+        delivered = _seconds(videos[0].get("duration"))
+        provider_usage = ProviderUsage(duration=delivered) if delivered is not None else None
         output = ProviderOutputV2(
             task_id=task_id,
             received_at=self.clock().astimezone(UTC).isoformat(),
             video_url=url,
             result_source=source,
             provider_times=ProviderTimes(
-                submit_time=_text(entry.get("created_at")),
-                end_time=_text(entry.get("updated_at")),
+                submit_time=_epoch_millis_text(entry.get("create_time")),
+                end_time=_epoch_millis_text(entry.get("update_time")),
             ),
             usage=provider_usage,
         )
         return ProviderTaskSnapshotV3(task_id=task_id, status="succeeded", output=output)
 
-
-def _text(value) -> str | None:
-    return value if isinstance(value, str) and value else None

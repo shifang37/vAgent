@@ -21,7 +21,10 @@ from vagent.video.contracts import JobErrorV2, ProviderCallError
 
 MAX_RESPONSE_BYTES = 1024 * 1024
 _IDENTIFIER = re.compile(r"[A-Za-z0-9_-]{1,256}\Z", re.ASCII)
-_CODE = re.compile(r"[A-Za-z0-9][A-Za-z0-9_.:-]{0,127}\Z", re.ASCII)
+# Must stay a strict subset of JobErrorV2.provider_code. A vendor code the contract
+# rejects would raise ValidationError while an error record is being built, i.e. inside
+# the failure path itself.
+_CODE = re.compile(r"[A-Za-z][A-Za-z0-9_.-]{0,127}\Z", re.ASCII)
 
 PROVIDER_MESSAGES = {
     "PROVIDER_INVALID_REQUEST": "上游明确拒绝了请求参数，未创建替代任务。",

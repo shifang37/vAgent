@@ -257,14 +257,21 @@ class KlingFixture:
             200,
             json={
                 "code": 0,
+                "message": "SUCCESS",
                 "data": [
                     {
                         "id": task_id,
                         "status": "succeeded",
+                        "message": "",
+                        "create_time": 1781080778802,
+                        "update_time": 1781080794151,
                         "outputs": [
-                            {"type": "video", "url": f"{KLING_RESULT_ORIGIN}/{task_id}.mp4?sig=private"}
+                            {
+                                "type": "video",
+                                "url": f"{KLING_RESULT_ORIGIN}/{task_id}.mp4?sig=private",
+                                "duration": "5",
+                            }
                         ],
-                        "usage": {"duration": 5},
                     }
                 ],
             },

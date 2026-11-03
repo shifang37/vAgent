@@ -42,6 +42,9 @@ from vagent.video.providers.kling import KlingAdapter
 
 KLING_VIDEO_URL = "https://cdn.example-provider.test/results/task-1.mp4?Signature=secret&Expires=1"
 FAL_VIDEO_URL = "https://v3.fal.media/files/example/result.mp4?token=secret"
+# The query entry reports create_time/update_time as Unix milliseconds (official payload).
+KLING_CREATE_TIME = 1781080778802
+KLING_UPDATE_TIME = 1781080794151
 
 
 def kling_request(prompt="雨夜咖啡店，镜头缓慢推近。"):
@@ -100,12 +103,29 @@ def kling_created(task_id="kling-task-1"):
     return {"code": 0, "message": "SUCCESS", "data": {"id": task_id}}
 
 
-def kling_status(status, task_id="kling-task-1", *, url=None, usage=None):
+def kling_status(
+    status,
+    task_id="kling-task-1",
+    *,
+    url=None,
+    duration=None,
+    create_time=None,
+    update_time=None,
+    message=None,
+):
+    """The documented field names for one query entry; times are Unix milliseconds."""
     entry = {"id": task_id, "status": status}
     if url is not None:
-        entry["outputs"] = [{"type": "video", "url": url}]
-    if usage is not None:
-        entry["usage"] = usage
+        video = {"type": "video", "url": url}
+        if duration is not None:
+            video["duration"] = duration
+        entry["outputs"] = [video]
+    if create_time is not None:
+        entry["create_time"] = create_time
+    if update_time is not None:
+        entry["update_time"] = update_time
+    if message is not None:
+        entry["message"] = message
     return {"code": 0, "message": "SUCCESS", "data": [entry]}
 
 
@@ -146,7 +166,13 @@ async def test_kling_submit_and_query_bind_the_result_origin():
         kling_created(),
         kling_status("submitted"),
         kling_status("processing"),
-        kling_status("succeeded", url=KLING_VIDEO_URL, usage={"duration": 5}),
+        kling_status(
+            "succeeded",
+            url=KLING_VIDEO_URL,
+            duration="5",
+            create_time=KLING_CREATE_TIME,
+            update_time=KLING_UPDATE_TIME,
+        ),
     )
     async with KlingAdapter(api_key="kling-secret", transport=httpx.MockTransport(upstream)) as adapter:
         handle = await adapter.submit(kling_request(), "run:1:batch")
@@ -171,13 +197,16 @@ async def test_kling_submit_and_query_bind_the_result_origin():
     assert output.result_source.source_policy_version == KLING_SOURCE_POLICY_VERSION
     assert output.result_source.task_id == "kling-task-1"
     assert output.usage.duration == 5
+    assert output.provider_times.submit_time == "2026-06-10T08:39:38.802+00:00"
+    assert output.provider_times.end_time == "2026-06-10T08:39:54.151+00:00"
 
 
 async def test_kling_rejections_never_look_like_a_confirmed_submission():
     cases = [
         (401, {"code": 1001, "message": "invalid key"}, "PROVIDER_AUTH_FAILED"),
-        (403, {"code": 1004, "message": "denied"}, "PROVIDER_ACCESS_DENIED"),
-        (400, {"code": 1201, "message": "sensitive"}, "PROVIDER_CONTENT_REJECTED"),
+        (401, {"code": 1004, "message": "expired"}, "PROVIDER_AUTH_FAILED"),
+        (400, {"code": 1201, "message": "bad parameter"}, "PROVIDER_INVALID_REQUEST"),
+        (400, {"code": 1301, "message": "sensitive"}, "PROVIDER_CONTENT_REJECTED"),
         (429, {"code": 1102, "message": "resource pack"}, "PROVIDER_BILLING_BLOCKED"),
         (429, {"code": 1302, "message": "rate limit"}, "PROVIDER_RATE_LIMITED"),
         (422, {"code": "InvalidParameter", "message": "bad"}, "PROVIDER_INVALID_REQUEST"),
@@ -248,6 +277,17 @@ async def test_kling_success_requires_exactly_one_video_output():
             with pytest.raises(ProviderCallError) as caught:
                 await adapter.query("kling-task-1")
             assert caught.value.error.code == "QUERY_PROTOCOL_ERROR"
+
+
+async def test_kling_failure_keeps_the_vendor_reason_without_inventing_a_code():
+    payload = kling_status("failed", message="content risk control triggered")
+    async with KlingAdapter(api_key="k", transport=httpx.MockTransport(Upstream(payload))) as adapter:
+        snapshot = await adapter.query("kling-task-1")
+    assert snapshot.status == "failed"
+    assert snapshot.error.code == "PROVIDER_GENERATION_FAILED"
+    assert "content risk control triggered" in snapshot.error.message
+    # provider_code must stay code-shaped, so a free-text reason never lands there.
+    assert snapshot.error.provider_code is None
 
 
 async def test_fal_submit_status_and_result_use_the_app_root_paths():
