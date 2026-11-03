@@ -178,16 +178,16 @@ async def check_kling_status_mapping(checks: list) -> None:
             )
 
 
-def check_kling_service_codes(checks: list) -> None:
-    adapter = KlingAdapter(api_key="contract-replay")
-    for code, expected in OFFICIAL_SERVICE_CODES.items():
-        status = OFFICIAL_CODE_STATUS[code]
-        _record(
-            checks,
-            f"kling.service_code.{code}",
-            expected,
-            adapter._rejection(status, {"code": int(code)}),
-        )
+async def check_kling_service_codes(checks: list) -> None:
+    async with KlingAdapter(api_key="contract-replay") as adapter:
+        for code, expected in OFFICIAL_SERVICE_CODES.items():
+            status = OFFICIAL_CODE_STATUS[code]
+            _record(
+                checks,
+                f"kling.service_code.{code}",
+                expected,
+                adapter._rejection(status, {"code": int(code)}),
+            )
 
 
 def fal_transport(routes: dict[str, httpx.Response]) -> httpx.MockTransport:
@@ -247,7 +247,7 @@ async def run() -> dict:
     await check_kling_success(checks)
     await check_kling_failure(checks)
     await check_kling_status_mapping(checks)
-    check_kling_service_codes(checks)
+    await check_kling_service_codes(checks)
     await check_fal_success(checks)
     await check_fal_queue_states(checks)
     await check_fal_failure(checks)
