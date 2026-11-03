@@ -276,4 +276,3 @@ class KlingAdapter(ProviderHttpAdapter):
             usage=provider_usage,
         )
         return ProviderTaskSnapshotV3(task_id=task_id, status="succeeded", output=output)
-

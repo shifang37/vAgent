@@ -136,7 +136,9 @@ async def check_kling_success(checks: list) -> None:
         _record(checks, "kling.success.output", "present", "missing")
         return
     _record(checks, "kling.success.video_url", KLING_VIDEO_URL, output.video_url)
-    _record(checks, "kling.success.result_origin", "https://p1-kling.klingai.com:443", output.result_source.origin)
+    _record(
+        checks, "kling.success.result_origin", "https://p1-kling.klingai.com:443", output.result_source.origin
+    )
     _record(checks, "kling.success.submit_time", KLING_SUBMIT_TIME, output.provider_times.submit_time)
     _record(checks, "kling.success.end_time", KLING_END_TIME, output.provider_times.end_time)
     _record(checks, "kling.success.usage", 5.0, output.usage.duration if output.usage else None)
@@ -171,7 +173,9 @@ async def check_kling_status_mapping(checks: list) -> None:
         entry = kling_entry(status=remote)
         adapter = KlingAdapter(api_key="contract-replay", transport=kling_transport(entry))
         async with adapter:
-            _record(checks, f"kling.status_map.{remote}", expected, (await adapter.query(KLING_TASK_ID)).status)
+            _record(
+                checks, f"kling.status_map.{remote}", expected, (await adapter.query(KLING_TASK_ID)).status
+            )
 
 
 def check_kling_service_codes(checks: list) -> None:
