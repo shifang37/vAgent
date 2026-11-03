@@ -286,14 +286,21 @@
 | 上游事实 | 错误码 | `submission_outcome` | Job 状态 | 冷却 |
 |---|---|---|---|---|
 | 2xx + 已确认 ID（Kling `code="0"`+`data.id`；fal `request_id`） | —（受理） | accepted | `queued` | 无 |
-| 401 / Kling 1001–1003 | `PROVIDER_AUTH_FAILED` | not_accepted | `failed` | 无（需人工改 Key） |
-| 403 / Kling 1004、1304 | `PROVIDER_ACCESS_DENIED` | not_accepted | `failed` | 无 |
-| 404 | `PROVIDER_MODEL_UNAVAILABLE` | not_accepted | `failed` | 无 |
-| 429 / Kling 1302、1303 | `PROVIDER_RATE_LIMITED` | not_accepted | `failed` | **触发**（§5.4） |
-| Kling 1101、1102 | `PROVIDER_BILLING_BLOCKED` | not_accepted | `failed` | 无（需人工充值） |
-| Kling 1201、1301 | `PROVIDER_CONTENT_REJECTED` | not_accepted | `failed` | 无 |
+| 401 / Kling `1000`–`1004`（鉴权失败、为空、无效、未生效、已过期） | `PROVIDER_AUTH_FAILED` | not_accepted | `failed` | 无（需人工改 Key） |
+| 403 / Kling `1103`（无权访问该 API 或模型） | `PROVIDER_ACCESS_DENIED` | not_accepted | `failed` | 无 |
+| 429 / Kling `1304`（IP 白名单策略） | `PROVIDER_ACCESS_DENIED` | not_accepted | `failed` | 无 |
+| 404 / Kling `1203`（模型或资源不存在） | `PROVIDER_MODEL_UNAVAILABLE` | not_accepted | `failed` | 无 |
+| 429 / Kling `1302`、`1303`（限流、并发超资源包） | `PROVIDER_RATE_LIMITED` | not_accepted | `failed` | **触发**（§5.4） |
+| 429 / Kling `1100`–`1102`（账号异常、欠费、资源包耗尽） | `PROVIDER_BILLING_BLOCKED` | not_accepted | `failed` | 无（需人工充值） |
+| 400 / Kling `1200`、`1201`（请求参数无效） | `PROVIDER_INVALID_REQUEST` | not_accepted | `failed` | 无 |
+| 404 / Kling `1202`（请求方法无效） | `PROVIDER_INVALID_REQUEST` | not_accepted | `failed` | 无 |
+| 400 / Kling `1300`、`1301`（平台策略、内容安全） | `PROVIDER_CONTENT_REJECTED` | not_accepted | `failed` | 无 |
+| 404（无业务码） | `PROVIDER_MODEL_UNAVAILABLE` | not_accepted | `failed` | 无 |
 | 400/422（fal `detail` 含 safety 时为内容拒绝） | `PROVIDER_INVALID_REQUEST` / `PROVIDER_CONTENT_REJECTED` | not_accepted | `failed` | 无 |
 | 其他非 2xx、无法解析、超时、网络、协议错误 | `SUBMISSION_UNKNOWN` | unknown | `unknown` | 无 |
+
+> Kling 业务码按官方[错误码表](https://kling.ai/document-api/api/get-started/error-codes)逐码映射，业务码优先于 HTTP 状态；对齐过程、崩溃级约束与离线校验见 [Kling 对齐与契约校验](./KLING_ALIGNMENT.md)。
+
 
 **`not_accepted` 也只把该 Job 置终态，不自动重投。** 恢复方式是既有的 `shot_redo`/`episode_generate` 显式路径，占用新的 Job 名额与估算。
 

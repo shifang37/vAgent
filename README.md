@@ -6,7 +6,7 @@
 
 当前版本 **v0.6.0**（2026-10-25）。安装为 Python 包后以 `vagent` 命令运行，提供 CLI、本地 Web 工作台、无头两阶段授权流程和只读 MCP。所有数据和 Key 都留在本机。
 
-> 这是一个实习项目，重点在于把一条 16:9 横屏 720p 的 AI 短剧流水线从契约冻结做到可复现的成片交付，并把每一步的证据写进 `docs/`。
+> 一条 16:9 横屏 720p 的 AI 短剧流水线：从契约冻结到可复现的成片交付，每一步的证据都写进 `docs/`。
 
 ## 它能做什么
 
@@ -178,8 +178,8 @@ src/vagent/
     seasons.py · batches.py · routing.py · billing.py · usage.py   季、批量、报价对比、账单、用量聚合
 web/        工作台页面与 10 个纯函数状态模块（*-state.js）
 skills/     内置 SKILL.md（video-brief、shot-description），随 wheel 分发
-scripts/    evaluate_m*.py 离线验收套件、capture_m*_baseline.py 基线快照、wheel_smoke.py 安装态检查
-tests/      122 个 pytest 文件与 10 个 Node 状态测试
+scripts/    evaluate_m*.py 离线验收套件、capture_m*_baseline.py 基线快照、verify_provider_contract.py 供应商契约回放、wheel_smoke.py 安装态检查
+tests/      139 个 pytest 文件与 10 个 Node 状态测试
 ```
 
 设计依据见 [产品设计](./DESIGN.md)、[Agent 选型与 Harness 设计](./AGENT_HARNESS_DESIGN.md) 与 [M1 实施计划](./M1_PLAN.md)。
@@ -197,12 +197,12 @@ node --test tests/test_job_state.mjs          # 其余 9 个 *-state 测试同�
 
 | 检查 | 最近结果（v0.6.0 之后，`master`） |
 |---|---|
-| 全量 pytest | 1520 passed / 4 skipped（skip 为 Windows 符号链接权限用例） |
-| Ruff check / format | 232 个文件通过 |
+| 全量 pytest | 1,522 passed / 4 skipped（skip 为平台条件：Windows 符号链接权限 3 例、POSIX 文件模式 1 例） |
+| Ruff check / format | 234 个文件通过 |
 | 前端 Node 测试 | 10 个状态模块 91 项 |
-| CI 矩阵 | ubuntu / windows × Python 3.11 / 3.12，全部 success |
+| CI 矩阵 | ubuntu / windows × Python 3.11 / 3.12 四组，实时状态见页首 badge |
 
-离线验收套件 `scripts/evaluate_m2.py` … `evaluate_m8.py` 默认不联网，用受控上游与本地测试媒体走真实生产代码路径；`--live` 会被明确拒绝或需要单独授权。全量回归约 25 分钟，已知一处与顺序相关的偶发失败（时间线混音静音）已加固为确定性诊断，见 [M9 计划 §3.0](./docs/M9_PLAN.md)。
+离线验收套件 `scripts/evaluate_m2.py` … `evaluate_m8.py` 默认不联网，用受控上游与本地测试媒体走真实生产代码路径；`--live` 会被明确拒绝或需要单独授权。全量回归约 21–25 分钟。已知两类偶发，均按「记录而不掩盖」处理：一是与顺序相关的时间线混音静音（`tests/test_m7_timeline_render.py`，单跑必过），已加固为确定性诊断，见 [M9 计划 §3.0](./docs/M9_PLAN.md)；二是 Windows 上 M5 离线评估偶发超出夹具等待上限，评估侧的 300 秒已放宽到 600 秒，见 [M5 验收](./docs/M5_E4_ACCEPTANCE.md)。
 
 ## 文档索引
 
@@ -213,7 +213,7 @@ node --test tests/test_job_state.mjs          # 其余 9 个 *-state 测试同�
 | 计划 | [M1-B](./docs/M1B_PLAN.md) · [M1-C](./docs/M1C_PLAN.md) · [M2](./docs/M2_PLAN.md) · [M3](./docs/M3_PLAN.md) · [M5](./docs/M5_PLAN.md) · [M8](./docs/M8_PLAN.md) · [M9](./docs/M9_PLAN.md) · [两 Key 直用](./docs/KEYS_ONLY_PLAN.md) |
 | 契约 | [M1-B](./docs/M1B_CONTRACTS.md) · [M1-C](./docs/M1C_CONTRACTS.md) · [M2](./docs/M2_CONTRACTS.md) · [M3](./docs/M3_CONTRACTS.md) · [M5](./docs/M5_CONTRACTS.md) · [M6](./docs/M6_CONTRACTS.md) · [M7](./docs/M7_CONTRACTS.md) · [M8](./docs/M8_CONTRACTS.md) · [M9](./docs/M9_CONTRACTS.md) |
 | 阶段验收 | [M1-A](./docs/M1A_ACCEPTANCE.md) · [M1-B](./docs/M1B_ACCEPTANCE.md) · [M1-C](./docs/M1C_ACCEPTANCE.md) · [M2](./docs/M2_ACCEPTANCE.md) · [M3](./docs/M3_ACCEPTANCE.md) · [M4](./docs/M4_NORMALIZATION.md) · [M5](./docs/M5_E4_ACCEPTANCE.md) · [M6](./docs/M6_E4_ACCEPTANCE.md) · [M7](./docs/M7_ACCEPTANCE.md) · [M8](./docs/M8_ACCEPTANCE.md) · [K3](./docs/KEYS_ONLY_K3_ACCEPTANCE.md) |
-| 专项验收 | [编排](./docs/AGENT_ORCHESTRATION_ACCEPTANCE.md) · [质量校验](./docs/QUALITY_ACCEPTANCE.md) · [持久恢复](./docs/RECOVERY_ACCEPTANCE.md) · [用量观测](./docs/USAGE_ACCEPTANCE.md) · [上下文优化](./docs/CONTEXT_OPTIMIZATION_ACCEPTANCE.md) · [Redis 缓存](./docs/REDIS_CACHE_ACCEPTANCE.md) · [i2v / flf2v 样本](./docs/M2_I2V_ACCEPTANCE.md) |
+| 专项验收 | [编排](./docs/AGENT_ORCHESTRATION_ACCEPTANCE.md) · [质量校验](./docs/QUALITY_ACCEPTANCE.md) · [持久恢复](./docs/RECOVERY_ACCEPTANCE.md) · [用量观测](./docs/USAGE_ACCEPTANCE.md) · [上下文优化](./docs/CONTEXT_OPTIMIZATION_ACCEPTANCE.md) · [Redis 缓存](./docs/REDIS_CACHE_ACCEPTANCE.md) · [i2v / flf2v 样本](./docs/M2_I2V_ACCEPTANCE.md) · [Kling 对齐与契约校验](./docs/KLING_ALIGNMENT.md) |
 | 发布说明 | [v0.6.0](./docs/RELEASE_0.6.0.md) · [v0.5.0](./docs/RELEASE_0.5.0.md) · [v0.4.0](./docs/RELEASE_0.4.0.md) · [v0.3.0](./docs/RELEASE_0.3.0.md) |
 | 外部依据 | [万相 API 核实](./docs/VIDEO_API_NOTES.md) · [第三方组件与分发材料](./docs/THIRD_PARTY_ASSEMBLY.md) |
 

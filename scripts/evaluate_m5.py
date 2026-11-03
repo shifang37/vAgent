@@ -712,7 +712,10 @@ async def settle(service, project_id, clock, *, pause=0.01, timeout=180):
         await asyncio.sleep(pause)
 
 
-async def drive(service, run_id, clock, *, timeout=300):
+# Waiting for a Run must outlast RunPolicy.timeout_seconds (300s) with real margin: when
+# both were 300s, a legal but slow Run on the Windows runner finished after the wait had
+# already expired and the fixture reported EVAL_TIMEOUT instead of the result.
+async def drive(service, run_id, clock, *, timeout=600):
     waiter = asyncio.create_task(service.wait_for_run(run_id))
     try:
         async with asyncio.timeout(timeout):

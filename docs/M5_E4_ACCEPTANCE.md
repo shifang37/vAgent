@@ -153,3 +153,6 @@ node --test tests/test_job_state.mjs tests/test_storyboard_state.mjs tests/test_
 3. **用例共享数据目录导致跨界任务（套件缺陷）**：见第 2 节第 2 条；修复为每用例独立数据目录，`wan-cap` 停止 Worker 后只验证注册与拒绝。
 4. **`--live` 与真实样本的边界**：离线套件明确拒绝 `--live`；真实样本通过独立的一次性脚本执行，脚本在提交前校验 18 镜头/全部 5 秒/54.00 CNY，失败保留证据且不重提。
 5. **既有 `episode_read` 的读取视图不变**：Web 的 `film` 投影只加在应用层，工具返回仍按 E2/E3 契约；未新增工具版本（保持 9/9）。
+6. **Windows 上离线套件偶发超出夹具等待上限（环境时序，非回归）**：`scripts/evaluate_m5.py` 的 `drive()` 原本用 300 秒等待一次 Run 结束，而同一脚本里的 `RunPolicy.timeout_seconds` 也是 300 秒——两者相等时，一次合法但偏慢的 Run 会在收尾阶段刚好把等待耗尽，抛出 `EVAL_TIMEOUT`（`{project_id} 的任务未在夹具时限内结束`）。Windows runner 的 ffmpeg 与文件系统更慢，因此更容易触发；该异常只出现在评估夹具的等待层，不改变产品代码路径、拒绝语义或任何冻结契约。处理：等待上限放宽到 600 秒（与 RunPolicy 保持 2 倍余量），并在 README 的「已知偶发」中登记。再次出现时，应先区分「等待层超时」与「任务真实停滞」——后者会伴随活跃 Job 列表非空，可直接从报错里的 `worker=` 与 `活跃任务` 判读。
+
+   实测依据（2026-11-03 本机 Windows，`python scripts/evaluate_m5.py`）：5 个用例 5/5 通过，`durationSeconds=216.61`、墙钟 218.5 秒，距原 300 秒上限仅约 28% 余量；同一套件在 CI 的 Windows runner 上还要叠加 checkout、依赖安装与并发负载，跨过 300 秒是正常的量级差异，不是任务停滞。
