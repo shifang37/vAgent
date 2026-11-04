@@ -21,6 +21,7 @@
 - **契约回放**：37/37 通过，退出码 0（`scripts/verify_provider_contract.py`）。
 - **基线保护**：升到 0.6.1 后重新生成 `docs/M9_E0_BASELINE.json`，SHA-256 仍为 `afd1b38f…59b694b`，逐字节不变；`docs/M8_E0_BASELINE.json` 保持 `f3dc91c1…cb3706`。`src/vagent/video/assembler.py` 的 `PACKAGE_VERSION` 是冻结的装配引擎标识（写进每份成片的 `engine.packageVersion`），**不随包版本变化**，本版未改动。
 - **安装态 wheel smoke**：**PASS**（`output/release-0.6.1-wheel-smoke.json`，23/23 检查、退出码 0、`temporaryDataCleaned=true`）。在独立环境 `tmp/wheel-env-061` 安装本版 wheel 后运行，`packagePath` 指向该环境的 `site-packages`（不是仓库副本）。覆盖文本/质量/MCP、Mock 视频工具、持久等待与重启续接、M1-B 五用例、M1-C 七用例、M2 工作台与七用例、M3 六用例（`submitCalls=11`、成片 6）与成片媒体 HTTP/CLI、M5 五用例（`submitCalls=42`、成片 18）、M6 三用例、M7 三用例、M8 四用例与 `route preview`/`usage bill`，以及两 Key 零费用探测与免重启登记；各段 `realProviderCalls=0`。
+- **四组 CI**：发布提交 `e571bc9` 上四组矩阵（ubuntu / windows × Python 3.11 / 3.12）全部 **success**（[运行 41786694393](https://github.com/shifang37/vAgent/actions/runs/41786694393)；ubuntu 组约 19 分钟，windows 组约 62 分钟）。CI 覆盖 `ruff check` / `ruff format --check`、前端 10 个模块的语法检查与 Node 测试、全量 pytest、构建 wheel 并在独立环境安装后运行 `scripts/wheel_smoke.py`。
 
 ## 构建产物
 
