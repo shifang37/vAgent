@@ -4,7 +4,7 @@
 
 **vagent** 是一个面向视频创作的本地 Agent：用自然语言指挥它完成「剧本 → 分集 / 分场 / 分镜 → 调用视频模型生成 → 字幕 / 配音 / 混音 / 转场 → 整集成片」。它用 **Python + DeepSeek + LangGraph** 自主实现上下文、项目记忆、Skills、工具执行与费用护栏，再接入真实的视频生成与语音合成服务。
 
-当前版本 **v0.6.0**（2026-10-25）。安装为 Python 包后以 `vagent` 命令运行，提供 CLI、本地 Web 工作台、无头两阶段授权流程和只读 MCP。所有数据和 Key 都留在本机。
+当前版本 **v0.6.1**（2026-11-04）。安装为 Python 包后以 `vagent` 命令运行，提供 CLI、本地 Web 工作台、无头两阶段授权流程和只读 MCP。所有数据和 Key 都留在本机。
 
 > 一条 16:9 横屏 720p 的 AI 短剧流水线：从契约冻结到可复现的成片交付，每一步的证据都写进 `docs/`。
 
@@ -48,6 +48,8 @@
 | M8 | 报价对比、提交节流、手工账单、真实样本、发布 | 完成，v0.6.0 |
 | K0–K3 | 两 Key 直用：设置页最小表单、零费用探测、免重启生效 | 完成 |
 | M9 | 9:16 竖屏 | **暂缓**。E0 契约与基线已冻结保留，E1 起未开始 |
+
+**v0.6.1 是 v0.6.0 之后的补丁版本**：收纳 Kling 3.0 Turbo 适配器的字段与错误码对齐（含错误路径上的崩溃级修复）、零费用契约回放校验器，以及混音静音快速失败。存储、工具面与全部契约基线逐字节不变，不新增付费样本。
 
 每个里程碑按固定节奏推进：**E0 冻结契约与机器可读基线 → E1–E3 实现 → E4 离线评估套件 + 安装态 wheel smoke + 受控浏览器 + 四组 CI**。契约、基线快照与验收证据全部在 [`docs/`](./docs)。
 
@@ -195,9 +197,9 @@ node --test tests/test_job_state.mjs          # 其余 9 个 *-state 测试同�
 .\.venv\Scripts\python.exe scripts/wheel_smoke.py   # 在临时环境安装 wheel 并跑安装态套件
 ```
 
-| 检查 | 最近结果（v0.6.0 之后，`master`） |
+| 检查 | 最近结果（`master`，v0.6.1 发布前） |
 |---|---|
-| 全量 pytest | 1,522 passed / 4 skipped（skip 为平台条件：Windows 符号链接权限 3 例、POSIX 文件模式 1 例） |
+| 全量 pytest | 1,522 passed / 4 skipped，另有 1 例已登记的偶发失败（skip 为平台条件：Windows 符号链接权限 3 例、POSIX 文件模式 1 例） |
 | Ruff check / format | 234 个文件通过 |
 | 前端 Node 测试 | 10 个状态模块 91 项 |
 | CI 矩阵 | ubuntu / windows × Python 3.11 / 3.12 四组，实时状态见页首 badge |
@@ -214,7 +216,7 @@ node --test tests/test_job_state.mjs          # 其余 9 个 *-state 测试同�
 | 契约 | [M1-B](./docs/M1B_CONTRACTS.md) · [M1-C](./docs/M1C_CONTRACTS.md) · [M2](./docs/M2_CONTRACTS.md) · [M3](./docs/M3_CONTRACTS.md) · [M5](./docs/M5_CONTRACTS.md) · [M6](./docs/M6_CONTRACTS.md) · [M7](./docs/M7_CONTRACTS.md) · [M8](./docs/M8_CONTRACTS.md) · [M9](./docs/M9_CONTRACTS.md) |
 | 阶段验收 | [M1-A](./docs/M1A_ACCEPTANCE.md) · [M1-B](./docs/M1B_ACCEPTANCE.md) · [M1-C](./docs/M1C_ACCEPTANCE.md) · [M2](./docs/M2_ACCEPTANCE.md) · [M3](./docs/M3_ACCEPTANCE.md) · [M4](./docs/M4_NORMALIZATION.md) · [M5](./docs/M5_E4_ACCEPTANCE.md) · [M6](./docs/M6_E4_ACCEPTANCE.md) · [M7](./docs/M7_ACCEPTANCE.md) · [M8](./docs/M8_ACCEPTANCE.md) · [K3](./docs/KEYS_ONLY_K3_ACCEPTANCE.md) |
 | 专项验收 | [编排](./docs/AGENT_ORCHESTRATION_ACCEPTANCE.md) · [质量校验](./docs/QUALITY_ACCEPTANCE.md) · [持久恢复](./docs/RECOVERY_ACCEPTANCE.md) · [用量观测](./docs/USAGE_ACCEPTANCE.md) · [上下文优化](./docs/CONTEXT_OPTIMIZATION_ACCEPTANCE.md) · [Redis 缓存](./docs/REDIS_CACHE_ACCEPTANCE.md) · [i2v / flf2v 样本](./docs/M2_I2V_ACCEPTANCE.md) · [Kling 对齐与契约校验](./docs/KLING_ALIGNMENT.md) |
-| 发布说明 | [v0.6.0](./docs/RELEASE_0.6.0.md) · [v0.5.0](./docs/RELEASE_0.5.0.md) · [v0.4.0](./docs/RELEASE_0.4.0.md) · [v0.3.0](./docs/RELEASE_0.3.0.md) |
+| 发布说明 | [v0.6.1](./docs/RELEASE_0.6.1.md) · [v0.6.0](./docs/RELEASE_0.6.0.md) · [v0.5.0](./docs/RELEASE_0.5.0.md) · [v0.4.0](./docs/RELEASE_0.4.0.md) · [v0.3.0](./docs/RELEASE_0.3.0.md) |
 | 外部依据 | [万相 API 核实](./docs/VIDEO_API_NOTES.md) · [第三方组件与分发材料](./docs/THIRD_PARTY_ASSEMBLY.md) |
 
 每个 `docs/M*_E*_ACCEPTANCE.md` 记录对应子阶段的范围、复现命令、回归数字与保留的边界；`docs/M*_E0_BASELINE.json` 是机器可读的契约基线。

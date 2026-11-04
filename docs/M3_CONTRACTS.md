@@ -101,6 +101,8 @@ Job/Request v6 冻结 `provider, model, mode, region, endpointProfile, adapterVe
 
 Kling 基址固定 `https://api-singapore.klingai.com`；`Authorization: Bearer <API_KEY>`；创建 `POST /text-to-video/kling-3.0-turbo`，请求仅 `prompt`、`settings{duration:5,resolution:"720p",aspect_ratio:"16:9"}` 与服务端关联 `options.external_task_id`。`prompt` 非空且最多 2500 字符（本项目裁剪）。查询 `GET /tasks?task_ids=<原ID>`，只处理对应 ID；`submitted/processing/succeeded/failed` 映射本地状态，成功取唯一 video output。外部 ID 的唯一性不等于幂等保证，`supportsIdempotentSubmit=false`。
 
+> **2026-11-03 对齐补记**：Kling 直连的响应字段与业务错误码已按官方 3.0 Turbo 与错误码文档逐项核对（`create_time`/`update_time` 为 Unix 毫秒、交付时长取 `outputs[].duration`、失败原因在 `message`；官方码 `1000`–`1304` 逐码映射），契约语义未变，并新增零费用回放校验器。过程、崩溃级约束与证据见 [Kling 对齐与契约校验](./KLING_ALIGNMENT.md)。
+
 fal 使用 `Authorization: Key <FAL_KEY>`、基址 `https://queue.fal.run` 与上述 endpoint；请求固定 `duration:"5", aspect_ratio:"16:9", generate_audio:false, shot_type:"customize", enable_safety_checker:true`，只提供单个 `prompt`（1..2500），`cfg_scale=0.5`、`negative_prompt="blur, distort, and low quality"` 显式固定。不得遗漏音频开关而触发默认收费档。持久化 `request_id`，按官方 SDK 的 app 根路径 `GET /fal-ai/kling-video/requests/{id}/status` 与 `GET /fal-ai/kling-video/requests/{id}` 查询（生成路径含 `/v3/standard/text-to-video`，查询路径去除该子路径，不盲跟响应中的 URL）；`IN_QUEUE/IN_PROGRESS` 为未完成，`COMPLETED` 后仍需 GET result 并检查错误/唯一 `video.url`。
 
 两者采用轮询，不开放本地公网回调、不上传参考图、不执行云端取消。查询初始 15 秒，退避沿用既有持久策略；每 provider 本地至多一个未完成提交任务作为保守调度上限，不把它称为账号额度。Kling 限额按账号/模型/资源包、查询不占并发；fal 额度以账号为准，E0 不读取账号。HTTP 401/403、参数拒绝、内容拒绝、429、上游 5xx/协议错误分列；提交一旦进入不确定窗口一律不盲重投，查询可退避恢复，result 下载重试复用原 task ID。E2 用受控响应测试全部映射。
