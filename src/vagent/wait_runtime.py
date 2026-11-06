@@ -4,6 +4,7 @@ import asyncio
 import contextlib
 import json
 import math
+import time
 from collections.abc import Callable, Mapping
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
@@ -401,10 +402,30 @@ class WaitService:
 
 
 class WaitCoordinator:
-    """Restart scans are authoritative; in-memory notifications only reduce latency."""
+    """Restart scans are authoritative; in-memory notifications only reduce latency.
+
+    A scan must never be pinned on one Run. A permanent blocker (an explicit-resume
+    marker, or a Run superseded by a newer request) is skipped instead of re-attempted,
+    and a transient blocker is retried with capped exponential backoff, so a later Run
+    whose external result is ready still advances on the same or the next scan.
+    """
+
+    # These codes cannot change without an explicit user action or a new request, so
+    # re-attempting them every scan only starves the Runs behind them.
+    PERMANENT_BLOCKERS = frozenset({"EXPLICIT_RESUME_REQUIRED", "STALE_RUN"})
+    RETRY_BASE_SECONDS = 1.0
+    RETRY_MAX_SECONDS = 60.0
 
     def __init__(
-        self, store, runner_factory, *, resolvers=None, clock=utc_now, on_event=None, interval_seconds=0.25
+        self,
+        store,
+        runner_factory,
+        *,
+        resolvers=None,
+        clock=utc_now,
+        on_event=None,
+        interval_seconds=0.25,
+        monotonic=time.monotonic,
     ):
         if not math.isfinite(interval_seconds) or interval_seconds <= 0:
             raise ValueError("Wait scan interval must be finite and positive")
@@ -412,11 +433,17 @@ class WaitCoordinator:
         self.resolvers = resolvers or {}
         self.waits = WaitService(store, clock=clock, on_event=on_event)
         self.interval_seconds = interval_seconds
+        self.monotonic = monotonic
         self.shutdown = asyncio.Event()
         self._wake = asyncio.Event()
         self._task = None
+        self._retry_at: dict[str, float] = {}
+        self._retry_attempts: dict[str, int] = {}
 
     def notify(self) -> None:
+        # A fresh result may make a backoff-parked Run resumable right now.
+        self._retry_at.clear()
+        self._retry_attempts.clear()
         self._wake.set()
 
     def start(self) -> asyncio.Task:
@@ -445,9 +472,65 @@ class WaitCoordinator:
             except TimeoutError:
                 pass
 
+    def _schedule_retry(self, run_id: str, error: AppError) -> None:
+        """Back off a transient blocker; permanent ones wait for an explicit action."""
+        if error.code in self.PERMANENT_BLOCKERS:
+            return
+        attempts = self._retry_attempts.get(run_id, 0) + 1
+        self._retry_attempts[run_id] = attempts
+        delay = min(self.RETRY_MAX_SECONDS, self.RETRY_BASE_SECONDS * 2 ** (attempts - 1))
+        self._retry_at[run_id] = self.monotonic() + delay
+
+    def _clear_retry(self, run_id: str) -> None:
+        self._retry_at.pop(run_id, None)
+        self._retry_attempts.pop(run_id, None)
+
+    def _supersede(self, run_id: str) -> bool:
+        """Close a Run whose session already accepted a newer request.
+
+        Its results are no longer addressable by automatic or explicit resume, so it
+        must leave the scan instead of being re-attempted on every pass.
+        """
+        error = AppError("STALE_RUN", "该会话已有更新的请求，旧 Run 已结束，已保存的产物仍然保留。")
+
+        def close(draft):
+            record = draft["runs"].get(run_id)
+            if record is None or record["status"] not in {"running", "waiting_external", "interrupted"}:
+                return False
+            for raw in draft["waits"].values():
+                if raw["context"]["runId"] == run_id and raw["status"] != "delivered":
+                    raw.update(status="stopped", autoResume=False, deliveredCheckpointId=None)
+            close_external_time(record, self.waits.timestamp())
+            record.update(
+                status="cancelled",
+                errorCode=error.code,
+                answer=str(error),
+                resumable=False,
+                waitResumeError=None,
+                activeWaitId=None,
+                messages=messages_to_dict(close_pending_calls(messages_from_dict(record["messages"]), error)),
+                updatedAt=now(),
+            )
+            return True
+
+        if not self.store.transaction(close):
+            return False
+        self._clear_retry(run_id)
+        if self.waits.on_event:
+            with contextlib.suppress(Exception):
+                self.waits.on_event(
+                    {
+                        "type": "run.superseded",
+                        "runId": run_id,
+                        "error": {"code": error.code, "message": str(error)},
+                    }
+                )
+        return True
+
     async def run_once(self) -> dict | None:
         if self.shutdown.is_set() or execution_control(self.store).lock.locked():
             return None
+        attempted = None
         for record in self.store.snapshot()["runs"].values():
             if (
                 record.get("executionVersion") not in WAIT_EXECUTION_VERSIONS
@@ -455,17 +538,40 @@ class WaitCoordinator:
                 or self.waits.recovery_binding(record["id"]) is None
             ):
                 continue
+            run_id = record["id"]
+            blocker = record.get("waitResumeError") or {}
+            code = blocker.get("code") if isinstance(blocker, dict) else None
+            if code in self.PERMANENT_BLOCKERS:
+                # Never let a known-permanent blocker pin the scan. STALE_RUN can be
+                # closed on sight; EXPLICIT_RESUME_REQUIRED waits for the user.
+                if code == "STALE_RUN":
+                    self._supersede(run_id)
+                continue
+            if code is not None and self._retry_at.get(run_id, 0.0) > self.monotonic():
+                continue
             try:
                 # Results survive missing/changed model configuration. Only graph
                 # invocation needs the original model, tools and remaining budget.
-                for binding in self.waits.bindings(record["id"]):
+                for binding in self.waits.bindings(run_id):
                     self.waits.resolve(binding, self.resolvers)
                 runner = self.runner_factory(record)
-                return await runner.advance_wait(record["id"], shutdown=self.shutdown)
+                result = await runner.advance_wait(run_id, shutdown=self.shutdown)
+                self._clear_retry(run_id)
+                return result
             except AppError as error:
-                if error.code not in {"RUN_BUSY", "STALE_WAIT"}:
-                    self.waits.block_auto(record["id"], error)
+                if error.code == "RUN_BUSY":
+                    # Another execution owns the lock; retry on the next scan.
+                    return None
+                if error.code == "STALE_RUN":
+                    self._supersede(run_id)
+                    continue
+                if error.code not in {"STALE_WAIT"}:
+                    self.waits.block_auto(run_id, error)
+                    self._schedule_retry(run_id, error)
+                    attempted = self.store.snapshot()["runs"][run_id]
             except Exception as error:
-                self.waits.block_auto(record["id"], public_error(error))
-            return self.store.snapshot()["runs"][record["id"]]
-        return None
+                safe = public_error(error)
+                self.waits.block_auto(run_id, safe)
+                self._schedule_retry(run_id, safe)
+                attempted = self.store.snapshot()["runs"][run_id]
+        return attempted

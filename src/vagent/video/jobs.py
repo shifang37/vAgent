@@ -273,11 +273,40 @@ def _preview_context(project_id: str) -> ToolExecutionContext:
     )
 
 
-def recover_interrupted_jobs(state: dict, timestamp: str) -> None:
-    """Only the Store opener calls this, after acquiring the exclusive instance lock."""
+def adopt_submission_handle(job: Job, timestamp: str, handle: dict) -> Job:
+    """Turn a confirmed WAL handle back into the committed queued state."""
+    if not isinstance(job, LiveJob):
+        raise AppError("JOB_CONFLICT", "只有真实视频任务可以恢复上游句柄。")
+    return changed_job(
+        job,
+        timestamp,
+        status="queued",
+        providerTaskId=handle["taskId"],
+        providerSubmissionRequestId=handle.get("requestId"),
+        queryState="polling",
+        nextPollAt=after_seconds(timestamp, job.policy.interval_seconds),
+        queryStartedAt=None,
+        consecutiveQueryErrors=0,
+        queryPauseReason=None,
+        runtimeBlock=None,
+        error=None,
+    )
+
+
+def recover_interrupted_jobs(state: dict, timestamp: str, *, handles: dict | None = None) -> None:
+    """Only the Store opener calls this, after acquiring the exclusive instance lock.
+
+    ``handles`` is the confirmed-provider-handle snapshot from the submission WAL. A
+    Job that was submitting (or already marked unknown) when the state write failed
+    adopts it instead of losing a task the provider may already have accepted.
+    """
+    handles = handles or {}
     for job_id, raw in state["jobs"].items():
         job = parse_job(raw)
-        if job.status == "submitting":
+        handle = handles.get(job_id)
+        if job.status == "submitting" and handle:
+            recovered = adopt_submission_handle(job, timestamp, handle)
+        elif job.status == "submitting":
             recovered = changed_job(
                 job,
                 timestamp,
@@ -288,6 +317,8 @@ def recover_interrupted_jobs(state: dict, timestamp: str) -> None:
                     "message": "提交过程中进程退出，受理结果不确定；不会自动重新提交。",
                 },
             )
+        elif job.status == "unknown" and handle and job.provider_task_id is None:
+            recovered = adopt_submission_handle(job, timestamp, handle)
         elif job.query_started_at is not None:
             # The saved timeout deadline anchors retries across repeated restarts.
             recovered = query_failed(
@@ -424,7 +455,19 @@ def validate_job_changes(previous: dict[str, dict], state: dict) -> None:
             raise AppError("JOB_REVISION_CONFLICT", "Job 版本已变化，请重新读取。")
         transition = live_job_transition_allowed if isinstance(job, LiveJob) else job_transition_allowed
         terminal = {"failed", "unknown"} if isinstance(job, LiveJob) else {"succeeded", "failed", "unknown"}
-        if old.status in terminal or not transition(old.status, job.status):
+        # The submission WAL may confirm a handle after the Job was already marked
+        # unknown. That one shape (unknown + no task ID -> queued + the WAL's ID) is a
+        # recovery, not a resubmission; every other terminal->active move stays rejected.
+        recovered_submission = (
+            old.status == "unknown"
+            and job.status == "queued"
+            and old.provider_task_id is None
+            and job.provider_task_id is not None
+            and old.error is not None
+            and old.error.code == "SUBMISSION_UNKNOWN"
+            and job.error is None
+        )
+        if (old.status in terminal or not transition(old.status, job.status)) and not recovered_submission:
             raise AppError("JOB_INVALID_TRANSITION", "不允许回退或重新提交这个视频任务。")
         if old.provider_task_id is not None and job.provider_task_id != old.provider_task_id:
             raise AppError("JOB_IMMUTABLE", "已确认的上游任务 ID 不可替换。")

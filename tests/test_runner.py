@@ -99,6 +99,115 @@ async def test_step_limit_prevents_unbounded_loop(store):
     assert_complete_protocol(messages_from_dict(result["messages"]))
 
 
+async def test_a_stale_running_record_does_not_block_the_next_run(store):
+    first = await AgentRunner(
+        store=store, model=ScriptedModel(lambda *_: AIMessage(content="第一次")), tools=create_project_tools()
+    ).run("coffee", "第一次")
+    assert first["status"] == "completed"
+    # A final write that failed after the Run's own commit leaves an unowned `running`.
+    store.transaction(lambda draft: draft["runs"][first["id"]].update(status="running"))
+    second = await AgentRunner(
+        store=store, model=ScriptedModel(lambda *_: AIMessage(content="第二次")), tools=create_project_tools()
+    ).run("coffee", "第二次")
+    assert second["status"] == "completed"
+    assert store.snapshot()["runs"][first["id"]]["status"] == "interrupted"
+
+
+async def test_a_budget_stop_after_a_write_gets_a_closing_turn(store):
+    events = []
+
+    def respond(messages, step):
+        if step == 0:
+            return tool_call(
+                "artifact_save", {"kind": "brief", "title": "收尾", "content": "内容"}, call_id="save"
+            )
+        return AIMessage(content="已保存 brief，其余未做。")
+
+    result = await AgentRunner(
+        store=store,
+        model=ScriptedModel(respond),
+        tools=create_project_tools(),
+        policy=RunPolicy(max_steps=1, closing_turn=True),
+        on_event=events.append,
+    ).run("coffee", "保存 brief")
+    assert result["status"] == "completed" and result["errorCode"] is None
+    assert result["modelSteps"] == 2 and result["toolCalls"] == 1
+    artifact_id = next(iter(store.snapshot()["artifacts"]))
+    assert artifact_id in result["answer"]
+    assert any(event["type"] == "run.closing_turn" and event["reason"] == "STEP_LIMIT" for event in events)
+
+
+async def test_a_tool_budget_stop_after_a_write_gets_a_closing_turn(store):
+    def respond(messages, step):
+        if step == 0:
+            return tool_call(
+                "artifact_save", {"kind": "brief", "title": "收尾", "content": "内容"}, call_id="save"
+            )
+        return AIMessage(content="工具额度用尽，brief 已保存。")
+
+    result = await AgentRunner(
+        store=store,
+        model=ScriptedModel(respond),
+        tools=create_project_tools(),
+        policy=RunPolicy(max_tool_calls=1, closing_turn=True),
+    ).run("coffee", "保存 brief")
+    assert result["status"] == "completed"
+    assert result["modelSteps"] == 2 and result["toolCalls"] == 1
+
+
+async def test_a_budget_stop_without_a_write_still_fails(store):
+    model = ScriptedModel(lambda _, step: tool_call("project_read", {}, call_id=f"read-{step}"))
+    result = await AgentRunner(
+        store=store,
+        model=model,
+        tools=create_project_tools(),
+        policy=RunPolicy(max_steps=2, closing_turn=True),
+    ).run("coffee", "只读循环")
+    assert result["errorCode"] == "STEP_LIMIT" and model.calls == 2
+
+
+async def test_the_closing_turn_is_off_in_the_library_default(store):
+    def respond(messages, step):
+        if step == 0:
+            return tool_call(
+                "artifact_save", {"kind": "brief", "title": "收尾", "content": "内容"}, call_id="save"
+            )
+        return AIMessage(content="不应被调用")
+
+    model = ScriptedModel(respond)
+    result = await AgentRunner(
+        store=store, model=model, tools=create_project_tools(), policy=RunPolicy(max_steps=1)
+    ).run("coffee", "保存 brief")
+    assert result["errorCode"] == "STEP_LIMIT" and model.calls == 1
+
+
+async def test_the_closing_turn_never_executes_a_tool(store):
+    def respond(messages, step):
+        if step == 0:
+            return tool_call(
+                "artifact_save", {"kind": "brief", "title": "第一个", "content": "内容"}, call_id="save"
+            )
+        return AIMessage(
+            content="收尾说明。",
+            tool_calls=[
+                {
+                    "name": "artifact_save",
+                    "args": {"kind": "brief", "title": "第二个", "content": "内容"},
+                    "id": "save-2",
+                }
+            ],
+        )
+
+    result = await AgentRunner(
+        store=store,
+        model=ScriptedModel(respond),
+        tools=create_project_tools(),
+        policy=RunPolicy(max_steps=1, closing_turn=True),
+    ).run("coffee", "保存 brief")
+    assert result["status"] == "completed" and result["toolCalls"] == 1
+    assert len(store.snapshot()["artifacts"]) == 1
+
+
 async def test_model_sees_original_remaining_budget_after_failure_and_restart(store):
     observed = []
 
@@ -181,9 +290,31 @@ async def test_malformed_calls_never_execute(store, reply):
     result = await AgentRunner(
         store=store, model=ScriptedModel(lambda *_: reply), tools=create_project_tools()
     ).run("coffee", "测试")
-    assert result["errorCode"] == "INVALID_TOOL_CALL"
+    # The first malformed batch is fed back once; the identical second one stops the Run.
+    assert result["errorCode"] == "SCHEMA_FEEDBACK_LIMIT"
     assert result["toolCalls"] == 0
     assert store.snapshot()["operations"] == {}
+
+
+async def test_a_malformed_call_is_fed_back_and_can_be_corrected(store):
+    def respond(messages, step):
+        if step == 0:
+            return AIMessage(
+                content="",
+                invalid_tool_calls=[
+                    {"name": "project_update", "args": '{"goal":', "id": "bad", "error": "parse"}
+                ],
+            )
+        payload = json.loads(messages[-1].content)
+        assert payload["error"]["code"] == "INVALID_TOOL_CALL"
+        return AIMessage(content="参数已修正，本步不再调用工具。")
+
+    result = await AgentRunner(store=store, model=ScriptedModel(respond), tools=create_project_tools()).run(
+        "coffee", "修改目标"
+    )
+    assert result["status"] == "completed" and result["errorCode"] is None
+    assert result["modelSteps"] == 2 and result["toolCalls"] == 0
+    assert store.snapshot()["projects"]["coffee"]["goal"] == ""
 
 
 async def test_pre_cancelled_run_never_starts_model(store):

@@ -126,6 +126,72 @@ async def test_deepseek_stream_text_and_usage_are_preserved_once():
     }
 
 
+async def test_a_repeated_final_chunk_does_not_concatenate_the_finish_reason():
+    def handler(_):
+        return response(
+            [
+                packet({"role": "assistant", "content": ""}),
+                packet({"content": "完成"}),
+                packet({}, reason="stop"),
+                packet({}, reason="stop"),
+                packet(usage=USAGE),
+                b"data: [DONE]\n\n",
+            ]
+        )
+
+    async with httpx.AsyncClient(transport=httpx.MockTransport(handler)) as client:
+        reply = await DeepSeekModel("test", http_client=client).generate_stream(
+            [HumanMessage(content="hello")], [], lambda _: None
+        )
+    assert reply.content == "完成"
+    assert reply.response_metadata["finish_reason"] == "stop"
+
+
+async def test_a_tool_name_repeated_in_every_delta_is_taken_once():
+    arguments = json.dumps({"kind": "brief", "title": "t", "content": "c"}, ensure_ascii=False)
+
+    def handler(_):
+        return response(
+            [
+                packet({"role": "assistant", "content": ""}),
+                packet(
+                    {
+                        "tool_calls": [
+                            {
+                                "index": 0,
+                                "id": "save-1",
+                                "type": "function",
+                                "function": {"name": "artifact_save", "arguments": arguments[:12]},
+                            }
+                        ]
+                    }
+                ),
+                packet(
+                    {
+                        "tool_calls": [
+                            {
+                                "index": 0,
+                                "id": "save-1",
+                                "function": {"name": "artifact_save", "arguments": arguments[12:]},
+                            }
+                        ]
+                    }
+                ),
+                packet({}, reason="tool_calls"),
+                packet(usage=USAGE),
+                b"data: [DONE]\n\n",
+            ]
+        )
+
+    async with httpx.AsyncClient(transport=httpx.MockTransport(handler)) as client:
+        reply = await DeepSeekModel("test", http_client=client).generate_stream(
+            [HumanMessage(content="hello")], [], lambda _: None
+        )
+    assert [call["name"] for call in reply.tool_calls] == ["artifact_save"]
+    assert reply.tool_calls[0]["id"] == "save-1"
+    assert reply.tool_calls[0]["args"] == {"kind": "brief", "title": "t", "content": "c"}
+
+
 async def test_stream_tools_wait_for_finish_then_use_complete_arguments_and_results(store):
     arguments = json.dumps({"kind": "brief", "title": "test", "content": "已保存内容"}, ensure_ascii=False)
     frames = tool_frames(arguments)
@@ -158,14 +224,14 @@ async def test_stream_tools_wait_for_finish_then_use_complete_arguments_and_resu
 
 
 @pytest.mark.parametrize(
-    "reason,arguments,code",
+    "reason,arguments,code,calls",
     [
-        ("tool_calls", '{"kind":"brief","title":"test","content":"partial"', "INVALID_TOOL_CALL"),
-        ("tool_calls", "[]", "INVALID_TOOL_CALL"),
-        ("length", '{"kind":"brief","title":"test","content":"partial"}', "RESPONSE_TRUNCATED"),
+        ("tool_calls", '{"kind":"brief","title":"test","content":"partial"', "SCHEMA_FEEDBACK_LIMIT", 2),
+        ("tool_calls", "[]", "SCHEMA_FEEDBACK_LIMIT", 2),
+        ("length", '{"kind":"brief","title":"test","content":"partial"}', "RESPONSE_TRUNCATED", 1),
     ],
 )
-async def test_stream_rejects_incomplete_or_truncated_tool_response(store, reason, arguments, code):
+async def test_stream_rejects_incomplete_or_truncated_tool_response(store, reason, arguments, code, calls):
     requests = []
 
     def handler(request):
@@ -178,8 +244,9 @@ async def test_stream_rejects_incomplete_or_truncated_tool_response(store, reaso
         ).run("test", "save")
     assert result["errorCode"] == code and result["status"] == "failed"
     assert not store.snapshot()["artifacts"] and result["toolCalls"] == 0
+    assert len(result["modelCalls"]) == calls
     assert result["modelCalls"][0]["inputTokens"] == 20  # Rejected response is still billed.
-    assert len(requests) == 1 and not result["resumable"]
+    assert len(requests) == calls and not result["resumable"]
 
 
 async def test_interrupted_stream_discards_draft_and_only_explicit_resume_calls_model(store):

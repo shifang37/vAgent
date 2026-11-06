@@ -8,7 +8,7 @@ import inspect
 import json
 import time
 from collections.abc import Callable
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from datetime import datetime
 from typing import TypedDict
 from uuid import uuid4
@@ -50,7 +50,7 @@ from vagent.prompts import (
     render_system_prompt,
 )
 from vagent.quality import requested_content_limits, updated_content_limits
-from vagent.storage import FileStore, now
+from vagent.storage import FileStore, now, repair_stale_runs
 from vagent.summary import Summarizer, SummaryStore, span_key, summary_target_bytes
 from vagent.tools import ToolRegistry
 from vagent.tracing import Tracer, span
@@ -82,6 +82,10 @@ class RunPolicy:
     max_steps: int = 8
     max_tool_calls: int = 12
     timeout_seconds: float = 180
+    # One extra, tool-free model call after the budget runs out, so a Run that already
+    # committed a paid product can still explain it. Off in the library default so
+    # existing evaluation baselines keep their exact model-call counts.
+    closing_turn: bool = False
 
     def __post_init__(self):
         if (
@@ -90,8 +94,16 @@ class RunPolicy:
             or type(self.max_tool_calls) is not int
             or self.max_tool_calls <= 0
             or not 0 < self.timeout_seconds < float("inf")
+            or type(self.closing_turn) is not bool
         ):
             raise AppError("INVALID_POLICY", "执行步数、工具次数与超时必须是有限正数，次数必须是整数。")
+
+
+CLOSING_TURN_INSTRUCTION = (
+    "\n\n【预算收尾】本次 Run 的模型步数或工具额度已用尽，不要调用任何工具。"
+    "请用中文简短说明：已经完成了什么、产物的 artifactId（如有）、还剩什么没有做。"
+    "不要说“请继续”，也不要把未完成的工作说成已完成。"
+)
 
 
 class GraphState(TypedDict):
@@ -105,6 +117,9 @@ class GraphState(TypedDict):
     dropped_messages: int
     error_code: str | None
     answer: str
+    # Set once the extra tool-free closing call has happened; persisted only in the
+    # graph checkpoint (not state.json), so a resume cannot repeat it.
+    closing_turn_used: bool
 
 
 class WaitingGraphState(GraphState):
@@ -351,6 +366,108 @@ class AgentRunner:
             payload["toolFeatures"] = self.tools.features
         return hashlib.sha256(json.dumps(payload, sort_keys=True, ensure_ascii=False).encode()).hexdigest()
 
+    def _normalize_tool_calls(self, reply: AIMessage, step: int) -> AIMessage:
+        """Make every malformed call a pairable call the tools node answers with an error.
+
+        The model gets one bounded feedback instead of an unrecoverable Run failure; the
+        marker rides in ``additional_kwargs`` so it survives checkpoint serialization.
+        A new message is returned so a scripted model that reuses one object is untouched.
+        A batch with a missing or duplicate call ID is treated as a whole: no call from it
+        executes, because pairing the results would be ambiguous.
+        """
+        calls = list(reply.tool_calls)
+        invalid = list(reply.invalid_tool_calls)
+        ids = [call.get("id") for call in calls]
+        ambiguous = any(not call_id for call_id in ids) or len(set(ids)) != len(ids)
+        invalid_map: dict[str, dict] = {}
+        normalized: list[dict] = []
+
+        def synthetic_id(index: int) -> str:
+            call_id = f"invalid-{step}-{index}"
+            while call_id in invalid_map:
+                call_id = f"{call_id}x"
+            return call_id
+
+        for index, call in enumerate(calls):
+            if not ambiguous:
+                normalized.append(call)
+                continue
+            call_id = synthetic_id(index)
+            invalid_map[call_id] = {
+                "name": call.get("name"),
+                "message": "工具调用 ID 缺失或重复，本批工具未执行。",
+            }
+            normalized.append(
+                {"name": call.get("name") or "unknown_tool", "args": {}, "id": call_id, "type": "tool_call"}
+            )
+        for index, call in enumerate(invalid):
+            call_id = call.get("id")
+            taken = {call.get("id") for call in normalized if call.get("id")}
+            if not isinstance(call_id, str) or not call_id or call_id in taken or call_id in invalid_map:
+                call_id = synthetic_id(len(normalized) + index)
+            invalid_map[call_id] = {
+                "name": call.get("name"),
+                "message": call.get("error") or "模型返回了不完整的工具参数，本步未执行工具。",
+            }
+            normalized.append(
+                {"name": call.get("name") or "unknown_tool", "args": {}, "id": call_id, "type": "tool_call"}
+            )
+        kwargs = {key: value for key, value in reply.additional_kwargs.items() if key != "invalidToolCalls"}
+        if invalid_map:
+            kwargs["invalidToolCalls"] = invalid_map
+        return reply.model_copy(
+            update={"tool_calls": normalized, "invalid_tool_calls": [], "additional_kwargs": kwargs}
+        )
+
+    def _successful_write(self, messages: list[BaseMessage]) -> bool:
+        """Did the *current* request already commit a write effect worth reporting?"""
+        start = 0
+        for index, message in enumerate(messages):
+            if isinstance(message, HumanMessage):
+                start = index
+        writes = self.tools.write_names
+        for message in messages[start:]:
+            if not isinstance(message, ToolMessage) or message.name not in writes:
+                continue
+            payload = result_payload(message)
+            if payload is not None and payload.get("ok") is True:
+                return True
+        return False
+
+    def _closing_turn_available(self, state: dict, policy: "RunPolicy") -> tuple[bool, str | None]:
+        """Whether this execution may spend its one extra tool-free closing call."""
+        if not policy.closing_turn or state.get("closing_turn_used"):
+            return False, None
+        if state["model_steps"] >= policy.max_steps:
+            reason = "STEP_LIMIT"
+        elif state["tool_calls"] >= policy.max_tool_calls:
+            reason = "TOOL_LIMIT"
+        else:
+            return False, None
+        if not self._successful_write(state["messages"]):
+            return False, None
+        return True, reason
+
+    @staticmethod
+    def _artifact_ids(messages: list[BaseMessage]) -> list[str]:
+        ids: list[str] = []
+        for message in messages:
+            if not isinstance(message, ToolMessage) or message.name != "artifact_save":
+                continue
+            payload = result_payload(message)
+            data = payload.get("data") if payload else None
+            if isinstance(data, dict) and isinstance(data.get("artifactId"), str):
+                if data["artifactId"] not in ids:
+                    ids.append(data["artifactId"])
+        return ids
+
+    def _closing_answer(self, answer: str, messages: list[BaseMessage]) -> str:
+        """Guarantee the user sees the IDs the model may have omitted."""
+        missing = [artifact_id for artifact_id in self._artifact_ids(messages) if artifact_id not in answer]
+        if not missing:
+            return answer
+        return f"{answer.rstrip()}\n\n已完成产物：{'、'.join(missing)}"
+
     async def _summarize(self, dropped: list[BaseMessage], record: dict) -> str | None:
         """Reuse a cached digest of ``dropped`` else ask the summarizer exactly once.
 
@@ -475,6 +592,10 @@ class AgentRunner:
             draft["sessions"][session_id]["latestRunId"] = record["id"]
             return record, True
 
+        if not execution_control(store).lock.locked():
+            # A failed final write can leave an unowned `running` record behind. Close it
+            # before the busy check, so one lost commit cannot block every later request.
+            repair_stale_runs(store)
         record, created = store.transaction(begin)
         if not created:
             return record
@@ -553,6 +674,8 @@ class AgentRunner:
                 record.update(status="running", errorCode=None, answer="", updatedAt=now())
             return record, True
 
+        if not execution_control(self.store).lock.locked():
+            repair_stale_runs(self.store)
         record, claimed = self.store.transaction(claim)
         return (
             await self._execute(record, resume=True, cancelled=cancelled, shutdown=shutdown)
@@ -649,7 +772,12 @@ class AgentRunner:
         store, model, tools = self.store, self.model, self.tools
         session_id = record["sessionId"]
         limits = record["policy"]
-        policy = RunPolicy(limits["maxSteps"], limits["maxToolCalls"], limits["timeoutSeconds"])
+        policy = RunPolicy(
+            limits["maxSteps"],
+            limits["maxToolCalls"],
+            limits["timeoutSeconds"],
+            closing_turn=self.policy.closing_turn,
+        )
         context = self.context.for_version(record.get("contextVersion", 1))
         durable_waits = record.get("executionVersion") in WAIT_EXECUTION_VERSIONS
         journal = RunJournal(store, record["id"], active=not (resume and durable_waits))
@@ -692,6 +820,7 @@ class AgentRunner:
             "dropped_messages": 0,
             "error_code": None,
             "answer": "",
+            "closing_turn_used": False,
         }
         if durable_waits:
             initial["wait_deliveries"] = {}
@@ -799,9 +928,10 @@ class AgentRunner:
                     # attempt. Commit delivery evidence before spending that attempt.
                     waits.synchronize(await compiled.aget_state(config), record["id"])
                 check_active(cancelled, deadline)
-                if next_state["model_steps"] >= policy.max_steps:
+                closing, close_reason = self._closing_turn_available(next_state, policy)
+                if not closing and next_state["model_steps"] >= policy.max_steps:
                     raise AppError("STEP_LIMIT", "已达到模型步数上限，保留已完成产物。")
-                specs = tools.specs()
+                specs = [] if closing else tools.specs()
                 budget = {
                     "modelCallsRemaining": policy.max_steps - next_state["model_steps"],
                     "toolCallsRemaining": policy.max_tool_calls - next_state["tool_calls"],
@@ -869,11 +999,19 @@ class AgentRunner:
                     if summary:
                         report = build_context(summary)
                 specs = report.tools
+                if closing:
+                    # A tool-free follow-up is appended as data-bearing user text: the
+                    # provider contract accepts it and it never enters the run history.
+                    report = replace(
+                        report,
+                        messages=[*report.messages, HumanMessage(content=CLOSING_TURN_INSTRUCTION)],
+                    )
                 if (
                     self.read_only
                     and self.answer_cache
                     and not tools.identities
                     and not tools.bypass_answer_cache
+                    and not closing
                     and getattr(model, "cache_config", None)
                 ):
                     snapshot = store.snapshot()
@@ -936,14 +1074,20 @@ class AgentRunner:
                     raise
                 if not isinstance(reply, AIMessage):
                     raise AppError("INVALID_RESPONSE", "模型返回了不支持的消息。")
+                if closing:
+                    closing_text = text_content(reply)
+                    if not closing_text.strip():
+                        raise AppError(
+                            close_reason or "STEP_LIMIT",
+                            "预算已用尽且模型未给出收尾说明，保留已完成产物。",
+                        )
+                    # The model sees no tools, but a gateway may still emit calls. Keep
+                    # only the text so the closing turn can never start new work.
+                    reply = reply.model_copy(
+                        update={"tool_calls": [], "invalid_tool_calls": [], "content": closing_text}
+                    )
+                reply = self._normalize_tool_calls(reply, next_state["model_steps"])
                 calls = reply.tool_calls
-                ids = [call.get("id") for call in calls]
-                if (
-                    reply.invalid_tool_calls
-                    or any(not call_id for call_id in ids)
-                    or len(set(ids)) != len(ids)
-                ):
-                    raise AppError("INVALID_TOOL_CALL", "模型返回了无法配对的工具调用，本步未执行工具。")
                 next_state = journal.stats({**next_state, "messages": [*state["messages"], reply]})
                 if not calls:
                     answer = text_content(reply)
@@ -955,14 +1099,29 @@ class AgentRunner:
                             "QUALITY_UNRESOLVED",
                             "项目记忆或文本产物仍未通过校验，本次任务未完成；已保存的版本仍保留。",
                         )
+                    if closing:
+                        answer = self._closing_answer(answer, state["messages"])
+                        next_state["closing_turn_used"] = True
+                        self.emit(
+                            {
+                                "type": "run.closing_turn",
+                                "runId": record["id"],
+                                "step": attempt_step,
+                                "reason": close_reason,
+                            }
+                        )
                     next_state.update(status="completed", answer=answer)
                     if cache_key:
-                        # Only successful final text is reusable; tool responses are never cached.
-                        record_cache(
-                            await bounded_call(
-                                lambda: self.answer_cache.put(cache_key, reply), cancelled, deadline
-                            )
-                        )
+                        # The answer is already final: a user stop or an expired deadline
+                        # while writing the cache must not turn it into a cancellation or
+                        # a timeout. The cache call has its own short timeout and its own
+                        # "error"/"skipped" statuses.
+                        try:
+                            cache_status = await self.answer_cache.put(cache_key, reply)
+                        except asyncio.CancelledError:
+                            record_cache("cancelled")
+                            raise
+                        record_cache(cache_status)
             except asyncio.CancelledError:
                 finish_attempt(AppError("CANCELLED", "执行已停止，保留已完成产物。"))
                 self.emit({"type": "assistant.discarded", "runId": record["id"], "step": attempt_step})
@@ -1029,7 +1188,16 @@ class AgentRunner:
                     if tools.requires_context(call["name"])
                     else None
                 )
+                malformed = None
                 try:
+                    malformed = (state["messages"][-1].additional_kwargs.get("invalidToolCalls") or {}).get(
+                        call["id"]
+                    )
+                    if malformed:
+                        raise AppError(
+                            "INVALID_TOOL_CALL",
+                            malformed.get("message") or "模型返回了无法执行的工具调用，本步未执行工具。",
+                        )
                     if over_budget:
                         raise AppError("TOOL_LIMIT", "已达到工具调用上限，本批工具未执行。")
                     check_active(cancelled, deadline)
@@ -1069,7 +1237,18 @@ class AgentRunner:
                     next_state = journal.stats(next_state)
                 except Exception as error:
                     safe = public_error(error)
-                    next_state = finish_error(next_state, safe)
+                    # A tool budget stop after a successful write is not a failed Run:
+                    # the model node turns it into the one guaranteed closing turn.
+                    closable = (
+                        safe.code == "TOOL_LIMIT"
+                        and self.policy.closing_turn
+                        and not state.get("closing_turn_used")
+                        and self._successful_write(state["messages"])
+                    )
+                    # A malformed call is a normal tool result: the model gets one
+                    # feedback and the Run continues.
+                    if malformed is None and not closable:
+                        next_state = finish_error(next_state, safe)
                     result = failure(safe.code, str(safe))
                 if isinstance(result, DeferredToolResult):
                     # A marker is neither a completed ToolMessage nor JSON data.
@@ -1240,13 +1419,20 @@ class AgentRunner:
             ):
                 raise AppError("WAIT_CONTEXT_INVALID", "检查点没有可恢复的原工具或后续模型节点。")
 
-        def validate_auto_budget():
+        def validate_auto_budget(closing_used: bool = False):
             current = journal.record
             if current["activeSeconds"] >= policy.timeout_seconds:
                 raise AppError("TIMEOUT", "原 Run 的活动时间预算已耗尽，不能自动继续。")
-            if current["modelSteps"] >= policy.max_steps:
+            closing = (
+                self.policy.closing_turn
+                and not closing_used
+                and self._successful_write(messages_from_dict(current["messages"]))
+            )
+            if current["modelSteps"] > policy.max_steps:
                 raise AppError("STEP_LIMIT", "原 Run 的模型步数预算已耗尽，不能自动继续。")
-            if current["toolCalls"] > policy.max_tool_calls:
+            if current["modelSteps"] == policy.max_steps and not closing:
+                raise AppError("STEP_LIMIT", "原 Run 的模型步数预算已耗尽，不能自动继续。")
+            if current["toolCalls"] > policy.max_tool_calls and not closing:
                 raise AppError("TOOL_LIMIT", "原 Run 的工具预算已耗尽，不能自动继续。")
 
         def preserve_shutdown_wait() -> bool:
@@ -1302,7 +1488,7 @@ class AgentRunner:
                             if binding.status not in {"ready", "claimed"}:
                                 return suspend(snapshot)
                             if automatic:
-                                validate_auto_budget()
+                                validate_auto_budget(bool(snapshot.values.get("closing_turn_used", False)))
                             # Recheck pointer against persistence before writing a
                             # Command; callers cannot supply arbitrary tool results.
                             binding.confirmed_result(binding.resume_token())
@@ -1316,7 +1502,7 @@ class AgentRunner:
                             )
                         else:
                             if automatic:
-                                validate_auto_budget()
+                                validate_auto_budget(bool(snapshot.values.get("closing_turn_used", False)))
                             journal.update(status="running", errorCode=None, answer="", waitResumeError=None)
                         journal.restart()
                         deadline = journal.started + (policy.timeout_seconds - journal.previous_seconds)

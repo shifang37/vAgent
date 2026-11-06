@@ -313,6 +313,13 @@ class ToolRegistry:
         return registry
 
     @property
+    def write_names(self) -> frozenset[str]:
+        """Tool names that change durable state, for closing-turn progress checks."""
+        return frozenset(
+            definition.name for definition in self._definitions.values() if definition.effect == "write"
+        )
+
+    @property
     def identities(self) -> dict[str, str]:
         return {d.name: d.identity for d in self._definitions.values() if d.identity}
 

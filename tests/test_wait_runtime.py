@@ -426,6 +426,20 @@ async def test_stop_during_delivery_reuses_stable_result_on_explicit_resume(stor
     assert outcomes(final)["await-0"]["data"]["jobId"] == binding.resource.id
 
 
+async def test_external_result_at_the_last_step_still_gets_a_closing_turn(store, video_clock):
+    harness = Harness(store, video_clock, policy=RunPolicy(max_steps=1, closing_turn=True))
+    first = await harness.begin()
+    assert first["status"] == "waiting_external" and first["modelSteps"] == 1
+    await harness.complete_jobs()
+    final = await harness.coordinator.run_once()
+    assert final["status"] == "completed", final
+    assert final["errorCode"] is None
+    assert final["modelSteps"] == 2 and final["toolCalls"] == 3
+    assert harness.model.calls == 2
+    artifact_id = next(iter(store.snapshot()["artifacts"]))
+    assert artifact_id in final["answer"]
+
+
 async def test_rewaiting_after_timeout_is_a_new_call_with_cumulative_budget(store, video_clock):
     harness = Harness(store, video_clock, policy=RunPolicy(max_steps=3, max_tool_calls=2))
     job_id = harness.job()
@@ -745,6 +759,115 @@ async def test_application_exit_during_preparation_reconstructs_interrupt(tmp_pa
         service.wait_coordinator.notify()
         final = await wait_for_status(service, first["id"], "completed")
         assert final["modelSteps"] == 2 and final["toolCalls"] == 1 and model.calls == 1
+
+
+def force_interrupted_after_model_start(store, run_id):
+    """Reproduce a crash after the resumed model attempt started.
+
+    The wait boundary is one model step, so a persisted ``modelSteps`` of two makes
+    the recovery check answer ``EXPLICIT_RESUME_REQUIRED`` exactly like a hard exit
+    between the model attempt and its commit.
+    """
+    store.transaction(lambda draft: draft["runs"][run_id].update(status="interrupted", modelSteps=2))
+
+
+def waiting_model(harness, job_id, *, text, prefix):
+    def respond(messages, step):
+        if step == 0:
+            return AIMessage(
+                content="",
+                tool_calls=[
+                    save_call(f"{prefix}-save"),
+                    {"id": f"{prefix}-await", "name": "await_job", "args": {"jobIds": [job_id]}},
+                ],
+            )
+        assert_complete_protocol(messages)
+        return AIMessage(content=text)
+
+    harness.model = ScriptedModel(respond)
+
+
+def job_for(harness, project, run_id):
+    context = video_run(harness.store, run_id, project_id=project)
+    return harness.jobs.generate(video_request(harness.adapter), context=context)["data"]["jobId"]
+
+
+async def test_blocked_run_does_not_starve_a_later_run_in_another_session(store, video_clock):
+    harness = Harness(store, video_clock)
+    blocked = await harness.begin()
+    await harness.complete_jobs()
+    force_interrupted_after_model_start(store, blocked["id"])
+
+    job = job_for(harness, "session-b", "job-b")
+    waiting_model(harness, job, text="B 完成", prefix="b")
+    second = await harness.runner().run("session-b", "B 的任务")
+    assert second["status"] == "waiting_external"
+    await harness.complete_jobs()
+
+    for _ in range(4):
+        await harness.coordinator.run_once()
+        if store.snapshot()["runs"][second["id"]]["status"] == "completed":
+            break
+    state = store.snapshot()
+    assert state["runs"][blocked["id"]]["status"] == "interrupted"
+    assert state["runs"][blocked["id"]]["waitResumeError"]["code"] == "EXPLICIT_RESUME_REQUIRED"
+    assert state["runs"][second["id"]]["status"] == "completed", state["runs"][second["id"]]
+    assert harness.model.calls == 2
+
+
+async def test_superseded_run_is_closed_and_the_newer_run_resumes(store, video_clock):
+    harness = Harness(store, video_clock)
+    old = await harness.begin()
+    await harness.complete_jobs()
+    force_interrupted_after_model_start(store, old["id"])
+
+    job = job_for(harness, "coffee", "job-newer")
+    waiting_model(harness, job, text="新请求完成", prefix="b")
+    newer = await harness.runner().run("coffee", "新的请求", request_id="newer")
+    assert newer["status"] == "waiting_external"
+    await harness.complete_jobs()
+
+    for _ in range(4):
+        await harness.coordinator.run_once()
+        if store.snapshot()["runs"][newer["id"]]["status"] == "completed":
+            break
+    state = store.snapshot()
+    superseded = state["runs"][old["id"]]
+    assert superseded["status"] == "cancelled"
+    assert superseded["errorCode"] == "STALE_RUN" and superseded["resumable"] is False
+    assert state["runs"][newer["id"]]["status"] == "completed", state["runs"][newer["id"]]
+    assert all(
+        raw["status"] == "stopped" and not raw["autoResume"]
+        for raw in state["waits"].values()
+        if raw["context"]["runId"] == old["id"]
+    )
+
+
+async def test_transient_blocker_waits_for_its_backoff_window(store, video_clock):
+    class Ticks:
+        value = 0.0
+
+        def __call__(self):
+            return self.value
+
+    ticks = Ticks()
+    harness = Harness(store, video_clock)
+    await harness.begin()
+    await harness.complete_jobs()
+    harness.coordinator.monotonic = ticks
+    attempts = []
+
+    def missing(_):
+        attempts.append(1)
+        raise AppError("KEY_MISSING", "原模型配置不可用。")
+
+    harness.coordinator.runner_factory = missing
+    blocked = await harness.coordinator.run_once()
+    assert blocked["waitResumeError"]["code"] == "KEY_MISSING" and len(attempts) == 1
+    assert await harness.coordinator.run_once() is None and len(attempts) == 1
+    ticks.value = 1.5
+    retried = await harness.coordinator.run_once()
+    assert retried["waitResumeError"]["code"] == "KEY_MISSING" and len(attempts) == 2
 
 
 def agent_runner(**kwargs):

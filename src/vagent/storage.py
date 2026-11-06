@@ -1,10 +1,12 @@
 """Atomic, single-writer JSON storage; domain writes and operation results commit together."""
 
 import copy
+import errno
 import hashlib
 import json
 import os
 import threading
+import time
 from collections.abc import Callable
 from contextlib import contextmanager
 from datetime import UTC, datetime
@@ -18,6 +20,7 @@ from pydantic.alias_generators import to_camel
 
 from vagent.config import assert_id
 from vagent.errors import AppError, failure
+from vagent.submission_log import SubmissionLog
 from vagent.video.audio import AudioAsset, AudioMedia, validate_audio_changes
 from vagent.video.batches import recover_interrupted_batches, validate_batch_changes
 from vagent.video.contracts import Job, MediaAsset, StoredJob
@@ -32,9 +35,42 @@ from vagent.waiting import WAIT_EXECUTION_VERSIONS, StoredWait, WaitBinding, par
 
 T = TypeVar("T")
 
+# Windows indexers, antivirus scanners and editors hold short-lived handles on
+# state.json. A replace that loses that race is retried for well under a second
+# instead of turning one transient lock into a failed paid operation.
+WRITE_ATTEMPTS = 6
+WRITE_RETRY_BASE_SECONDS = 0.02
+WRITE_RETRY_MAX_SECONDS = 0.32
+_TRANSIENT_WINERRORS = frozenset({5, 32, 33})
+_TRANSIENT_ERRNOS = frozenset({errno.EACCES, errno.EPERM, errno.EBUSY})
+
 
 def now() -> str:
     return datetime.now(UTC).isoformat()
+
+
+def _transient_lock_error(error: OSError) -> bool:
+    if getattr(error, "winerror", None) in _TRANSIENT_WINERRORS:
+        return True
+    return error.errno in _TRANSIENT_ERRNOS
+
+
+def _retry_transient(operation: Callable[[], T], *, attempts: int = WRITE_ATTEMPTS) -> T:
+    delay = WRITE_RETRY_BASE_SECONDS
+    for attempt in range(1, attempts + 1):
+        try:
+            return operation()
+        except OSError as error:
+            if not _transient_lock_error(error) or attempt == attempts:
+                raise
+            time.sleep(delay)
+            delay = min(WRITE_RETRY_MAX_SECONDS, delay * 2)
+    raise AssertionError("unreachable")
+
+
+def read_bytes_with_retry(path: Path) -> bytes:
+    """Read a store file through the same transient-lock window as a write."""
+    return _retry_transient(path.read_bytes)
 
 
 def atomic_write_bytes(path: Path, content: bytes) -> None:
@@ -45,7 +81,14 @@ def atomic_write_bytes(path: Path, content: bytes) -> None:
             handle.write(content)
             handle.flush()
             os.fsync(handle.fileno())
-        os.replace(temporary, path)
+        try:
+            _retry_transient(lambda: os.replace(temporary, path))
+        except OSError as error:
+            if not _transient_lock_error(error):
+                raise
+            raise AppError(
+                "STORAGE_BUSY", "本地状态文件被占用，写入未完成；已保留原文件，请稍后重试。"
+            ) from error
     finally:
         temporary.unlink(missing_ok=True)
 
@@ -301,6 +344,35 @@ def migrated_state(state: dict) -> dict:
     return upgraded
 
 
+def repair_stale_runs(store: "FileStore") -> list[str]:
+    """Close persisted ``running`` Runs that no live execution owns.
+
+    A failed final write can leave a Run marked ``running`` while its execution lock is
+    already free, which would answer every later start with ``RUN_BUSY`` and, for older
+    execution versions without a wait coordinator, could not even be stopped. The
+    caller must prove the lock is free first (an active execution always holds it).
+    """
+    if not any(run["status"] == "running" for run in store.snapshot()["runs"].values()):
+        return []
+
+    def repair(draft):
+        repaired = []
+        for run in draft["runs"].values():
+            if run["status"] != "running":
+                continue
+            run.update(status="interrupted", updatedAt=now())
+            # The lost attempt's elapsed time is unknown; charge its reservation once.
+            run["activeSeconds"] = run.get("activeSeconds", 0) + run.get("inFlightSeconds", 0)
+            run["inFlightSeconds"] = 0
+            for call in run.get("modelCalls", []):
+                if call["status"] == "started":
+                    call.update(status="interrupted", errorCode="INTERRUPTED")
+            repaired.append(run["id"])
+        return repaired
+
+    return store.transaction(repair)
+
+
 class FileStore:
     def __init__(self, home: Path, state: dict):
         self.home = home
@@ -323,7 +395,7 @@ class FileStore:
             with handle:
                 json.dump({"pid": os.getpid(), "createdAt": now()}, handle)
             try:
-                raw = (home / "state.json").read_bytes()
+                raw = read_bytes_with_retry(home / "state.json")
             except FileNotFoundError:
                 state = {
                     "schemaVersion": 9,
@@ -411,6 +483,8 @@ class FileStore:
                     # no fingerprints/default fields or SQLite checkpoints are rewritten.
                     atomic_write_json(home / "state.json", state)
             store = cls(home, state)
+            submission_log = SubmissionLog(home)
+            handles = submission_log.handles()
 
             def recover(draft: dict) -> None:
                 from vagent.video.jobs import recover_interrupted_jobs
@@ -470,10 +544,11 @@ class FileStore:
                                     run["externalWaitStartedAt"] = (
                                         run.get("externalWaitStartedAt") or binding.started_at
                                     )
-                recover_interrupted_jobs(draft, now())
+                recover_interrupted_jobs(draft, now(), handles=handles)
                 recover_interrupted_batches(draft, now())
 
             store.transaction(recover)
+            submission_log.compact(store.snapshot())
             from vagent.video.films import cleanup_stale_parts
 
             cleanup_stale_parts(store.home, store.snapshot())

@@ -36,6 +36,59 @@ class StreamResponseError(AppError):
         self.usage = extract_usage(reply)
 
 
+def _last_finish_reason(chunks) -> str | None:
+    """Gateways may repeat the final chunk; ``add_ai_message_chunks`` would join the
+    strings into ``"stopstop"``. The last non-empty value is the actual reason."""
+    reason = None
+    for chunk in chunks:
+        value = chunk.response_metadata.get("finish_reason")
+        if isinstance(value, str) and value:
+            reason = value
+    return reason
+
+
+def _merge_tool_call_chunks(chunks) -> list[dict]:
+    """Merge per-index deltas, taking the last non-empty name/id instead of joining them."""
+    slots: dict[object, dict] = {}
+    for chunk in chunks:
+        for part in chunk.tool_call_chunks:
+            index = part.get("index")
+            key = index if index is not None else part.get("id") or 0
+            slot = slots.setdefault(key, {"name": None, "id": None, "args": ""})
+            if part.get("name"):
+                slot["name"] = part["name"]
+            if part.get("id"):
+                slot["id"] = part["id"]
+            args = part.get("args")
+            if isinstance(args, str):
+                slot["args"] += args
+    return list(slots.values())
+
+
+def _decode_tool_calls(chunks) -> tuple[list[dict], list[dict]]:
+    """Complete calls and malformed ones; a malformed call is fed back, never executed."""
+    calls: list[dict] = []
+    invalid: list[dict] = []
+    for part in _merge_tool_call_chunks(chunks):
+        name, call_id = part["name"], part["id"]
+        try:
+            args = json.loads(part["args"])
+            if not isinstance(args, dict) or not name or not call_id:
+                raise ValueError
+        except (ValueError, TypeError):
+            invalid.append(
+                {
+                    "name": name or "",
+                    "args": part["args"][:200],
+                    "id": call_id,
+                    "error": "工具参数不是完整的 JSON 对象",
+                }
+            )
+            continue
+        calls.append({"name": name, "args": args, "id": call_id, "type": "tool_call"})
+    return calls, invalid
+
+
 class AgentModel(Protocol):
     name: str
 
@@ -97,7 +150,8 @@ class DeepSeekModel:
         reply = message_chunk_to_message(combined)
         reply.usage_metadata = usage_metadata
         reply.response_metadata["token_usage"] = raw_usage
-        reason = reply.response_metadata.get("finish_reason")
+        reason = _last_finish_reason(chunks)
+        reply.response_metadata["finish_reason"] = reason
         if not reason:
             raise StreamResponseError(
                 "STREAM_INTERRUPTED", "回复流中断，草稿未保存，可在剩余预算内继续。", reply
@@ -107,21 +161,27 @@ class DeepSeekModel:
                 "RESPONSE_TRUNCATED", "模型回复被截断，本步未保存回复或执行工具。", reply
             )
         # LangChain deliberately repairs partial JSON while aggregating chunks.
-        # Tool execution needs strictly complete JSON, so decode the raw arguments again.
-        calls = []
-        try:
-            for call in combined.tool_call_chunks:
-                args = json.loads(call["args"])
-                if not isinstance(args, dict) or not call.get("name") or not call.get("id"):
-                    raise ValueError
-                calls.append({"name": call["name"], "args": args, "id": call["id"], "type": "tool_call"})
-            if (reason == "tool_calls") != bool(calls):
-                raise ValueError
-        except (ValueError, TypeError, KeyError):
-            raise StreamResponseError(
-                "INVALID_TOOL_CALL", "模型返回了不完整的工具参数，本步未执行工具。", reply
-            ) from None
+        # Tool execution needs strictly complete JSON, so decode the merged raw
+        # arguments again, with names/ids taken once from the repeated deltas.
+        calls, invalid = _decode_tool_calls(chunks)
+        if reason == "stop" and (calls or invalid):
+            # A stop with tool calls is a provider contract violation; feed every call
+            # back as malformed instead of executing it.
+            invalid = [
+                *invalid,
+                *[
+                    {
+                        "name": call["name"],
+                        "args": call["args"],
+                        "id": call["id"],
+                        "error": "stop 同时携带工具调用",
+                    }
+                    for call in calls
+                ],
+            ]
+            calls = []
         reply.tool_calls = calls
+        reply.invalid_tool_calls = invalid
         return reply
 
 

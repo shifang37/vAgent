@@ -171,10 +171,11 @@ async def test_rejected_tool_response_still_records_reported_usage(store):
     message = reply()
     message.tool_calls = [{"id": None, "name": "project_read", "args": {}}]
     result = await runner(store, lambda *_: message).run("coffee", "test")
-    assert result["errorCode"] == "INVALID_TOOL_CALL" and result["toolCalls"] == 0
-    assert result["inputTokens"] == 100
-    assert result["modelCalls"][0]["status"] == "responded"
-    assert summarize_usage(result)["cacheHitTokens"] == 60
+    # The first malformed call is fed back; the second identical one stops the Run.
+    assert result["errorCode"] == "SCHEMA_FEEDBACK_LIMIT" and result["toolCalls"] == 0
+    assert result["inputTokens"] == 200
+    assert [call["status"] for call in result["modelCalls"]] == ["responded", "responded"]
+    assert summarize_usage(result)["cacheHitTokens"] == 120
 
 
 async def test_failure_and_resume_add_one_call_without_recounting_cached_tokens(store):

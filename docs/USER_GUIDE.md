@@ -143,6 +143,8 @@ $env:VAGENT_VIDEO_MODE = 'mock'
 
 用户停止会先持久关闭自动继续，并补齐可见的终止工具结果；Job 继续独立跟踪。正常退出保留等待意图，重启只自动继续有效等待。结果之后已经开始过模型尝试的中断要求显式 `resume`；缺少原配置、检查点或预算时保留结果，原因记录在 `waitResumeError`。
 
+预算耗尽（模型步数或工具额度）且本次请求已成功写入产物时，Run 会额外执行一次**不带工具**的收尾调用，用来说明已完成/未完成部分并给出 `artifactId`；总数最多 `maxSteps+1`，只触发一次，恢复后不重复。该行为默认开启，可用 `VAGENT_CLOSING_TURN=off` 关闭；只读步骤不触发收尾轮，仍按原错误码结束。每次收尾调用照常计入用量与成本。
+
 `ApplicationService` 统一管理 JobWorker、媒体 Worker 和等待协调器。`run/chat/resume` 等待原 Run 完成，图挂起期间 Worker 仍独立推进；`chat` 输入不会阻塞 Worker，也不留下阻止 Windows 退出的输入线程。缺少恢复配置时显示原因并保存结果。旧 B2 execution v1 仍按 `EXTERNAL_WAIT_UNAVAILABLE` 结束未完成等待，其 preparing 记录不会被后台唤醒。
 
 以下 Job 命令不需要 DeepSeek Key：

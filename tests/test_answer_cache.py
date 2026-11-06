@@ -13,7 +13,7 @@ from langchain_core.messages import AIMessage, HumanMessage
 from vagent.cache import AnswerCache
 from vagent.config import load_config
 from vagent.errors import AppError
-from vagent.runner import AgentRunner
+from vagent.runner import AgentRunner, RunPolicy
 from vagent.storage import FileStore
 from vagent.tools import create_project_tools
 from vagent.usage import summarize_usage
@@ -168,6 +168,35 @@ async def test_corrupt_entries_fall_back(store, raw):
     result = await runner.run("test", "hi")
     assert result["status"] == "completed" and runner.model.calls == 1
     assert result["answerCache"]["invalid"] == 1
+
+
+async def test_a_user_stop_during_the_cache_write_keeps_the_answer(store):
+    cancelled = asyncio.Event()
+
+    class StopsDuringWrite(MemoryRedis):
+        async def set(self, key, value, *, ex):
+            cancelled.set()
+            return await super().set(key, value, ex=ex)
+
+    backend = StopsDuringWrite()
+    result = await make_runner(store, AnswerCache(backend)).run("test", "解释镜头", cancelled=cancelled)
+    assert result["status"] == "completed"
+    assert result["answer"] == "只读回答"
+    assert result["answerCache"] == {"miss": 1, "stored": 1}
+    assert backend.values
+
+
+async def test_a_deadline_during_the_cache_write_keeps_the_answer(store):
+    class SlowWrite(MemoryRedis):
+        async def set(self, key, value, *, ex):
+            await asyncio.sleep(1.0)
+            return await super().set(key, value, ex=ex)
+
+    result = await make_runner(
+        store, AnswerCache(SlowWrite(), timeout=2.0), policy=RunPolicy(timeout_seconds=0.5)
+    ).run("test", "解释镜头")
+    assert result["status"] == "completed"
+    assert result["answer"] == "只读回答"
 
 
 async def test_timeout_and_write_failure_do_not_fail_run(store):

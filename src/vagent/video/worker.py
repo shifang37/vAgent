@@ -9,6 +9,7 @@ from uuid import uuid4
 from weakref import WeakKeyDictionary
 
 from vagent.errors import AppError
+from vagent.submission_log import SubmissionLog
 from vagent.video.contracts import (
     SOURCE_POLICY_VERSION,
     DownloadRecord,
@@ -45,6 +46,8 @@ class JobWorker:
             raise ValueError("Worker idle interval must be finite and positive")
         self.service = service
         self.idle_interval_seconds = idle_interval_seconds
+        # The handle WAL is the redundancy path for a failed state.json commit.
+        self.submission_log = SubmissionLog(service.store.home)
         # Multiple owners must still share the one serial Worker boundary for
         # this Store, including when lifecycle code replaces a Worker instance.
         self._turn_lock = self._store_locks.setdefault(service.store, asyncio.Lock())
@@ -274,6 +277,18 @@ class JobWorker:
         job = self.service.update(job, status="submitting", submitAttempts=1, **extra)
         live = isinstance(job, LiveJob)
         if live:
+            # Record the intent before the paid call. If even the small WAL cannot be
+            # written, do not spend money on a submission nobody can reconcile.
+            if not self.submission_log.append_intent(job.id, job.request.provider, job.operation_key):
+                return self._submit_error(
+                    job,
+                    JobError(
+                        stage="submit",
+                        code="SUBMISSION_INTENT_UNRECORDED",
+                        message="无法在提交前记录任务意图，未向上游发起请求。",
+                    ),
+                    rejected=True,
+                )
             # The interval is measured from the moment this one request starts; a
             # crash after this point can only make the next submit wait a little.
             self.gate.record_submit(job.request.provider)
@@ -327,6 +342,9 @@ class JobWorker:
         if isinstance(job, LiveJob):
             # Once committed, even a crash while interpreting the optional snapshot
             # can only query this ID. Never turn it back into an unconfirmed submit.
+            # The handle goes to its own fsync'd WAL first, so a locked state.json
+            # cannot turn a paid task into SUBMISSION_UNKNOWN with no task ID.
+            self.submission_log.append_handle(job.id, job.request.provider, handle.request_id, handle.task_id)
             accepted = self.service.update(
                 job,
                 status="queued",

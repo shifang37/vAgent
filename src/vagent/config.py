@@ -97,6 +97,9 @@ class Config:
     tracing_enabled: bool = False
     trace_sample: int = 100
     trace_content: bool = False
+    # The product path enables the one extra tool-free closing call after a budget
+    # stop; direct Config/AgentRunner constructions keep today's exact call counts.
+    closing_turn: bool = False
     skills_root: Path | None = None
     redis_url: str | None = field(default=None, repr=False)
     cache_ttl: int = 3600
@@ -316,6 +319,7 @@ def load_config(env: Mapping[str, str] | None = None) -> Config:
         raise AppError("INVALID_MEMORY_LIMIT", "记忆条数上限必须是 1 到 16 的整数。")
     tracing_enabled = (env.get("VAGENT_TRACING") or "off").strip().lower() in {"1", "on", "true", "yes"}
     trace_content = (env.get("VAGENT_TRACE_CONTENT") or "off").strip().lower() in {"1", "on", "true", "yes"}
+    closing_turn = (env.get("VAGENT_CLOSING_TURN") or "on").strip().lower() in {"1", "on", "true", "yes"}
     try:
         trace_sample = int(env.get("VAGENT_TRACE_SAMPLE") or "100")
     except ValueError:
@@ -348,6 +352,7 @@ def load_config(env: Mapping[str, str] | None = None) -> Config:
         tracing_enabled=tracing_enabled,
         trace_sample=trace_sample,
         trace_content=trace_content,
+        closing_turn=closing_turn,
         redis_url=redis_url,
         cache_ttl=ttl,
         skills_root=Path(env["VAGENT_SKILLS_DIR"]).absolute() if env.get("VAGENT_SKILLS_DIR") else None,

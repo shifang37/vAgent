@@ -72,7 +72,7 @@ async def test_hard_exit_recovers_production_wait_without_repeating_model_or_sid
             assert interrupted["modelCalls"][-1]["status"] == "interrupted"
             paused = await coordinator.run_once()
             assert paused["waitResumeError"]["code"] == "EXPLICIT_RESUME_REQUIRED"
-            assert await coordinator.run_once() is not None and model.calls == 0
+            assert await coordinator.run_once() is None and model.calls == 0
             final = await runner.resume(run_id)
         else:
             worker = JobWorker(jobs)

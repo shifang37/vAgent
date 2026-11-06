@@ -47,7 +47,7 @@ from vagent.video.tools import register_video_tools, resolve_job_wait, resolve_j
 from vagent.video.usage import summarize_records
 from vagent.video.views import current_storyboard_view, job_view, storyboard_summaries, storyboard_view
 from vagent.video.worker import JobWorker
-from vagent.wait_runtime import WaitCoordinator, execution_control
+from vagent.wait_runtime import WaitCoordinator, WaitService, execution_control
 from vagent.waiting import WAIT_EXECUTION_VERSIONS
 
 
@@ -73,7 +73,7 @@ class ApplicationService:
         self.fal_adapter = None
         self.tool_views = {config.video_mode: tools}
         self.http_client, self.model, self.cache = http_client, model, cache
-        self.policy = policy or RunPolicy()
+        self.policy = policy or RunPolicy(closing_turn=self.config.closing_turn)
         self.mcp_status = []
         self.task = None
         self.cancelled = None
@@ -1365,5 +1365,9 @@ class ApplicationService:
         if self.active_run_id == run_id and self.task and not self.task.done():
             self.cancelled.set()
         elif record["status"] == "running":
-            raise AppError("RUN_BUSY", "该 Run 不属于当前 Web 执行进程。")
+            # A persisted `running` record with no local task is a failed final write.
+            # No execution owns it, so it can be closed instead of answering RUN_BUSY.
+            stopped = WaitService(self.store).stop_run(run_id)
+            self.notify(record["sessionId"])
+            return {"runId": run_id, "stopRequested": stopped}
         return {"runId": run_id, "stopRequested": record["status"] == "running"}
