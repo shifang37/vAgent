@@ -131,6 +131,8 @@ AgentRunner ── ContextBuilder ── RunPolicy
 
 限额由配置决定。停止时保留已完成产物并说明未完成部分；用户主动继续可以创建关联的新 Run，不能自动重置预算无限执行。
 
+> **实现状态（2026-11-04 核对）**：参数纠错上限已实现——连续两次相同 Schema 错误即停止（`SCHEMA_FEEDBACK_LIMIT`）；只读工具的「有限重试」当前不做自动重试，回退为显式恢复。逐项决策见 [H0 落差收口验收](./docs/AGENT_HARNESS_H0_ACCEPTANCE.md)。
+
 ## 5. 首批工具与真实 Agent 验收任务
 
 ### 5.1 M1-A 的内置工具
@@ -198,7 +200,7 @@ created → running → completed
              └── failed           # 错误或预算耗尽，带明确原因
 ```
 
-“继续”针对可恢复检查点；新需求或回复追问建立新 Run。用户停止后，不能因 Job 回调而自动重启被停止的 Agent。
+“继续”针对可恢复检查点；新需求或回复追问建立新 Run。用户停止后，不能因 Job 回调而自动重启被停止的 Agent。 `waiting_user` 不作为独立状态：追问即一次正常完成的 Run，其后的回答建立新 Run（见 [H0 落差收口验收](./docs/AGENT_HARNESS_H0_ACCEPTANCE.md)）。
 
 ### 7.2 工具执行记录
 
@@ -213,6 +215,8 @@ created → running → completed
 ### 7.3 事件
 
 统一输出 `run.started`、`assistant.delta`、`tool.started`、`tool.completed`、`artifact.updated`、`run.waiting`、`run.completed`、`run.failed` 等事件。M1-B 起补充 `job.updated`。
+
+> **实现状态（2026-11-04 核对）**：`run.failed` 与 `artifact.updated` 两个事件尚未发出：失败表现为 `run.completed` 且 `status:"failed"`，产物变更由快照 diff 呈现。已登记为已知落差（见 H0 落差收口验收）。
 
 事件具有递增序号、Run/Session 标识和 revision。状态先落盘，再通知客户端；Web 重连获取快照并去重。文本 delta 是临时草稿，刷新后以最终消息或中断状态为准。
 
@@ -410,3 +414,10 @@ M1-A0 必须验证：DeepSeek Key 直连、文本流、工具参数增量组装�
 - [LangGraph Python 概览](https://docs.langchain.com/oss/python/langgraph/overview)
 - [DeepSeek Harness 官方仓库](https://github.com/deepseek-ai/deepseek-harness)
 - [M1 实施计划](./M1_PLAN.md)
+
+## 11. 设计与实现落差核对（2026-11-04）
+
+对照 [H0 落差收口验收](./docs/AGENT_HARNESS_H0_ACCEPTANCE.md)：`waiting_user` 状态、运行级排队与
+`video_generate`/`shot_redo` 的 `confirm` 三项属**有意不实现**并在上文标注理由（改动会触及冻结的
+schema 或工具面）；参数纠错上限**已实现**。另登记四项本轨道新发现的落差：`run.failed`、
+`artifact.updated` 事件未发出、只读工具无自动重试、推理模式协议元数据保留未验证。

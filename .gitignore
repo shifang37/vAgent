@@ -57,3 +57,6 @@ Desktop.ini
 *.swp
 *.swo
 *~
+
+# Local planning notes: kept out of the repository
+/docs/AGENT_HARNESS_GAP_PLAN.md

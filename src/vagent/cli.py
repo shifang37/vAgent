@@ -11,7 +11,7 @@ from uuid import uuid4
 
 from dotenv import load_dotenv
 
-from vagent import __version__
+from vagent import __version__, pricing
 from vagent import headless as headless_service
 from vagent.application import ApplicationService
 from vagent.config import assert_id, load_config
@@ -679,6 +679,43 @@ def local_assets(config, store, args) -> int:
     return 1 if failed else 0
 
 
+def project_runs(store, selector: str | None) -> list[dict]:
+    """Runs of one project, or of every project when the selector is ``all``/``None``."""
+    runs = list(store.snapshot()["runs"].values())
+    if selector in {None, "all"}:
+        return runs
+    return [run for run in runs if run["sessionId"] == selector]
+
+
+def usage_payload(runs: list[dict], *, cost: bool = False) -> dict:
+    """The ``usage`` view: token accounting always, money only when explicitly asked.
+
+    ``cost`` is a read-only projection of already recorded counters: no provider call, no
+    write, no currency conversion. Without it the payload has no cost key at all, so the
+    default output stays what it was before this existed.
+    """
+    payload = {
+        "runs": [
+            {
+                "id": run["id"],
+                "sessionId": run["sessionId"],
+                "model": run["model"],
+                "status": run["status"],
+                "contextVersion": run.get("contextVersion", 1),
+                "readOnly": run.get("readOnly", False),
+                "usage": summarize_usage(run),
+                "modelCalls": run.get("modelCalls", []),
+            }
+            for run in runs
+        ]
+    }
+    if cost:
+        for row, run in zip(payload["runs"], runs, strict=True):
+            row["cost"] = pricing.estimate_run(run)
+        payload["costTotal"] = pricing.estimate_runs(runs)
+    return payload
+
+
 def local_usage(config, store, selector: str) -> dict:
     from vagent.video.providers.gate import metrics_for
 
@@ -1139,6 +1176,11 @@ def parser() -> argparse.ArgumentParser:
         metavar="PROJECT",
         help="按项目（省略取值时汇总整个数据目录）聚合 Job、估算与 Token 用量",
     )
+    usage.add_argument(
+        "--cost",
+        action="store_true",
+        help="按本地参考价目表估算文本模型费用（离线、不换汇、不调用供应商）",
+    )
     usage_actions = usage.add_subparsers(dest="action")
     bill = usage_actions.add_parser(
         "bill", help="供应商实际扣费账本：手工录入或只读查看；不调用供应商、不登记任务"
@@ -1529,7 +1571,10 @@ def main() -> None:
                 raise SystemExit(local_bill(config, store, args))
         elif args.command == "usage" and args.project is not None:
             with FileStore.open(config.home) as store:
-                print_json(local_usage(config, store, args.project))
+                result = local_usage(config, store, args.project)
+                if args.cost:
+                    result["textCost"] = pricing.estimate_runs(project_runs(store, args.project))
+                print_json(result)
         elif args.command == "route":
             with FileStore.open(config.home) as store:
                 print_json(local_route(config, store.snapshot(), args))
@@ -1544,23 +1589,7 @@ def main() -> None:
                     selected = [
                         run for run in runs.values() if run["sessionId"] == (args.session or "default")
                     ]
-                print_json(
-                    {
-                        "runs": [
-                            {
-                                "id": run["id"],
-                                "sessionId": run["sessionId"],
-                                "model": run["model"],
-                                "status": run["status"],
-                                "contextVersion": run.get("contextVersion", 1),
-                                "readOnly": run.get("readOnly", False),
-                                "usage": summarize_usage(run),
-                                "modelCalls": run.get("modelCalls", []),
-                            }
-                            for run in selected
-                        ]
-                    }
-                )
+                print_json(usage_payload(selected, cost=args.cost))
         elif args.command == "inspect":
             with FileStore.open(config.home) as store:
                 state = store.snapshot()

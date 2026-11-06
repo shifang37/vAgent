@@ -12,6 +12,8 @@ import yaml
 from pydantic import BaseModel, BeforeValidator, ConfigDict, Field, ValidationError, model_validator
 
 from vagent.errors import AppError
+from vagent.memory import DEFAULT_LIMIT as MEMORY_DEFAULT_LIMIT
+from vagent.prompts import PROMPT_VERSIONS
 from vagent.video.contracts import WAN_MODEL, WAN_REGION, Money, WorkspaceId
 
 
@@ -83,6 +85,18 @@ class Config:
     # the old 64 KiB default could not start a Run at all. 96 KiB is the budget the
     # acceptance fixtures already used since M6 E1.
     context_bytes: int = 98304
+    # Opt-in context v3 (history summary); 2 keeps every stored Run and baseline.
+    context_version: int = 2
+    prompt_version: str = "v1"
+    # Opt-in long-term memory (H2): an offline, retrievable index of confirmed facts.
+    # Off keeps the rendered context and the contextSignature byte-identical to today.
+    memory_enabled: bool = False
+    memory_limit: int = MEMORY_DEFAULT_LIMIT
+    # Opt-in tracing (H5): finished spans go to a JSONL sidecar. Off writes nothing,
+    # constructs no span and changes no behavior.
+    tracing_enabled: bool = False
+    trace_sample: int = 100
+    trace_content: bool = False
     skills_root: Path | None = None
     redis_url: str | None = field(default=None, repr=False)
     cache_ttl: int = 3600
@@ -284,6 +298,30 @@ def load_config(env: Mapping[str, str] | None = None) -> Config:
         raise AppError("INVALID_CONTEXT_BUDGET", "上下文预算必须是至少 1024 字节的整数。") from None
     if budget < 1024:
         raise AppError("INVALID_CONTEXT_BUDGET", "上下文预算必须是至少 1024 字节的整数。")
+    try:
+        context_version = int(env.get("VAGENT_CONTEXT_VERSION") or "2")
+    except ValueError:
+        raise AppError("INVALID_CONTEXT_VERSION", "上下文版本必须是 2 或 3。") from None
+    if context_version not in {2, 3}:
+        raise AppError("INVALID_CONTEXT_VERSION", "上下文版本必须是 2 或 3。")
+    prompt_version = env.get("VAGENT_PROMPT_VERSION") or "v1"
+    if prompt_version not in PROMPT_VERSIONS:
+        raise AppError("INVALID_PROMPT_VERSION", "提示词版本不受支持，请使用 v1 或 v2。")
+    memory_enabled = (env.get("VAGENT_MEMORY") or "off").strip().lower() in {"1", "on", "true", "yes"}
+    try:
+        memory_limit = int(env.get("VAGENT_MEMORY_LIMIT") or str(MEMORY_DEFAULT_LIMIT))
+    except ValueError:
+        raise AppError("INVALID_MEMORY_LIMIT", "记忆条数上限必须是 1 到 16 的整数。") from None
+    if not 1 <= memory_limit <= 16:
+        raise AppError("INVALID_MEMORY_LIMIT", "记忆条数上限必须是 1 到 16 的整数。")
+    tracing_enabled = (env.get("VAGENT_TRACING") or "off").strip().lower() in {"1", "on", "true", "yes"}
+    trace_content = (env.get("VAGENT_TRACE_CONTENT") or "off").strip().lower() in {"1", "on", "true", "yes"}
+    try:
+        trace_sample = int(env.get("VAGENT_TRACE_SAMPLE") or "100")
+    except ValueError:
+        raise AppError("INVALID_TRACE_SAMPLE", "采样百分比必须是 0 到 100 的整数。") from None
+    if not 0 <= trace_sample <= 100:
+        raise AppError("INVALID_TRACE_SAMPLE", "采样百分比必须是 0 到 100 的整数。")
     redis_url = env.get("VAGENT_REDIS_URL") or None
     try:
         ttl = int(env.get("VAGENT_CACHE_TTL") or "3600")
@@ -303,6 +341,13 @@ def load_config(env: Mapping[str, str] | None = None) -> Config:
         api_key=environment_key or local.apiKey,
         model=environment_model or local.model or "deepseek-flash",
         context_bytes=budget,
+        context_version=context_version,
+        prompt_version=prompt_version,
+        memory_enabled=memory_enabled,
+        memory_limit=memory_limit,
+        tracing_enabled=tracing_enabled,
+        trace_sample=trace_sample,
+        trace_content=trace_content,
         redis_url=redis_url,
         cache_ttl=ttl,
         skills_root=Path(env["VAGENT_SKILLS_DIR"]).absolute() if env.get("VAGENT_SKILLS_DIR") else None,

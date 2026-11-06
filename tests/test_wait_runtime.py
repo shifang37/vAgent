@@ -14,6 +14,7 @@ from vagent.errors import AppError
 from vagent.runner import AgentRunner, RunPolicy
 from vagent.storage import FileStore
 from vagent.tools import Arguments, ToolDefinition, ToolRegistry, create_project_tools
+from vagent.tracing import InMemoryExporter, Tracer
 from vagent.video.jobs import JobService
 from vagent.video.providers.mock import MockScenario, MockVideoAdapter
 from vagent.video.tools import register_video_tools, resolve_job_wait
@@ -27,8 +28,11 @@ def save_call(name):
 
 
 class Harness:
-    def __init__(self, store, clock, *, scenario=None, policy=None, on_event=None, read_only=False):
+    def __init__(
+        self, store, clock, *, scenario=None, policy=None, on_event=None, read_only=False, tracing=None
+    ):
         self.store, self.clock = store, clock
+        self.tracing = tracing
         self.adapter = MockVideoAdapter(
             store, clock=clock, scenario=scenario or MockScenario(states=["succeeded"])
         )
@@ -54,6 +58,7 @@ class Harness:
             policy=self.policy,
             on_event=self.on_event,
             read_only=self.read_only,
+            tracing=self.tracing,
             **kwargs,
         )
 
@@ -136,6 +141,36 @@ async def test_wait_releases_graph_freezes_budget_and_delivers_original_batch_on
     assert await harness.runner().resume(final["id"]) == final
     assert store.snapshot() == before and harness.model.calls == 2
     assert harness.adapter.ledger_snapshot()["submitCalls"] == 1
+
+
+async def test_tracing_records_the_wait_lifecycle(store, video_clock):
+    exporter = InMemoryExporter()
+    harness = Harness(store, video_clock, tracing=Tracer(exporter))
+    first = await harness.begin()
+    assert first["status"] == "waiting_external"
+
+    suspend = exporter.by_name("wait.suspend")
+    assert len(suspend) == 1
+    assert suspend[0]["attributes"]["waitId"] == first["activeWaitId"]
+    assert suspend[0]["parentSpanId"] == exporter.by_name("run")[0]["spanId"]
+    assert exporter.by_name("run")[0]["attributes"]["runStatus"] == "waiting_external"
+
+    video_clock.advance(90)
+    await harness.complete_jobs()
+    final = await harness.coordinator.run_once()
+    assert final["status"] == "completed"
+
+    external = exporter.by_name("wait.external")
+    assert len(external) == 1
+    assert external[0]["attributes"]["resumed"] == "automatic"
+    assert external[0]["attributes"]["waitId"] == first["activeWaitId"]
+    # The retroactive span carries the real elapsed wait, not a process-local guess.
+    assert external[0]["attributes"]["waitedSeconds"] >= 90
+    assert external[0]["durationNano"] >= 90 * 1_000_000_000
+    # Both executions stayed on one trace, chained root to root.
+    runs = exporter.by_name("run")
+    assert len(runs) == 2 and runs[1]["parentSpanId"] == runs[0]["spanId"]
+    assert {item["traceId"] for item in exporter.spans} == {runs[0]["traceId"]}
 
 
 async def test_two_interrupts_in_one_batch_keep_positions_and_individual_results(store, video_clock):

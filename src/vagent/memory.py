@@ -1,0 +1,262 @@
+"""H2 long-term memory: a retrievable index of *confirmed* project facts.
+
+Memory is a derived index, never a source of truth. Records are projected from the
+structured project fields (goal / audience / style / constraints / plan), never from
+model free text, so a hallucinated summary cannot pollute the project facts — the
+same deterministic-field discipline the rest of the harness already uses.
+
+The index lives in a sidecar file (``<home>/memory.json``), so ``state.json`` keeps its
+frozen schema and the 168 contract model hashes do not move. Retrieval is offline: the
+default embedder is a deterministic hashing bag-of-ngrams with no network and no model
+call. Everything is opt-in (``VAGENT_MEMORY=on``); with memory off the rendered context
+and ``contextSignature`` are byte-for-byte what they are today.
+"""
+
+from __future__ import annotations
+
+import hashlib
+import json
+import math
+import os
+import re
+import unicodedata
+from pathlib import Path
+
+MEMORY_VERSION = 1
+MEMORY_FILE = "memory.json"
+EMBEDDING_DIM = 256
+EMBEDDING_VERSION = "hashing-bigram-v1"
+MAX_RECORDS = 4096
+DEFAULT_LIMIT = 4
+DEFAULT_BLOCK_BYTES = 1024
+
+# A fact that looks like a credential is never indexed: Keys and secret material must
+# not reach a store that a later retrieval step feeds back into the model.
+SECRET_PATTERNS = (
+    re.compile(r"\bsk-[A-Za-z0-9_\-]{8,}"),
+    re.compile(r"\bapi[_\-\s]?key\b", re.IGNORECASE),
+    re.compile(r"\b[A-Fa-f0-9]{32,}\b"),
+    re.compile(r"\b[A-Za-z0-9+/]{40,}={0,2}\b"),
+)
+
+CJK = re.compile(r"[㐀-鿿]+")
+WORD = re.compile(r"[a-z0-9_]+")
+
+
+def normalize(text: str) -> str:
+    """Canonical form for hashing and tokenizing (NFKC folds full-width punctuation)."""
+    return " ".join(unicodedata.normalize("NFKC", text).split())
+
+
+def clean(text: str) -> str:
+    """Whitespace-collapse only: the stored fact keeps the user's own punctuation."""
+    return " ".join(text.split())
+
+
+def looks_secret(text: str) -> bool:
+    return any(pattern.search(text) for pattern in SECRET_PATTERNS)
+
+
+def tokens(text: str) -> list[str]:
+    """Deterministic tokens: ASCII word runs plus CJK unigrams and bigrams.
+
+    Chinese has no spaces, so character bigrams carry the lexical signal that word
+    tokens carry in English; both feed the same hashing embedder.
+    """
+    lowered = unicodedata.normalize("NFKC", text).casefold()
+    result = WORD.findall(lowered)
+    for run in CJK.findall(lowered):
+        result.extend(run)
+        result.extend(run[i : i + 2] for i in range(len(run) - 1))
+    return result
+
+
+class HashingEmbedder:
+    """A deterministic, offline embedder: hashing trick over tokens, L2 normalized.
+
+    Same text always yields the same vector on every platform (blake2b, not ``hash``),
+    so retrieval is reproducible in tests and across processes without a model call.
+    """
+
+    name = EMBEDDING_VERSION
+    fingerprint = EMBEDDING_VERSION
+    dim = EMBEDDING_DIM
+
+    def embed(self, text: str) -> list[float]:
+        vector = [0.0] * self.dim
+        for token in tokens(text):
+            digest = hashlib.blake2b(token.encode("utf-8"), digest_size=8).digest()
+            index = int.from_bytes(digest[:4], "little") % self.dim
+            vector[index] += 1.0 if digest[4] & 1 else -1.0
+        norm = math.sqrt(sum(value * value for value in vector))
+        if not norm:
+            return vector
+        return [value / norm for value in vector]
+
+
+def cosine(left: list[float], right: list[float]) -> float:
+    return sum(a * b for a, b in zip(left, right, strict=False))
+
+
+def fingerprint(project_id: str, kind: str, text: str) -> str:
+    payload = f"{project_id}\n{kind}\n{normalize(text)}"
+    return hashlib.sha256(payload.encode("utf-8")).hexdigest()
+
+
+def project_facts(project: dict) -> list[tuple[str, str]]:
+    """The confirmed project fields, in a fixed order; nothing model-authored enters."""
+
+    def entries(value) -> list[str]:
+        if not isinstance(value, list):
+            return []
+        out = []
+        for item in value:
+            if isinstance(item, str):
+                out.append(item)
+            elif isinstance(item, dict):
+                text = item.get("text") or item.get("title") or item.get("value")
+                if isinstance(text, str):
+                    out.append(text)
+        return out
+
+    facts: list[tuple[str, str]] = []
+    for kind in ("goal", "audience", "style"):
+        value = project.get(kind)
+        if isinstance(value, str) and value.strip():
+            facts.append((kind, clean(value)))
+    for field, kind in (("constraints", "constraint"), ("plan", "plan")):
+        for text in entries(project.get(field)):
+            if text.strip():
+                facts.append((kind, clean(text)))
+    return facts
+
+
+class MemoryIndex:
+    """``memory-v1`` sidecar: content-addressed records with superseding per kind.
+
+    Adding the same fact twice is a no-op (same fingerprint). Changing a fact of the
+    same ``(projectId, kind)`` marks the older record ``supersededBy`` rather than
+    deleting it, so retrieval always returns the current truth while the history stays
+    auditable — the same "keep the old version" discipline as artifacts.
+    """
+
+    def __init__(self, home, embedder=None, *, clock=None):
+        self.path = Path(home) / MEMORY_FILE
+        self.embedder = embedder or HashingEmbedder()
+        if clock is None:
+            from vagent.storage import now as clock
+
+        self.clock = clock
+
+    def _read(self) -> dict:
+        try:
+            raw = self.path.read_bytes()
+        except OSError:
+            return {}
+        try:
+            payload = json.loads(raw)
+        except ValueError:
+            return {}
+        if not isinstance(payload, dict) or payload.get("version") != MEMORY_VERSION:
+            return {}
+        records = payload.get("records")
+        return records if isinstance(records, dict) else {}
+
+    def _write(self, records: dict) -> None:
+        payload = json.dumps(
+            {"version": MEMORY_VERSION, "embedding": self.embedder.fingerprint, "records": records},
+            ensure_ascii=False,
+            sort_keys=True,
+        )
+        temporary = self.path.with_name(self.path.name + ".tmp")
+        self.path.parent.mkdir(parents=True, exist_ok=True)
+        temporary.write_text(payload, encoding="utf-8")
+        os.replace(temporary, self.path)
+
+    def sync(self, project: dict) -> list[str]:
+        """Materialize the project's confirmed facts; idempotent, returns added ids."""
+        project_id = project["id"]
+        records = self._read()
+        added: list[str] = []
+        for kind, text in project_facts(project):
+            if looks_secret(text):
+                continue
+            key = fingerprint(project_id, kind, text)
+            for existing_id, record in records.items():
+                if (
+                    record.get("projectId") == project_id
+                    and record.get("kind") == kind
+                    and existing_id != key
+                    and not record.get("supersededBy")
+                ):
+                    record["supersededBy"] = key
+            if key in records:
+                continue
+            records[key] = {
+                "id": key,
+                "projectId": project_id,
+                "kind": kind,
+                "text": text,
+                "embedding": self.embedder.fingerprint,
+                "vector": self.embedder.embed(text),
+                "createdAt": self.clock(),
+                "supersededBy": None,
+            }
+            added.append(key)
+        if added:
+            if len(records) > MAX_RECORDS:
+                for stale in list(records)[: len(records) - MAX_RECORDS]:
+                    records.pop(stale, None)
+            self._write(records)
+        return added
+
+    def records(self, project_id: str | None = None, *, current_only: bool = True) -> list[dict]:
+        records = self._read().values()
+        return [
+            record
+            for record in records
+            if (project_id is None or record.get("projectId") == project_id)
+            and (not current_only or not record.get("supersededBy"))
+        ]
+
+    def recall(
+        self,
+        project_id: str,
+        query: str,
+        *,
+        limit: int = DEFAULT_LIMIT,
+        cross_project: bool = False,
+    ) -> list[dict]:
+        """Top-``limit`` current records by cosine similarity; deterministic ties."""
+        vector = self.embedder.embed(query)
+        scored = []
+        for record in self.records(None if cross_project else project_id):
+            stored = record.get("vector")
+            if not isinstance(stored, list) or len(stored) != len(vector):
+                continue
+            score = cosine(vector, stored)
+            if score > 0:
+                scored.append((score, record))
+        scored.sort(key=lambda item: (-item[0], item[1]["kind"], item[1]["id"]))
+        return [record for _, record in scored[:limit]]
+
+    def render(
+        self,
+        project_id: str,
+        query: str,
+        *,
+        limit: int = DEFAULT_LIMIT,
+        budget_bytes: int = DEFAULT_BLOCK_BYTES,
+        cross_project: bool = False,
+    ) -> str:
+        """The recalled block as plain lines, clipped to ``budget_bytes`` (no header)."""
+        lines: list[str] = []
+        used = 0
+        for record in self.recall(project_id, query, limit=limit, cross_project=cross_project):
+            line = f"- ({record['kind']}) {record['text']}"
+            size = len(line.encode("utf-8")) + 1
+            if used + size > budget_bytes:
+                break
+            lines.append(line)
+            used += size
+        return "\n".join(lines)

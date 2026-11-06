@@ -15,15 +15,18 @@ from vagent.config import (
     require_key,
     update_local_settings,
 )
-from vagent.context import ContextBuilder
+from vagent.context import SUMMARY_CONTEXT_VERSION, ContextBuilder
 from vagent.errors import AppError, public_error
 from vagent.http import ModelHttpClient
 from vagent.mcp_bridge import connect_mcp, server_configs
+from vagent.memory import MemoryIndex
 from vagent.models import DeepSeekModel
 from vagent.runner import AgentRunner, RunPolicy
 from vagent.skills import discover_for, register_skill_tool
 from vagent.storage import FileStore, now
+from vagent.summary import ExtractiveSummarizer
 from vagent.tools import create_project_tools
+from vagent.tracing import TRACE_DIRECTORY, JsonlExporter, Tracer
 from vagent.usage import summarize_usage
 from vagent.video import billing, clients
 from vagent.video.assets import asset_reference_loader
@@ -759,11 +762,46 @@ class ApplicationService:
             model=chosen,
             tools=tools,
             policy=self.policy,
-            context=ContextBuilder(self.config.context_bytes),
+            context=self.context_builder(),
+            summarizer=self.summarizer(),
+            prompt_version=self.prompt_version(),
+            memory=self.memory_index(),
+            memory_limit=self.config.memory_limit,
+            tracing=self.tracer(),
             skills=self.catalog.list(),
             read_only=read_only,
             answer_cache=self.cache,
             on_event=on_event,
+        )
+
+    def context_builder(self):
+        """The context layout for new Runs; v3 is opt-in via VAGENT_CONTEXT_VERSION."""
+        return ContextBuilder(self.config.context_bytes, format_version=self.config.context_version)
+
+    def prompt_version(self):
+        """The versioned system prompt for new Runs; v1 is the frozen default."""
+        return self.config.prompt_version
+
+    def summarizer(self):
+        """A v3 Run summarizes dropped turns; extractive and offline, never a paid call."""
+        if self.config.context_version >= SUMMARY_CONTEXT_VERSION:
+            return ExtractiveSummarizer()
+        return None
+
+    def memory_index(self):
+        """Long-term memory is opt-in; off keeps today's context and signature intact."""
+        if not self.config.memory_enabled:
+            return None
+        return MemoryIndex(self.store.home)
+
+    def tracer(self):
+        """Tracing is opt-in; off exports nothing and every span call site stays inert."""
+        if not self.config.tracing_enabled:
+            return None
+        return Tracer(
+            JsonlExporter(self.store.home / TRACE_DIRECTORY),
+            sample_percent=self.config.trace_sample,
+            content=self.config.trace_content,
         )
 
     def headless_runner(self, *, model=None, on_event=None, video_mode=None):
@@ -790,7 +828,12 @@ class ApplicationService:
             model=chosen,
             tools=tools,
             policy=self.policy,
-            context=ContextBuilder(self.config.context_bytes),
+            context=self.context_builder(),
+            summarizer=self.summarizer(),
+            prompt_version=self.prompt_version(),
+            memory=self.memory_index(),
+            memory_limit=self.config.memory_limit,
+            tracing=self.tracer(),
             skills=self.catalog.list(),
             answer_cache=self.cache,
             on_event=on_event,
