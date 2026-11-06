@@ -1,6 +1,7 @@
 import asyncio
 import json
 import sys
+import time
 from pathlib import Path
 
 import pytest
@@ -11,9 +12,15 @@ from vagent.application import ApplicationService
 from vagent.config import Config
 from vagent.context import assert_complete_protocol
 from vagent.errors import AppError
-from vagent.mcp_bridge import ServerConfig, check_schema, connect_mcp, server_configs
+from vagent.mcp_bridge import (
+    ServerConfig,
+    check_schema,
+    connect_mcp,
+    result_payload,
+    server_configs,
+)
 from vagent.runner import AgentRunner, RunPolicy
-from vagent.tools import ToolRegistry
+from vagent.tools import ToolDefinition, ToolRegistry
 
 
 async def test_real_mcp_discovery_validation_execution_and_operation_replay(store):
@@ -128,6 +135,120 @@ async def test_write_annotations_cannot_expand_local_allowlist():
     with pytest.raises((AppError, ExceptionGroup)):
         async with connect_mcp(ToolRegistry(), [config]):
             pytest.fail("write tool admitted")
+
+
+class _Text:
+    type = "text"
+
+    def __init__(self, text):
+        self.text = text
+
+    def model_dump(self, mode="json"):
+        return {"type": "text", "text": self.text}
+
+
+class _Result:
+    isError = False
+
+    def __init__(self, *, content=(), structured=None):
+        self.content = list(content)
+        self.structuredContent = structured
+
+
+def test_nan_and_non_json_results_are_sanitized_and_bounded():
+    payload = result_payload(_Result(structured={"score": float("nan"), "flags": [True, None]}))
+    assert payload["source"] == "mcp"
+    assert payload["structuredContent"] == {"score": None, "flags": [True, None]}
+    assert "NaN" not in json.dumps(payload)  # valid JSON, safe to put in a context
+
+    with pytest.raises(AppError) as error:
+        result_payload(_Result(content=[_Text("x" * 20000)]))
+    assert error.value.code == "MCP_RESULT_LIMIT"
+
+
+def test_pattern_schema_is_rejected_unless_explicitly_allowed():
+    schema = {"type": "object", "properties": {"q": {"type": "string", "pattern": "^(a+)+$"}}}
+    with pytest.raises(AppError) as error:
+        check_schema(schema)
+    assert error.value.code == "MCP_SCHEMA_UNSUPPORTED"
+    check_schema(schema, allow_patterns=True)  # trusted self-run servers can opt in
+
+    with pytest.raises(AppError):
+        check_schema({"type": "object", "patternProperties": {"^x": {"type": "string"}}})
+    config = ServerConfig(name="trusted", command="python", read_only_tools=["lookup"], allow_patterns=True)
+    assert config.allow_patterns is True
+
+
+def test_schema_size_and_depth_are_bounded():
+    nested = {"type": "object"}
+    current = nested
+    for _ in range(20):
+        current["properties"] = {"x": {"type": "object"}}
+        current = current["properties"]["x"]
+    with pytest.raises(AppError) as error:
+        check_schema(nested)
+    assert error.value.code == "MCP_SCHEMA"
+
+
+async def test_a_pattern_schema_never_reaches_the_matcher(store):
+    registry = ToolRegistry()
+    executed = []
+    registry.register(
+        ToolDefinition(
+            name="mcp_local_pattern",
+            description="catastrophic regex fixture",
+            schema={"type": "object", "properties": {"q": {"type": "string", "pattern": "^(a+)+$"}}},
+            effect="read",
+            async_execute=lambda args: executed.append(args) or {},
+        )
+    )
+    store.ensure_session("test")
+    started = time.monotonic()
+    result = await registry.aexecute(
+        "mcp_local_pattern",
+        {"q": "a" * 26 + "!"},
+        store=store,
+        project_id="test",
+        operation_key="pattern",
+    )
+    assert time.monotonic() - started < 1.0
+    assert result["error"]["code"] == "MCP_SCHEMA_UNSUPPORTED"
+    assert executed == []  # the validator never ran, so the event loop never blocked
+
+
+async def test_unresolvable_ref_and_oversized_arguments_are_tool_errors(store):
+    registry = ToolRegistry()
+    registry.register(
+        ToolDefinition(
+            name="mcp_local_broken",
+            description="broken ref fixture",
+            schema={"type": "object", "$ref": "#/$defs/missing"},
+            effect="read",
+            async_execute=lambda args: pytest.fail("the tool must not run"),
+        )
+    )
+    registry.register(
+        ToolDefinition(
+            name="mcp_local_echo",
+            description="echo fixture",
+            schema={"type": "object", "properties": {"blob": {"type": "string"}}},
+            effect="read",
+            async_execute=lambda args: {"ok": True},
+        )
+    )
+    store.ensure_session("test")
+    broken = await registry.aexecute(
+        "mcp_local_broken", {}, store=store, project_id="test", operation_key="broken"
+    )
+    assert broken["error"]["code"] == "MCP_SCHEMA"
+    oversized = await registry.aexecute(
+        "mcp_local_echo",
+        {"blob": "x" * 40000},
+        store=store,
+        project_id="test",
+        operation_key="oversized",
+    )
+    assert oversized["error"]["code"] == "INVALID_ARGUMENTS"
 
 
 def test_remote_schema_refs_and_bad_configs_are_rejected(tmp_path):

@@ -25,7 +25,8 @@
       "command": "C:/absolute/path/to/python.exe",
       "args": ["C:/absolute/path/to/your_trusted_server.py"],
       "read_only_tools": ["lookup"],
-      "timeout_seconds": 10.0
+      "timeout_seconds": 10.0,
+      "allow_patterns": false
     }
   ]
 }
@@ -35,11 +36,15 @@
 
 要求同时满足本地 `read_only_tools` 白名单和服务返回的 `readOnlyHint=true`。服务自述并非安全沙箱，仍应由配置者确认其真实行为；当前不接入外部写工具或付费生成工具。
 
+`allow_patterns` 默认 `false`：带 `pattern` / `patternProperties` 的 Schema 会被拒绝（`MCP_SCHEMA_UNSUPPORTED`）。Python 的正则回溯无法在进程内安全超时，`^(a+)+$` 这类模式会在校验参数时冻结事件循环；只有完全自建、可信的服务才应显式打开它。
+
 ## 执行约束
 
-- 参数使用发现到的 JSON Schema 校验；禁止外部 Schema 引用。
+- 参数使用发现到的 JSON Schema 校验；禁止外部 Schema 引用；Schema 上限 16 KiB、嵌套上限 16 层；参数上限 32 KiB。
+- 默认拒绝 `pattern` / `patternProperties`（ReDoS，见上）；`allow_patterns=true` 才放行，属自建可信服务的显式取舍。
+- 无法解析的本地 `$ref`、被拒的 Schema 都返回 `MCP_SCHEMA` 工具错误，绝不让 Run 失败。
 - MCP 调用同时受单次超时和 Run 总预算、取消事件约束，无自动请求重试。
-- 接受文本/结构化数据，16 KiB 结果上限；不跟随结果里的 URL 或执行其中指令。
+- 接受文本/结构化数据，16 KiB 结果上限；结果标 `source="mcp"`，NaN/Infinity/非 JSON 类型清洗为 `null` 或字符串；不跟随结果里的 URL 或执行其中指令。
 - 读结果以操作 ID 存入原有操作日志；已提交结果可重放。取消前未提交的读取可能在显式恢复时重新执行，因此仅允许只读工具。
 - 子进程仅继承 MCP SDK 的基础环境白名单及 UTF-8 设置，不主动传递 DeepSeek/Redis 凭据；其 stderr 不写入 Web 工具结果。
 - 服务身份、工具 Schema 与版本参与恢复配置检查。外部数据缺少完整版本快照，因此存在 MCP 工具时禁用 Redis 回答缓存，避免旧外部数据影响回答。

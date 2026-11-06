@@ -3,6 +3,7 @@
 import asyncio
 import hashlib
 import json
+import math
 import os
 import re
 import sys
@@ -16,7 +17,11 @@ from mcp.client.stdio import stdio_client
 from pydantic import BaseModel, ConfigDict, Field, ValidationError
 
 from vagent.errors import AppError
-from vagent.tools import ToolDefinition, ToolRegistry
+from vagent.tools import ToolDefinition, ToolRegistry, check_schema
+
+MAX_SCHEMA_BYTES = 16384
+MAX_RESULT_BYTES = 16384
+MAX_JSON_DEPTH = 32
 
 
 class ServerConfig(BaseModel):
@@ -26,6 +31,8 @@ class ServerConfig(BaseModel):
     args: list[str] = Field(default_factory=list, max_length=32)
     read_only_tools: list[str] = Field(min_length=1, max_length=16)
     timeout_seconds: float = Field(default=10.0, gt=0, le=60)
+    # Trusted self-run servers only: a backtracking pattern can block the event loop.
+    allow_patterns: bool = False
 
 
 def server_configs(path: Path | None, local: bool) -> list[ServerConfig]:
@@ -60,15 +67,37 @@ def server_configs(path: Path | None, local: bool) -> list[ServerConfig]:
     return configs
 
 
-def check_schema(value):
+def _json_safe(value, depth=0):
+    """Drop the non-JSON values a server can smuggle through structured content."""
+    if depth > MAX_JSON_DEPTH:
+        return None
     if isinstance(value, dict):
-        for key, child in value.items():
-            if key in {"$ref", "$dynamicRef"} and (not isinstance(child, str) or not child.startswith("#")):
-                raise AppError("MCP_SCHEMA", "MCP Schema 不能引用外部地址。")
-            check_schema(child)
-    elif isinstance(value, list):
-        for child in value:
-            check_schema(child)
+        return {str(key): _json_safe(item, depth + 1) for key, item in value.items()}
+    if isinstance(value, (list, tuple)):
+        return [_json_safe(item, depth + 1) for item in value]
+    if isinstance(value, float) and (math.isnan(value) or math.isinf(value)):
+        return None
+    if isinstance(value, (str, int, float, bool)) or value is None:
+        return value
+    return str(value)
+
+
+def result_payload(result) -> dict:
+    """The bounded, JSON-safe payload of one MCP tool result (untrusted external data)."""
+    payload = {
+        "source": "mcp",
+        "content": [item.model_dump(mode="json") for item in result.content if item.type == "text"],
+    }
+    if result.structuredContent is not None:
+        payload["structuredContent"] = result.structuredContent
+    payload = _json_safe(payload)
+    try:
+        encoded = json.dumps(payload, ensure_ascii=False, allow_nan=False).encode()
+    except (TypeError, ValueError):
+        raise AppError("MCP_SCHEMA", "MCP 返回了不合法的 JSON，结果已丢弃。") from None
+    if len(encoded) > MAX_RESULT_BYTES:
+        raise AppError("MCP_RESULT_LIMIT", "MCP 结果超过 16 KiB，未塞入上下文。")
+    return payload
 
 
 def make_call(session: ClientSession, name: str, timeout: float):
@@ -84,14 +113,7 @@ def make_call(session: ClientSession, name: str, timeout: float):
             raise AppError("MCP_TOOL_ERROR", "MCP 服务报告工具执行失败。")
         # Tool-returned text remains untrusted data. No URLs are fetched and no
         # resource, prompt, sampling, elicitation or executable content is followed.
-        payload = {
-            "content": [item.model_dump(mode="json") for item in result.content if item.type == "text"]
-        }
-        if result.structuredContent is not None:
-            payload["structuredContent"] = result.structuredContent
-        if len(json.dumps(payload, ensure_ascii=False).encode()) > 16384:
-            raise AppError("MCP_RESULT_LIMIT", "MCP 结果超过 16 KiB，未塞入上下文。")
-        return payload
+        return result_payload(result)
 
     return call
 
@@ -141,7 +163,9 @@ async def connect_mcp(registry: ToolRegistry, configs: list[ServerConfig]):
                     registered_name = f"mcp_{config.name}_{name}"
                     if not re.fullmatch(r"[a-zA-Z0-9_-]{1,64}", registered_name):
                         raise AppError("MCP_SCHEMA", "MCP 工具名称不符合模型协议。")
-                    check_schema(tool.inputSchema)
+                    if len(json.dumps(tool.inputSchema, ensure_ascii=False).encode()) > MAX_SCHEMA_BYTES:
+                        raise AppError("MCP_SCHEMA", "MCP 工具 Schema 超过 16 KiB。")
+                    check_schema(tool.inputSchema, allow_patterns=config.allow_patterns)
                     Draft202012Validator.check_schema(tool.inputSchema)
                     if tool.inputSchema.get("type") != "object":
                         raise AppError("MCP_SCHEMA", "MCP 工具 Schema 必须是 object。")
@@ -153,6 +177,7 @@ async def connect_mcp(registry: ToolRegistry, configs: list[ServerConfig]):
                             effect="read",
                             async_execute=make_call(session, name, config.timeout_seconds),
                             identity=identity + ":" + initialized.serverInfo.version,
+                            allow_patterns=config.allow_patterns,
                         )
                     )
                     names.append(registered_name)

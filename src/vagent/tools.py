@@ -1,6 +1,7 @@
 """Tool allowlist, shared JSON schemas, and project-scoped execution."""
 
 import copy
+import json
 from collections.abc import Awaitable, Callable
 from dataclasses import dataclass, replace
 from typing import Annotated, Literal
@@ -14,6 +15,32 @@ from vagent.errors import AppError, failure, public_error
 from vagent.quality import check_project_memory, content_check, project_memory_conflicts
 from vagent.storage import FileStore, now
 from vagent.waiting import DeferredToolResult, ToolExecutionContext
+
+MAX_TOOL_ARGUMENT_BYTES = 32 * 1024
+MAX_SCHEMA_DEPTH = 16
+# ``pattern`` reach Python's backtracking ``re`` engine, which cannot be interrupted with
+# a timeout (the GIL stays held), so a server could publish ``^(a+)+$`` and freeze the
+# event loop. External ``$ref`` would pull in a schema the harness never reviewed.
+UNSAFE_SCHEMA_KEYWORDS = frozenset({"pattern", "patternProperties"})
+
+
+def check_schema(value, *, allow_patterns: bool = False, depth: int = 0) -> None:
+    """Reject a tool schema the harness cannot validate safely."""
+    if depth > MAX_SCHEMA_DEPTH:
+        raise AppError("MCP_SCHEMA", "工具 Schema 嵌套过深。")
+    if isinstance(value, dict):
+        for key, child in value.items():
+            if key in {"$ref", "$dynamicRef"} and (not isinstance(child, str) or not child.startswith("#")):
+                raise AppError("MCP_SCHEMA", "工具 Schema 不能引用外部地址。")
+            if key in UNSAFE_SCHEMA_KEYWORDS and not allow_patterns:
+                raise AppError(
+                    "MCP_SCHEMA_UNSUPPORTED",
+                    "工具 Schema 的 pattern 无法安全超时，需在 MCP 服务配置里显式 allow_patterns。",
+                )
+            check_schema(child, allow_patterns=allow_patterns, depth=depth + 1)
+    elif isinstance(value, list):
+        for child in value:
+            check_schema(child, allow_patterns=allow_patterns, depth=depth + 1)
 
 
 class Arguments(BaseModel):
@@ -94,6 +121,8 @@ class ToolDefinition:
     # the handler opens its own short transactions around the long operation.
     async_write_execute: Callable[[dict, FileStore, ToolExecutionContext], Awaitable[dict]] | None = None
     identity: str | None = None
+    # Only a self-run, trusted MCP server may opt into backtracking regex validation.
+    allow_patterns: bool = False
     # Context handlers own their journal/transaction and may return a deferred
     # marker. Legacy handlers still return raw data for FileStore.operation.
     context_execute: Callable[[dict, FileStore, ToolExecutionContext], dict | DeferredToolResult] | None = (
@@ -360,7 +389,21 @@ class ToolRegistry:
             )
         if not isinstance(args, dict) or not isinstance(definition.schema, dict):
             return failure("INVALID_ARGUMENTS", "MCP 工具参数必须是 JSON 对象。")
-        if next(Draft202012Validator(definition.schema).iter_errors(args), None):
+        try:
+            encoded = json.dumps(args, ensure_ascii=False, default=str).encode()
+        except (TypeError, ValueError):
+            return failure("INVALID_ARGUMENTS", "MCP 工具参数不是合法 JSON。")
+        if len(encoded) > MAX_TOOL_ARGUMENT_BYTES:
+            return failure("INVALID_ARGUMENTS", "MCP 工具参数超过 32 KiB。")
+        try:
+            check_schema(definition.schema, allow_patterns=definition.allow_patterns)
+            invalid = next(Draft202012Validator(definition.schema).iter_errors(args), None)
+        except AppError as error:
+            # A schema the bridge cannot validate is a tool error, never a Run failure.
+            return failure(error.code, str(error))
+        except Exception:
+            return failure("MCP_SCHEMA", "MCP 工具 Schema 无法校验，本步未执行。")
+        if invalid:
             return failure("INVALID_ARGUMENTS", "MCP 工具参数不符合已发现的 Schema。")
         payload = copy.deepcopy(args)
         previous = store.operation_result(operation_key, name, payload)
