@@ -35,7 +35,7 @@
 | 检索注入不破坏稳定前缀 | 前缀按 `MEMORY_HEADER` 切开后与无记忆构建全等；块在 `PROJECT_HEADER` 之后 | `test_memory_on_recalls_the_fact_after_the_frozen_prefix` |
 | 默认无网络 | 模块无网络 / 随机依赖；embedder 逐位确定 | `test_memory_module_is_offline_and_free_of_io`、`test_embedding_is_deterministic_and_normalized` |
 | 恢复兼容 | 关闭时签名不变；开启后签名变化 → 旧 Run 拒绝恢复 | `test_memory_off_keeps_the_context_and_signature_untouched`、`test_memory_on_recalls_...`（签名断言） |
-| 隐私（Key / 密文不入库） | 凭据模式命中即不索引 | `test_secrets_are_never_indexed` |
+| 隐私（Key / 密文不入库） | 凭据模式命中即不索引；中文前缀、JWT、Bearer、中文键名都命中，否定句与裸 hash 不误报 | `test_secrets_are_never_indexed`、`test_secret_detection_catches_credentials`（8 组）、`test_secret_detection_ignores_benign_text`（5 组） |
 | 默认可关闭 | `VAGENT_MEMORY` 默认 off，越界参数拒绝 | `test_config_memory_defaults_off_and_parses_the_switch`、`test_config_rejects_an_invalid_memory_limit` |
 
 ## 检索质量实测（离线，固定事实集）
@@ -55,7 +55,7 @@
 
 ## 隐私与恢复
 
-- **凭据不入库**：`sk-…`、`api_key` 字样、32+ 位十六进制、40+ 位 base64 形态一律跳过，用例把 `sk-secret…` 塞进 `constraints` 后断言落盘 JSON 中不含该串。
+- **凭据不入库**：`sk-…`、JWT（`eyJ` 开头的三段 base64url）、`Bearer <token>`、`api_key: 值`、中文键名（密码/密钥/口令/令牌）后跟分隔符与值、以及「键名 + 分隔符 + 32+ 位十六进制 / 40+ 位 base64」一律跳过；边界用 `(?<![A-Za-z0-9])` 而不是 `\b`，所以中文前缀（`后台sk-…`）也能命中。单独的 32 位十六进制 / 长 base64（commit hash、普通编号）与「不要出现 API key 字样」这类否定句不命中。用例把 `sk-secret…` 塞进 `constraints` 后断言落盘 JSON 中不含该串。
 - **损坏即降级**：`memory.json` 读失败或 JSON 坏掉时按空索引处理（`records()` 返回空、`sync()` 可重建），记忆是派生索引，丢了不丢真相。
 - **恢复语义**：记忆不写 `state.json`，恢复只依赖 `state.json`；签名 payload 里的 `memory{embedding,limit}` 保证「换了 embedder 或改了条数上限」不会被静默复用。副作用是：开启记忆后旧 Run 不能 resume，需要新 Run——与 H1 / H3 的开关同一处理方式。
 
@@ -68,7 +68,7 @@
 
 ## 自动化验证
 
-`tests/test_long_term_memory.py`（23 项）：embedder 3 项、记录投影 / 去重 / 取代 / 复活 / 淘汰 / 隐私 / 旁路容错 13 项、检索 2 项、配置开关 2 项、runner 接线 3 项。
+`tests/test_long_term_memory.py`（36 项）：embedder 3 项、记录投影 / 去重 / 取代 / 复活 / 淘汰 / 隐私 / 旁路容错 26 项、检索 2 项、配置开关 2 项、runner 接线 3 项。
 
 复现（离线，无网络、无模型调用）：
 

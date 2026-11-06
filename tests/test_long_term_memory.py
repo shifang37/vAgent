@@ -248,6 +248,37 @@ def test_v1_sidecar_is_readable_and_rewritten_as_v2(index):
     assert [record["text"] for record in index.records("coffee")] == [GOAL]
 
 
+@pytest.mark.parametrize(
+    "text",
+    [
+        "sk-abcdef0123456789",
+        "后台sk-abcdef0123456789",  # a CJK prefix defeats a `\b` boundary
+        "Authorization: Bearer eyJhbGciOiJIUzI1NiJ9",
+        "eyJhbGciOiJIUzI1NiJ9.eyJzdWIiOiIxIn0.abcdefghijklmnop",
+        "后台密码：hunter2",
+        "密钥：9f8e7d6c5b4a",
+        "API_KEY: 123456",
+        "token=0123456789abcdef0123456789abcdef",
+    ],
+)
+def test_secret_detection_catches_credentials(text):
+    assert looks_secret(text)
+
+
+@pytest.mark.parametrize(
+    "text",
+    [
+        "不要出现 API key 字样",
+        "不要写密码到项目里",
+        "提交 0123456789abcdef0123456789abcdef",  # a commit hash, not a credential
+        "编号 12345678901234567890123456789012",
+        "面向年轻人的咖啡店",
+    ],
+)
+def test_secret_detection_ignores_benign_text(text):
+    assert not looks_secret(text)
+
+
 def test_secrets_are_never_indexed(index):
     assert looks_secret("sk-abcdef0123456789")
     assert looks_secret("API_KEY = 值")

@@ -525,6 +525,7 @@
 | 项 | 状态 | 落地要点 | 新增/调整用例 |
 |---|---|---|---|
 | FX-11 | 完成 | 侧车按 `(createdAt, id)` 从旧到新落盘；淘汰顺序改为「已取代 → 本项目最旧 → 全局最旧」，新增 `MAX_RECORDS_PER_PROJECT=512`；`MemoryIndex` / `SummaryStore` 都按 `(st_mtime_ns, st_size)` 缓存解析结果（写后刷新），一步的 `sync`+`render` 只解析一次；`SummaryStore` 条目加 `createdAt`、按时间淘汰 | `tests/test_long_term_memory.py` 新增 3 条（淘汰优先已取代、本地容量不跨项目、一步一次解析）；`tests/test_context_summary.py` 新增 1 条（摘要按时间淘汰） |
+| FX-13 | 完成 | 边界统一为 `(?<![A-Za-z0-9])`（中文前缀可命中）；补 JWT、`Bearer`、`api_key: 值`、中文键名（密码/密钥/口令/令牌）+ 分隔符；十六进制/base64 只在键名上下文里判为凭据，裸 hash 与「不要出现 API key 字样」不再误报 | `tests/test_long_term_memory.py` 新增 13 组参数化（8 正 + 5 负） |
 
 ### 与规划的偏差
 
@@ -533,8 +534,8 @@
 
 ### 验证
 
-- `tests/test_long_term_memory.py` **23 passed**、`tests/test_context_summary.py` **12 passed**。
-- 先在旧代码上跑新用例：4 条全部失败（3 条淘汰/解析 + 1 条摘要淘汰），修复后全绿。
+- `tests/test_long_term_memory.py` **36 passed**、`tests/test_context_summary.py` **12 passed**。
+- 先红后绿：FX-11 的 4 条新用例在旧代码上全失败（3 条淘汰/解析 + 1 条摘要淘汰）；FX-13 的 13 组参数化在旧模式上有 **8 组失败**（5 个漏报：中文前缀、Bearer、JWT、中文键名 ×2；3 个误报：否定句、commit hash、32 位编号），修复后全绿。
 
 
 

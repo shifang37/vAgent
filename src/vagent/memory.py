@@ -40,11 +40,28 @@ SCALAR_KINDS = frozenset({"goal", "audience", "style"})
 
 # A fact that looks like a credential is never indexed: Keys and secret material must
 # not reach a store that a later retrieval step feeds back into the model.
+# Boundaries are ASCII lookarounds, not ``\b``: Python counts a CJK character as a word
+# character, so ``\b`` would miss ``后台sk-...``.
 SECRET_PATTERNS = (
-    re.compile(r"\bsk-[A-Za-z0-9_\-]{8,}"),
-    re.compile(r"\bapi[_\-\s]?key\b", re.IGNORECASE),
-    re.compile(r"\b[A-Fa-f0-9]{32,}\b"),
-    re.compile(r"\b[A-Za-z0-9+/]{40,}={0,2}\b"),
+    re.compile(r"(?<![A-Za-z0-9])sk-[A-Za-z0-9_-]{8,}"),
+    # A JWT is three base64url segments; its JSON header always encodes as ``eyJ...``.
+    re.compile(r"(?<![A-Za-z0-9_-])eyJ[A-Za-z0-9_-]{6,}\.[A-Za-z0-9_-]{6,}\.[A-Za-z0-9_-]{6,}"),
+    re.compile(r"(?<![A-Za-z0-9])Bearer\s+\S+", re.IGNORECASE),
+    # ``api_key: value`` is a credential; the bare phrase "api key" is not.
+    re.compile(r"(?<![A-Za-z0-9])api[-_ ]?key\s*[:=：]\s*\S+", re.IGNORECASE),
+    re.compile(r"(?:密钥|密码|口令|令牌|秘钥)\s*[:=：]\s*\S+"),
+)
+# A long hex/base64 blob is only a credential next to a key name, so a commit hash or an
+# ordinary 32-digit number is not censored.
+CONTEXTUAL_SECRET_PATTERNS = (
+    re.compile(
+        r"(?:key|token|secret|password|passwd|密码|密钥|口令|令牌)[^\n]{0,16}?[:=：]\s*[A-Fa-f0-9]{32,}",
+        re.IGNORECASE,
+    ),
+    re.compile(
+        r"(?:key|token|secret|password|passwd|密码|密钥|口令|令牌)[^\n]{0,16}?[:=：]\s*[A-Za-z0-9+/]{40,}={0,2}",
+        re.IGNORECASE,
+    ),
 )
 
 CJK = re.compile(r"[㐀-鿿]+")
@@ -62,7 +79,9 @@ def clean(text: str) -> str:
 
 
 def looks_secret(text: str) -> bool:
-    return any(pattern.search(text) for pattern in SECRET_PATTERNS)
+    return any(pattern.search(text) for pattern in SECRET_PATTERNS) or any(
+        pattern.search(text) for pattern in CONTEXTUAL_SECRET_PATTERNS
+    )
 
 
 def tokens(text: str) -> list[str]:
