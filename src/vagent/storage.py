@@ -373,6 +373,33 @@ def repair_stale_runs(store: "FileStore") -> list[str]:
     return store.transaction(repair)
 
 
+def load_snapshot(home: Path | str) -> dict:
+    """Read ``state.json`` without locking, migrating, recovering or creating anything.
+
+    This is the read-only counterpart of :meth:`FileStore.open` for statistics scripts:
+    a ``running`` Run stays ``running`` and a missing data directory is an error instead
+    of a freshly created empty store. Schema upgrades are applied in memory only.
+    """
+    home = Path(home).resolve()
+    try:
+        raw = read_bytes_with_retry(home / "state.json")
+    except (FileNotFoundError, NotADirectoryError):
+        raise AppError("STORE_NOT_FOUND", "数据目录不存在或没有 state.json；未创建任何文件。") from None
+    except OSError as error:
+        raise AppError("STORE_UNREADABLE", "本地状态文件无法读取；未执行任何写入。") from error
+    try:
+        state = json.loads(raw)
+        version = state["schemaVersion"]
+        if type(version) is not int or version not in {1, 2, 3, 4, 5, 6, 7, 8, 9}:
+            raise ValueError("Unsupported schema version")
+        if version < 9:
+            state = migrated_state(state)
+        DatabaseV9.model_validate(state)
+    except (ValueError, TypeError, KeyError):
+        raise AppError("INVALID_STORE", "本地状态损坏或版本不支持，未执行任何写入。") from None
+    return state
+
+
 class FileStore:
     def __init__(self, home: Path, state: dict):
         self.home = home

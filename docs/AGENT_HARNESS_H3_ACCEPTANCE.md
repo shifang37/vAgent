@@ -23,7 +23,7 @@
 | 模板渲染确定性 | 同一入参两次渲染字节相同 | `test_rendering_is_deterministic` |
 | 签名覆盖 prompt 版本 | `v1`/`v2` 签名不同，同版本稳定；系统文本进签名 | `test_signature_changes_with_the_prompt_version`、`..._hashes_the_system_text` |
 | 注入用例按「数据非指令」处理 | 五条通道 + 两条行为用例 | 见下表 |
-| prompt 回归门禁（离线） | 本文件 29 项离线用例；四组 CI 与 `scripts/evaluate_behavior.py` 一并覆盖 | `tests/test_prompt_versions.py` |
+| prompt 回归门禁（离线） | 本文件 29 项离线用例；四组 CI 覆盖注入与签名。行为回归由 H4 的回放评分器承担，不代表真实模型行为 | `tests/test_prompt_versions.py` |
 | `v1` 不移动既有签名 | 逐字节等价 + 冻结基线全绿 | `test_v1_renders_byte_identical_to_the_pre_h3_assembly`；全量套件 1574 passed |
 
 ## 注入用例集（全部离线、零费用）
@@ -45,7 +45,7 @@
 - `PROMPT_VERSIONS = ("v1", "v2")`。未列出版本渲染时抛 `PROMPT_VERSION_UNSUPPORTED`；`load_config` 对非法 `VAGENT_PROMPT_VERSION` 抛 `INVALID_PROMPT_VERSION`。
 - `v1` 是默认且被冻签名基线锁定；升级到 `v2` 会让新 Run 的签名变化并拒绝恢复旧 Run（属预期契约变更，需显式选择）。
 - 提示词模板不再出现在 `runner.py`，`prompts.py` 无网络 / IO 依赖（用例断言）。
-- 不做向量记忆（H2）、不做 tracing（H5）；行为回归的量化由 H4 的 `scripts/evaluate_behavior.py` 承担。
+- 不做向量记忆（H2）、不做 tracing（H5）；行为回归的量化由 H4 的 `scripts/evaluate_behavior.py` 承担（离线脚本回放，不代表真实模型行为，也不覆盖提示词回归）。
 
 ## 自动化验证
 

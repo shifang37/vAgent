@@ -2,8 +2,10 @@
 
 Prices already-recorded model calls twice — once with the reported cache hit/miss split,
 once pricing every input token at the cache-miss rate — and prints the difference. No
-network, no provider call, no writes: the store is opened read-only and the price table is
-the versioned reference table in ``vagent.pricing``.
+network, no provider call, no writes: ``state.json`` is read through a read-only snapshot
+(no migration, no crash recovery, no directory creation) and the price table is the
+versioned reference table in ``vagent.pricing``. A wrong ``--home`` is an error instead
+of a silently created empty store.
 
 Usage::
 
@@ -16,11 +18,11 @@ import json
 
 from vagent import pricing
 from vagent.errors import AppError
-from vagent.storage import FileStore
+from vagent.storage import load_snapshot
 
 
-def collect(store, project: str | None) -> list[dict]:
-    runs = list(store.snapshot()["runs"].values())
+def collect(state: dict, project: str | None) -> list[dict]:
+    runs = list(state["runs"].values())
     if project in {None, "all"}:
         return runs
     return [run for run in runs if run["sessionId"] == project]
@@ -51,14 +53,13 @@ def report(runs: list[dict]) -> dict:
 
 def main() -> int:
     parser = argparse.ArgumentParser(description="离线对比缓存命中的费用节省，不联网、不调用供应商")
-    parser.add_argument("--home", default=".vagent", help="数据目录（默认 .vagent）")
+    parser.add_argument("--home", default=".vagent", help="数据目录（默认 .vagent；必须已存在）")
     parser.add_argument("--project", nargs="?", const="all", default=None, help="只统计一个项目")
     parser.add_argument("--json", action="store_true", help="输出机器可读结果")
     parser.add_argument("--verbose", action="store_true", help="逐 Run 列出估算")
     args = parser.parse_args()
     try:
-        with FileStore.open(args.home) as store:
-            payload = report(collect(store, args.project))
+        payload = report(collect(load_snapshot(args.home), args.project))
     except AppError as error:
         print(f"{error.code}: {error}")
         return 1

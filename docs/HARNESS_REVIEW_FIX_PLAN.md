@@ -546,9 +546,42 @@
 
 
 
+## 16. 实施记录（M2：FX-16 / FX-17 / FX-18 / FX-19）
+
+> 2026-11-06，接着 M1 的同一工作区落地；每条先让新增用例在旧代码上失败，再修复转绿。
+
+| 项 | 状态 | 落地要点 | 新增/调整用例 |
+|---|---|---|---|
+| FX-16 | 完成 | `mode="offline-replay"` + 明确 `LIMITATIONS`；`k` 必须 `1 <= k <= min(samples)`（`EVAL_K_TOO_LARGE` / `EVAL_K_INVALID`），不再重复最后一个脚本；用例分 `gate` / `measure`，`status` 只由 gate 的 `pass@1==1.0` 决定，measure-only 不判通过；`pass@k` 降为描述指标；`score_calls` 改最大二分匹配（Kuhn 增广路）；`suite_id` 纳入每个 sample 的完整文本与工具调用；`ReplayModel` 在「无工具却要调工具」时抛 `REPLAY_SCRIPT_NEEDS_TOOLS`；报告 schemaVersion 升 2 | `tests/test_behavior_evaluation.py` 重写为 18 项：k 上限、pass@1 门禁、k 不漂移、最大匹配、suiteId、4 个评分器负样本、ReplayModel 断言；`scripts/evaluate_behavior.py` 新增 2 个 gate 黄金用例 |
+| FX-17 | 完成 | 新增 `storage.load_snapshot(home)`：只读 `state.json`、只在内存做 v1–v9 迁移、`DatabaseV9.model_validate`，不建目录、不抢锁、不恢复 `running`；目录/文件不存在 → `STORE_NOT_FOUND`，损坏 → `INVALID_STORE`；`scripts/compare_cost.py` 改用该函数，去掉 `FileStore.open` | 新增 `tests/test_compare_cost.py`：快照不改 running、脚本不写盘、缺目录不创建、损坏不写盘 |
+| FX-18 | 完成 | README/USER_GUIDE 新增「高级开关（默认关闭）」表（7 个开关、默认值、签名/恢复影响），新增 `vagent usage --cost`、`scripts/evaluate_behavior.py`、`scripts/compare_cost.py` 说明与 60 秒限制；修正 `README.md:230` 的「没有自动摘要」与「文本模型尚无价格表」；`.env.example` 补齐 7 个开关注释 | `tests/test_docs.py` 的文档门禁；文档数字以本文件 §16 的实现结果为准 |
+| FX-19 | 完成 | 新增文档门禁用例：7 个环境变量（README/USER_GUIDE 与 `.env.example`）、3 个命令、60 秒限制、H3/H6 修正后的说法；新增 Application 端到端用例，设置 `VAGENT_MEMORY=on` / `VAGENT_MEMORY_LIMIT=8` / `VAGENT_CONTEXT_VERSION=3` / `VAGENT_PROMPT_VERSION=v2` / tracing 三开关后，断言 runner 的 memory、summarizer、promptVersion、tracing 真正透传 | `tests/test_docs.py`（4 项）；H4 文档样本 0/1 与表格对齐；H6 22.70% 标注 `ScriptedModel` |
+
+### 与规划的偏差
+
+- **`status` 的口径**：规划只要求「gate 全样本必须过、measure 只报告」。实现进一步规定「没有 gate 用例的运行不判通过」，避免 `--only <measure>` 被误当成发布门禁。
+- **`pass@k` 保留**：规划说「判定改用 pass@1」，实现保留 `pass@k` 作为报告字段（不参与门禁），既满足「不靠 pass@k 判定」，也不破坏既有报告读者。
+- **`load_snapshot` 的旧 schema**：规划写「只读 JSON + `DatabaseV9.model_validate`」。实现允许 v1–v8 只在内存做机械 envelope 升级后再校验，仍然不写盘、不备份、不迁移文件。
+- **文档门禁的严格度**：规划写「README 或 USER_GUIDE」；实现把 7 个开关同时写进两份文档，并让 `.env.example` 也必须覆盖，门禁比规划更严。
+
+### 验证
+
+- `tests/test_behavior_evaluation.py` **18 passed**；`tests/test_compare_cost.py` **4 passed**；`tests/test_docs.py` **4 passed**。
+- 行为评测实跑：`status=passed`、5 用例 / 10 样本、gate 2 / measure 3、pass@1=0.70、gatePass@1=1.00、pass@k=1.00、方差=0.15、precision/recall=0.72/0.90、redundant/missing=6/2、真实调用 0。
+- 先红后绿：新增的 k 上限、gate/measure、最大匹配、suiteId、4 个评分器负样本、ReplayModel 断言、只读快照与文档门禁用例，均在旧实现上失败（旧代码没有 `load_snapshot`，`compare_cost` 会写 store；旧评分器贪心匹配在 2/2 例上只算 1）。
+- 全量回归与 ruff 结果见 §17。
+
+## 17. 全量验证（M2）
+
+- `python -m pytest -q`（**完全权限，非沙箱**）：**1702 passed, 4 skipped（24 分 50 秒）**，退出码 0。4 个跳过项是本机既有的平台条件（Windows 符号链接权限 / POSIX 文件模式）。
+- 沙箱对照（仅作环境边界记录，不计为回归）：`1605 passed, 4 skipped, 69 failed, 28 errors`；97 个失败/错误全部落在「子进程 + 管道 / 本地媒体」边界（Redis、CLI 子进程、ffmpeg `PermissionError`、MCP stdio、M3/M5/M6/M7 真实媒体评估），与本文件 §15 记录的 M1 沙箱结果 **69 failed / 28 errors** 类别完全一致。完全权限复跑后全部消失，证明是环境限制而非 M2 回归。
+- `python -m ruff check src/vagent tests scripts`：**All checks passed**。
+- `python -m ruff format --check src/vagent tests scripts`：**255 files already formatted**。
+- 本次 M2 未调用任何模型或供应商，未产生费用；`scripts/evaluate_behavior.py` 与 `scripts/compare_cost.py` 均离线运行。
+
 ## 建议的下一步
 
-1. **M0 / M1 已全部落地**（见 §13–§15）：FX-08→15 完成，M1 只剩发布版本号与全量门禁。
-2. **M2（FX-16→19）** 可接着做：行为评测可信化、`compare_cost.py` 真只读、文档补齐（7 开关 + 3 命令 + 60 s 限制）、文档门禁用例。
-3. **M3（FX-20→28）** 按「数据增长 → 旁路写安全 → 观测细节 → 加固」推进；FX-20 需单独一条泳道。
-4. **M1 的 v4 仍是 opt-in**：默认 `VAGENT_CONTEXT_VERSION=2`。把默认翻到 v4 之前，建议先积累一段真实运行的缓存命中数据，再决定是否默认开启。
+1. **M0 / M1 / M2 已全部落地**（见 §13–§16）：FX-08→15 与 FX-16→19 完成，剩余是 v0.6.3 的版本号与发布门禁。
+2. **M3（FX-20→28）** 按「数据增长 → 旁路写安全 → 观测细节 → 加固」推进；FX-20 需单独一条泳道。
+3. **M1/M2 的 v4 与 v3 仍是 opt-in**：默认 `VAGENT_CONTEXT_VERSION=2`。把默认翻到 v4 之前，建议先积累一段真实运行的缓存命中数据，再决定是否默认开启。
+4. **C4 真模型评测**仍属 M4：在显式授权与成本上限下补无偏 pass@k、置信区间与提示词/上下文/记忆的 A/B；本轮只把离线套件做成诚实、可变异测试的门禁。

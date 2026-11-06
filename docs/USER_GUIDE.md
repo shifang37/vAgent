@@ -341,6 +341,15 @@ CLI/Web 共用的 HTTP 客户端仅在 `ConnectError` / `ConnectTimeout`（尚�
 
 `usage` 只显示运行标识、模型、状态及用量，不输出对话和产物正文。原始调用明细保存在 `state.json` 的 `runs[runId].modelCalls` 中，汇总从这些明细计算。
 
+`vagent usage --cost` 在既有输出上追加按参考价目表计算的金额（默认不显示，不写状态）。两个配套离线脚本：
+
+```powershell
+.\.venv\Scripts\python.exe scripts\compare_cost.py --home <已有数据目录>   # 缓存感知 vs 缓存盲
+.\.venv\Scripts\python.exe scripts\evaluate_behavior.py --home <空目录> --output <新路径> --k 2
+```
+
+`scripts/compare_cost.py` 使用只读快照：不迁移、不执行崩溃恢复、不创建目录，`--home` 打错直接报 `STORE_NOT_FOUND`。`scripts/evaluate_behavior.py` 默认离线、零费用；`gate` 用例必须每个样本都通过，`measure` 用例只报告指标，`--k` 不能超过样本数，`--live` 会被拒绝。
+
 | 字段 | 含义 |
 |---|---|
 | `modelCallCount` / `recordedCallCount` | 模型适配器调用尝试数 / 已有明细的调用数，包含失败与中断；存在旧版未跟踪步骤时前者为 null |
@@ -518,6 +527,22 @@ description: 说明哪些任务需要这个技能。
 
 `vagent skills list` 输出 `{"skills": [...], "diagnostics": [...]}`；诊断只含代码、目录名和固定说明，不含正文或私有绝对路径。Web 的「编排观测」面板同样显示未加载的用户 skill 诊断。
 
+## 高级开关（默认关闭）
+
+以下开关用于 Agent Harness 的可选能力（上下文摘要、长期记忆、提示词版本与追踪），默认关闭，在 `.env` 或环境变量中设置后重启生效。除 tracing 外，改动通常进入 Run 的 `contextSignature`，恢复旧 Run 需要原配置；关闭后回到 v2 基线。
+
+| 开关 | 默认 | 取值 / 作用 | 对签名 / 恢复的影响 |
+|---|---|---|---|
+| `VAGENT_CONTEXT_VERSION` | `2` | `2` 稳定前缀；`3` 历史摘要；`4` 尾部动态消息（配合 `VAGENT_CONTEXT_TAIL=system\|human`） | 版本改变签名；旧 Run 需新请求 |
+| `VAGENT_MEMORY` | `off` | 开启 `memory.json` 项目级长期记忆，召回已确认事实 | 开启后记忆块进入上下文并改变签名 |
+| `VAGENT_MEMORY_LIMIT` | `4` | 每个项目最多渲染的记忆条数（1–16） | 改变上下文内容与签名 |
+| `VAGENT_PROMPT_VERSION` | `v1` | `v1` 冻结；`v2` 追加数据通道硬化子句 | 模板文本进入签名，切换即拒绝恢复旧 Run |
+| `VAGENT_TRACING` | `off` | 开启 `traces/*.jsonl` span 导出 | 不改变签名；默认不写文件 |
+| `VAGENT_TRACE_SAMPLE` | `100` | 采样百分比（0–100） | 不改变签名 |
+| `VAGENT_TRACE_CONTENT` | `off` | 是否把提示词 / 回答正文写入 span | 不改变签名；开启后 trace 含正文 |
+
+`VAGENT_CLOSING_TURN`（缺省 `on`）控制预算耗尽后的无工具收尾轮；`VAGENT_CONTEXT_TAIL` 只对 v4 有效。两者已在前文说明。真实费用仍以 `usage bill` 手工台账为准，`usage --cost` 只是参考价目表下的估算。
+
 ## 数据兼容与限制
 
 默认数据目录为 `~/.vagent/`，可用 `VAGENT_HOME` 覆盖。`state.json` 保存会话、项目、产物、Run、操作结果、jobs/waits、media 索引与 M2 的 `storyboards`/`assets` 集合、M5 的 `episodes`/`scenes`/`characters`/`styles`、M6 的 `audio`/`subtitleTracks`/`renders` 与 M7 的 `seasons`/`batches`/`timelines` 集合；E3 的 headless 计划、授权指纹、登记结果与交付摘要保存在 Run 记录的可选 `headless` 字段（未使用时不写该字段，不改变存储 schema，也不迁移旧记录）；`checkpoints.sqlite` 保存图执行位置和消息。B1 的 `mock-video.json` 独立保存模拟上游受理记录、请求、轨迹和调用计数。应在程序退出后备份完整数据目录。配置 Key 不写入状态；真实 Job 的私有上游 URL 仅保存在本地状态中，不经公开接口返回。`inspect` 会显示创作正文。
@@ -528,7 +553,8 @@ description: 说明哪些任务需要这个技能。
 - B1 已登记但尚未提交的 Job 可由 Worker 继续推进；丢失提交结果的任务进入 `unknown`，不自动重提。已确认上游 ID 只用于继续查询，失败窗口和累计次数跨重启保留。
 - 应用快照和 SQLite 检查点分别提交，依靠同步图检查点、操作幂等和恢复时补交会话处理提交间隙；并非跨 JSON/SQLite 的单一数据库事务。
 - 异常断电可能留下 `instance.lock`；确认没有进程使用该数据目录后才手动移除，程序不会自动抢锁。
-- CLI/Web 已支持流式草稿，完成后以持久回复替换；草稿不写入检查点，中断后不作为下一次模型输入。自动摘要和跨项目偏好记忆尚未实现。
+- 单次模型请求预留并限制在 60 秒（剩余预算不足时更短）；接近输出上限的长回复可能因此被截断，已发生的费用仍按记录计入。
+- CLI/Web 已支持流式草稿，完成后以持久回复替换；草稿不写入检查点，中断后不作为下一次模型输入。自动摘要（v3/v4）与项目级长期记忆（`VAGENT_MEMORY=on`）都是显式 opt-in、默认关闭；不做跨项目偏好记忆。
 
 B1 的 JobService、MockVideoAdapter 和 JobWorker 可通过 Python API 独立使用和测试，不需要模型或 Key；应用统一管理 Worker 和客户端的启动与退出。Mock 只保存带 `simulated: true`、`mediaAvailable: false` 的描述，不生成媒体文件。文本 Agent 只需要 DeepSeek Key；live 生成另外需要视频 Key 和对应业务空间。缺少视频配置时仍可启动应用并使用文本功能。
 

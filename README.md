@@ -132,6 +132,28 @@ VAGENT_DEEPSEEK_MODEL=deepseek-flash
 
 每个子命令都支持 `--help`。逐命令的参数、错误码与边界见 [使用手册](./docs/USER_GUIDE.md)。
 
+## 高级开关（默认关闭）
+
+以下开关用于 Agent Harness 的可选能力（上下文摘要、长期记忆、提示词版本与追踪），默认关闭；在 `.env` 或环境变量中设置后重启生效。多数改动会进入 Run 的 `contextSignature`，因此恢复旧 Run 需要原配置；关掉即回到 v2 基线。
+
+| 开关 | 默认 | 作用 | 对签名 / 恢复的影响 |
+|---|---|---|---|
+| `VAGENT_CONTEXT_VERSION` | `2` | `2` 稳定前缀；`3` 历史摘要；`4` 尾部动态消息（配合 `VAGENT_CONTEXT_TAIL=system\|human`） | 版本改变签名；旧 Run 需新请求 |
+| `VAGENT_MEMORY` | `off` | 开启 `memory.json` 项目级长期记忆，召回已确认事实 | 开启后记忆块进入上下文并改变签名 |
+| `VAGENT_MEMORY_LIMIT` | `4` | 每个项目最多渲染的记忆条数（1–16） | 改变上下文内容与签名 |
+| `VAGENT_PROMPT_VERSION` | `v1` | `v1` 冻结；`v2` 追加数据通道硬化子句 | 模板文本进入签名，切换即拒绝恢复旧 Run |
+| `VAGENT_TRACING` | `off` | 开启 `traces/*.jsonl` span 导出 | 不改变签名；默认不写文件 |
+| `VAGENT_TRACE_SAMPLE` | `100` | 采样百分比（0–100） | 不改变签名 |
+| `VAGENT_TRACE_CONTENT` | `off` | 是否把提示词 / 回答正文写入 span | 不改变签名；开启后 trace 含正文 |
+
+`VAGENT_CLOSING_TURN`（缺省 `on`）控制预算耗尽后的无工具收尾轮，详见[使用手册](./docs/USER_GUIDE.md#高级开关默认关闭)。
+
+### 离线评测与成本命令
+
+- `vagent usage --cost`：在既有用量输出上追加参考价目表金额（默认不显示，不写状态）。
+- `scripts/evaluate_behavior.py --home <空目录> --output <新路径> --k 2`：离线行为评测。`gate` 用例必须全样本通过，`measure` 只报告指标；`k` 不能超过样本数，`--live` 明确拒绝。
+- `scripts/compare_cost.py --home <已有数据目录>`：只读快照对比缓存感知与缓存盲口径的文本模型费用；目录不存在直接报错。
+
 ## 架构概览
 
 ```text
@@ -227,5 +249,6 @@ node --test tests/test_job_state.mjs          # 其余 9 个 *-state 测试同�
 - Kling 与 fal 只有按官方文档的受控 HTTP 接入，没有真实付费样本；能力表标注「文档支持，未做真实样本」。
 - 万相与 CosyVoice 的真实样本给出的是产品口径估算，供应商实际账单未核对，账本依赖手工录入。
 - 单用户、单写进程的本地工具：同一数据目录同时只允许一个 CLI / Web 写进程；JSON 存储面向小规模使用。
-- 没有自动摘要、跨项目偏好记忆，也不做发送后的自动重投或换汇。
-- 未发布到 PyPI，需从仓库构建安装；文本模型尚无价格表与费用估算。
+- 自动摘要（`VAGENT_CONTEXT_VERSION=3/4`）与项目级长期记忆（`VAGENT_MEMORY=on`）都是显式 opt-in、默认关闭；不做跨项目偏好记忆、发送后的自动重投或换汇。
+- 单次模型请求预留并限制在 60 秒（剩余预算不足时更短）；接近输出上限的长回复可能因此被截断，见 [使用手册](./docs/USER_GUIDE.md)。
+- 未发布到 PyPI，需从仓库构建安装；文本模型有参考价目表与按已记录用量的估算，不是供应商账单。
