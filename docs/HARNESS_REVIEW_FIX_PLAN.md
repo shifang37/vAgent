@@ -518,6 +518,7 @@
 - `ruff check src/vagent tests scripts` 与 `ruff format --check` 全绿。
 - 全量：`pytest -q` **1557 passed, 4 skipped, 69 failed, 28 errors**（29 分 29 秒，本机 Windows）。失败/错误**全部**落在「子进程 + 管道」路径：ffmpeg 的 `asyncio.create_subprocess_exec` 抛 `PermissionError`（`ASSEMBLER_UNAVAILABLE`）、MCP stdio 连接失败（`MCP_CONNECT`）、`redis-server` 起不来、CLI 子进程超时或报本地目录权限——这是本次 DSH Windows 沙箱的已知边界（命名管道/受限令牌），不是本批改动。抽样复跑 `test_live_application`、`test_m3_headless`、`test_m3_multi_provider`、`test_m5_evaluation`、`test_m6_subtitle_api` 均复现为同一个 ffmpeg `PermissionError`；`test_m2_cli` 复现为 CLI 子进程的本地目录权限。失败清单里没有 `test_runner` / `test_resume` / `test_storage*` / `test_context_*` / `test_long_term_memory` / `test_usage` / `test_wait_*` / `test_job*` / `test_quality` / `test_tracing` 任何一项。
 - 因此「全绿门禁」需在非沙箱终端复跑（M0 的 1645 passed 就是这样得到的）；本机沙箱里只把定向与核心用例作为判据，未把环境失败算作回归。
+- 2026-11-06 已在完全权限（非沙箱）下复跑：**1685 passed, 4 skipped**（23 分 18 秒），见 §15。
 - 本机沙箱还有一个 `0o700` → Windows DACL 的问题（pytest 的 `tmp_path` 创建后本进程也不可读写）：用 `tmp/testshim/sitecustomize.py`（git-ignored，仅放进 `PYTHONPATH`）把该模式放宽到 `0o755` 再跑测试；仓库文件未改。
 
 ## 15. 实施记录（M1 剩余：FX-11 / FX-12 / FX-13 / FX-14 / FX-15）
@@ -541,6 +542,7 @@
 - 先红后绿：FX-11 的 4 条新用例在旧代码上全失败（3 条淘汰/解析 + 1 条摘要淘汰）；FX-13 的 13 组参数化在旧模式上有 **8 组失败**（5 个漏报：中文前缀、Bearer、JWT、中文键名 ×2；3 个误报：否定句、commit hash、32 位编号）；FX-15 的 2 条在旧代码上全失败（span 无 token、恢复后根 span 记 12 而非 5）；FX-14 的 3 条可导入断言在旧代码上全失败（pattern 被接受、深度无上限、坏 `$ref` 直接抛异常而不是返回工具错误），第 4 条因旧模块没有 `result_payload` 而无法收集（功能缺失）。FX-12 是新增布局，旧代码没有 v4；用「v2/v3 仍逐字节相同」与「相邻步共享前缀」两条覆盖，不把「旧代码没有该功能」算回归。
 - **FX-12 真实探针（已授权）**：2026-11-06，`deepseek-flash`，1 次调用。v4 + `tail=system` 的 Run 问「本 Run 的 modelCallsRemaining 是多少」，模型答 `8`（= `maxSteps`），状态 `completed`、`contextVersion=4`、`modelCalls=1` —— 供应商接受历史之后的尾部 `SystemMessage`，默认 `tail_role=system` 成立；`human` 仅作未验证时的回退。
 - `tests/test_context_layout_v4.py` 的 8 条：相邻步前缀一致、tail 不含预算/记忆、v2/v3 逐字节不变、两类尾部角色与非法值、v4 端到端摘要、签名覆盖 tail 角色、配置开关。
+- **全量（完全权限，非沙箱）**：`pytest -q` **1685 passed, 4 skipped**（23 分 18 秒）。此前沙箱里的 69 failed / 28 errors 全部消失，证实它们只是「子进程 + 管道」边界，不是回归。
 
 
 
