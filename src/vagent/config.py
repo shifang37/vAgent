@@ -86,7 +86,9 @@ class Config:
     # acceptance fixtures already used since M6 E1.
     context_bytes: int = 98304
     # Opt-in context v3 (history summary); 2 keeps every stored Run and baseline.
+    # Opt-in context v4 (dynamic tail) restores the provider prefix cache.
     context_version: int = 2
+    context_tail: Literal["system", "human"] = "system"
     prompt_version: str = "v1"
     # Opt-in long-term memory (H2): an offline, retrievable index of confirmed facts.
     # Off keeps the rendered context and the contextSignature byte-identical to today.
@@ -304,9 +306,12 @@ def load_config(env: Mapping[str, str] | None = None) -> Config:
     try:
         context_version = int(env.get("VAGENT_CONTEXT_VERSION") or "2")
     except ValueError:
-        raise AppError("INVALID_CONTEXT_VERSION", "上下文版本必须是 2 或 3。") from None
-    if context_version not in {2, 3}:
-        raise AppError("INVALID_CONTEXT_VERSION", "上下文版本必须是 2 或 3。")
+        raise AppError("INVALID_CONTEXT_VERSION", "上下文版本必须是 2、3 或 4。") from None
+    if context_version not in {2, 3, 4}:
+        raise AppError("INVALID_CONTEXT_VERSION", "上下文版本必须是 2、3 或 4。")
+    context_tail = (env.get("VAGENT_CONTEXT_TAIL") or "system").strip().lower()
+    if context_tail not in {"system", "human"}:
+        raise AppError("INVALID_CONTEXT_TAIL", "VAGENT_CONTEXT_TAIL 只支持 system 或 human。")
     prompt_version = env.get("VAGENT_PROMPT_VERSION") or "v1"
     if prompt_version not in PROMPT_VERSIONS:
         raise AppError("INVALID_PROMPT_VERSION", "提示词版本不受支持，请使用 v1 或 v2。")
@@ -346,6 +351,7 @@ def load_config(env: Mapping[str, str] | None = None) -> Config:
         model=environment_model or local.model or "deepseek-flash",
         context_bytes=budget,
         context_version=context_version,
+        context_tail=context_tail,
         prompt_version=prompt_version,
         memory_enabled=memory_enabled,
         memory_limit=memory_limit,

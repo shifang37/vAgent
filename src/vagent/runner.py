@@ -38,6 +38,8 @@ from vagent.context import (
     RUN_BUDGET_HEADER,
     SUMMARY_CONTEXT_VERSION,
     SUMMARY_HEADER,
+    TAIL_CONTEXT_VERSION,
+    TAIL_HEADER,
     ContextBuilder,
 )
 from vagent.errors import AppError, failure, public_error
@@ -357,6 +359,9 @@ class AgentRunner:
             payload["runBudgetGuidance"] = RUN_BUDGET_HEADER
         if context.format_version >= SUMMARY_CONTEXT_VERSION:
             payload["historySummaryGuidance"] = SUMMARY_HEADER
+        if context.format_version >= TAIL_CONTEXT_VERSION:
+            # The tail role is part of the signed layout: switching it refuses a resume.
+            payload["contextTail"] = {"role": context.tail_role, "template": TAIL_HEADER}
         if self.memory is not None:
             # The recall block and the embedder are part of the signed configuration:
             # toggling memory or swapping the embedder refuses an old Run's resume.

@@ -309,8 +309,9 @@ async def test_rejected_summary_does_not_emit_applied_event(store, tmp_path):
 def test_context_version_knob_defaults_to_v2_and_accepts_three():
     assert load_config({"VAGENT_HOME": "tmp/h1-knob"}).context_version == 2
     assert load_config({"VAGENT_HOME": "tmp/h1-knob", "VAGENT_CONTEXT_VERSION": "3"}).context_version == 3
+    assert load_config({"VAGENT_HOME": "tmp/h1-knob", "VAGENT_CONTEXT_VERSION": "4"}).context_version == 4
     with pytest.raises(AppError) as error:
-        load_config({"VAGENT_HOME": "tmp/h1-knob", "VAGENT_CONTEXT_VERSION": "4"})
+        load_config({"VAGENT_HOME": "tmp/h1-knob", "VAGENT_CONTEXT_VERSION": "5"})
     assert error.value.code == "INVALID_CONTEXT_VERSION"
 
 

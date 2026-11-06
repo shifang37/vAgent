@@ -520,7 +520,7 @@
 - 因此「全绿门禁」需在非沙箱终端复跑（M0 的 1645 passed 就是这样得到的）；本机沙箱里只把定向与核心用例作为判据，未把环境失败算作回归。
 - 本机沙箱还有一个 `0o700` → Windows DACL 的问题（pytest 的 `tmp_path` 创建后本进程也不可读写）：用 `tmp/testshim/sitecustomize.py`（git-ignored，仅放进 `PYTHONPATH`）把该模式放宽到 `0o755` 再跑测试；仓库文件未改。
 
-## 15. 实施记录（M1 续：FX-11 / FX-13 / FX-15）
+## 15. 实施记录（M1 剩余：FX-11 / FX-12 / FX-13 / FX-14 / FX-15）
 
 | 项 | 状态 | 落地要点 | 新增/调整用例 |
 |---|---|---|---|
@@ -528,6 +528,7 @@
 | FX-13 | 完成 | 边界统一为 `(?<![A-Za-z0-9])`（中文前缀可命中）；补 JWT、`Bearer`、`api_key: 值`、中文键名（密码/密钥/口令/令牌）+ 分隔符；十六进制/base64 只在键名上下文里判为凭据，裸 hash 与「不要出现 API key 字样」不再误报 | `tests/test_long_term_memory.py` 新增 13 组参数化（8 正 + 5 负） |
 | FX-15 | 完成 | 失败的模型调用在 `model.call` span 关闭前结算：`finish_model_call` 带 `error.usage`，span 记 `inputTokens/outputTokens`，有 token 时补发 `model.usage`；`finish_attempt` 用 `attempt_finished` 防重复结算；根 span 改为「本次执行增量」（减去进入时的累计 token） | `tests/test_tracing.py` 新增 2 条（截断流补 span/事件、恢复后根 span 每段增量） |
 | FX-14 | 完成 | Schema 关卡统一到 `tools.check_schema`：拒绝外部 `$ref`、默认拒绝 `pattern`/`patternProperties`（`MCP_SCHEMA_UNSUPPORTED`，`ServerConfig.allow_patterns` 显式放行）、深度 ≤ 16、体积 ≤ 16 KiB；参数 ≤ 32 KiB 且校验异常一律降级为工具错误（`MCP_SCHEMA`）；结果递归清洗 NaN/Infinity 并标 `source="mcp"`，仍受 16 KiB 上限 | `tests/test_mcp.py` 新增 5 条（NaN 清洗、pattern 拒绝/放行、深度、恶意 pattern 不阻塞、坏 `$ref`/超大参数降级） |
+| FX-12 | 完成 | 新增 `contextVersion=4`：系统消息只留规则 + Skills + 项目事实，摘要/记忆/剩余预算放进历史之后的**尾部动态消息**（每步合成、不入历史）；`VAGENT_CONTEXT_TAIL=system|human`（默认 `system`，已探针）；v4 签名纳入尾部角色与模板；v2/v3 布局与签名不变 | 新增 `tests/test_context_layout_v4.py`（8 条：前缀一致、tail 不含预算/记忆、v2/v3 逐字节、角色校验、端到端摘要、签名、开关） |
 
 ### 与规划的偏差
 
@@ -536,14 +537,16 @@
 
 ### 验证
 
-- `tests/test_long_term_memory.py` **36 passed**、`tests/test_context_summary.py` **12 passed**、`tests/test_tracing.py` **19 passed**、`tests/test_usage.py` **18 passed**、`tests/test_mcp.py` **10 passed**。
-- 先红后绿：FX-11 的 4 条新用例在旧代码上全失败（3 条淘汰/解析 + 1 条摘要淘汰）；FX-13 的 13 组参数化在旧模式上有 **8 组失败**（5 个漏报：中文前缀、Bearer、JWT、中文键名 ×2；3 个误报：否定句、commit hash、32 位编号）；FX-15 的 2 条在旧代码上全失败（span 无 token、恢复后根 span 记 12 而非 5）；FX-14 的 3 条可导入断言在旧代码上全失败（pattern 被接受、深度无上限、坏 `$ref` 直接抛异常而不是返回工具错误），第 4 条因旧模块没有 `result_payload` 而无法收集（功能缺失）。修复后全绿。
+- `tests/test_long_term_memory.py` **36 passed**、`tests/test_context_summary.py` **12 passed**、`tests/test_tracing.py` **19 passed**、`tests/test_usage.py` **18 passed**、`tests/test_mcp.py` **10 passed**、`tests/test_context_layout_v4.py` **8 passed**；布局相关四文件一起 **60 passed**。
+- 先红后绿：FX-11 的 4 条新用例在旧代码上全失败（3 条淘汰/解析 + 1 条摘要淘汰）；FX-13 的 13 组参数化在旧模式上有 **8 组失败**（5 个漏报：中文前缀、Bearer、JWT、中文键名 ×2；3 个误报：否定句、commit hash、32 位编号）；FX-15 的 2 条在旧代码上全失败（span 无 token、恢复后根 span 记 12 而非 5）；FX-14 的 3 条可导入断言在旧代码上全失败（pattern 被接受、深度无上限、坏 `$ref` 直接抛异常而不是返回工具错误），第 4 条因旧模块没有 `result_payload` 而无法收集（功能缺失）。FX-12 是新增布局，旧代码没有 v4；用「v2/v3 仍逐字节相同」与「相邻步共享前缀」两条覆盖，不把「旧代码没有该功能」算回归。
+- **FX-12 真实探针（已授权）**：2026-11-06，`deepseek-flash`，1 次调用。v4 + `tail=system` 的 Run 问「本 Run 的 modelCallsRemaining 是多少」，模型答 `8`（= `maxSteps`），状态 `completed`、`contextVersion=4`、`modelCalls=1` —— 供应商接受历史之后的尾部 `SystemMessage`，默认 `tail_role=system` 成立；`human` 仅作未验证时的回退。
+- `tests/test_context_layout_v4.py` 的 8 条：相邻步前缀一致、tail 不含预算/记忆、v2/v3 逐字节不变、两类尾部角色与非法值、v4 端到端摘要、签名覆盖 tail 角色、配置开关。
 
 
 
 ## 建议的下一步
 
-1. **M0 已全部落地**（见 §13），不再排期；回滚与偏差记录也在该节。
-2. **M1 剩余**：FX-13（密钥识别）与 FX-15（用量口径）相互独立，可并行；FX-11 已完成（见 §15）。
-3. **FX-12（contextVersion 4）** 动手前先跑 1 次尾部角色探针（需显式授权）；探针失败就把 v4 留在 opt-in，不阻塞其它修复。
-4. **M2 的 FX-16/FX-17** 与 M1 独立，可在 FX-12 之前先做。
+1. **M0 / M1 已全部落地**（见 §13–§15）：FX-08→15 完成，M1 只剩发布版本号与全量门禁。
+2. **M2（FX-16→19）** 可接着做：行为评测可信化、`compare_cost.py` 真只读、文档补齐（7 开关 + 3 命令 + 60 s 限制）、文档门禁用例。
+3. **M3（FX-20→28）** 按「数据增长 → 旁路写安全 → 观测细节 → 加固」推进；FX-20 需单独一条泳道。
+4. **M1 的 v4 仍是 opt-in**：默认 `VAGENT_CONTEXT_VERSION=2`。把默认翻到 v4 之前，建议先积累一段真实运行的缓存命中数据，再决定是否默认开启。

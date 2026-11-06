@@ -775,8 +775,12 @@ class ApplicationService:
         )
 
     def context_builder(self):
-        """The context layout for new Runs; v3 is opt-in via VAGENT_CONTEXT_VERSION."""
-        return ContextBuilder(self.config.context_bytes, format_version=self.config.context_version)
+        """The context layout for new Runs; v3/v4 are opt-in via VAGENT_CONTEXT_VERSION."""
+        return ContextBuilder(
+            self.config.context_bytes,
+            format_version=self.config.context_version,
+            tail_role=self.config.context_tail,
+        )
 
     def prompt_version(self):
         """The versioned system prompt for new Runs; v1 is the frozen default."""
