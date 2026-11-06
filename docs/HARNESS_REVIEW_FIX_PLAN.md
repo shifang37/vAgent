@@ -607,7 +607,7 @@
 
 ### 验证
 
-- 定向：`tests/test_state_growth.py` **12 passed**、`tests/test_sidecar_safety.py` **8 passed**、`tests/test_tracing.py` **22 passed**、`tests/test_streaming.py` **18 passed**、`tests/test_m5_tools.py` **22 passed**、`tests/test_m6_audio.py` + `test_m6_audio_generate.py` **34 passed**、`tests/test_cost_estimate.py` **16 passed**、`tests/test_mcp.py` **10 passed**。
+- 定向：`tests/test_state_growth.py` **13 passed**、`tests/test_sidecar_safety.py` **8 passed**、`tests/test_tracing.py` **22 passed**、`tests/test_streaming.py` **18 passed**、`tests/test_m5_tools.py` **22 passed**、`tests/test_m6_audio.py` + `test_m6_audio_generate.py` **34 passed**、`tests/test_cost_estimate.py` **16 passed**、`tests/test_mcp.py` **10 passed**。
 - 回归面：`test_resume` / `test_answer_cache` / `test_usage` / `test_harness_gaps` / `test_context_*` / `test_long_term_memory` / `test_storage_*` / `test_submission_wal` / `test_wait_runtime` / `test_wait_recovery` 共 **236 passed**（73 秒）。
 - `python -m ruff check src/vagent tests scripts`：**All checks passed**；`ruff format --check`：**258 files already formatted**。
 - 全量 `pytest -q` 见 §19。
