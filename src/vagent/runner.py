@@ -738,6 +738,10 @@ class AgentRunner:
         }
         if trace.content:
             attributes["prompt"] = record.get("prompt", "")
+        # The root span reports this execution only: the Run record accumulates tokens
+        # across resumes, so subtract the totals the execution started with.
+        base_input = record.get("inputTokens") or 0
+        base_output = record.get("outputTokens") or 0
         with span(trace, "run", attributes=attributes) as run_span:
             try:
                 result = await self._run_graph(
@@ -758,8 +762,8 @@ class AgentRunner:
                 errorCode=result.get("errorCode"),
                 modelSteps=result.get("modelSteps"),
                 toolCalls=result.get("toolCalls"),
-                inputTokens=result.get("inputTokens"),
-                outputTokens=result.get("outputTokens"),
+                inputTokens=max(0, (result.get("inputTokens") or 0) - base_input),
+                outputTokens=max(0, (result.get("outputTokens") or 0) - base_output),
                 droppedMessages=result.get("droppedMessages"),
             )
             return result
@@ -845,6 +849,7 @@ class AgentRunner:
             next_state = journal.stats(state)
             attempt_step = None
             attempt_started = None
+            attempt_finished = False
             cache_key = None
 
             def record_cache(status):
@@ -854,7 +859,7 @@ class AgentRunner:
                 self.emit({"type": "answer_cache", "status": status})
 
             async def generate():
-                nonlocal attempt_started
+                nonlocal attempt_started, attempt_finished
                 attempt_started = time.monotonic()
                 journal.start_model_call(attempt_step)
                 sequence = 0
@@ -889,10 +894,28 @@ class AgentRunner:
                             else await model.generate(report.messages, specs)
                         )
                     except Exception as error:
+                        # A truncated or interrupted stream is billed too: settle the call
+                        # here, while the span is still open, so the token usage reaches
+                        # both the span and a model.usage event. The outer handler must
+                        # not settle the same call twice.
+                        safe = public_error(error)
+                        attempt_finished = True
+                        call = journal.finish_model_call(
+                            attempt_step,
+                            status="failed",
+                            duration=time.monotonic() - attempt_started,
+                            error_code=safe.code,
+                            usage=getattr(error, "usage", None),
+                        )
                         model_span.set(
                             status="error",
-                            errorCode=getattr(error, "code", type(error).__name__),
+                            errorCode=safe.code,
+                            inputTokens=(call or {}).get("inputTokens"),
+                            outputTokens=(call or {}).get("outputTokens"),
+                            durationSeconds=(call or {}).get("durationSeconds"),
                         )
+                        if call and (call.get("inputTokens") or call.get("outputTokens")):
+                            self.emit({"type": "model.usage", "runId": record["id"], "call": call})
                         raise
                     call = journal.finish_model_call(
                         attempt_step,
@@ -911,7 +934,7 @@ class AgentRunner:
                 return reply
 
             def finish_attempt(error: AppError) -> None:
-                if attempt_started is not None:
+                if attempt_started is not None and not attempt_finished:
                     journal.finish_model_call(
                         attempt_step,
                         status="cancelled" if error.code == "CANCELLED" else "failed",

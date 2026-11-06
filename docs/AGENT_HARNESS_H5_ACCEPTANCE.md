@@ -58,7 +58,8 @@
 | 脱敏 | 键名整条丢弃 + 值就地替换 + 长度截断；内容采集为显式开关 | `test_secret_shaped_values_and_keys_are_redacted`、`test_failed_run_records_an_error_span`、`test_content_capture_is_opt_in` |
 | 默认关闭不改变行为 | 关闭不建目录、不建 span；事件类型序列与开启时一致；签名相同 | `test_tracing_off_writes_nothing_and_keeps_events_identical` |
 | 恢复后 span 连续 | 两次执行同一 traceId，`run₁.parentSpanId == run₀.spanId` | `test_resume_continues_the_same_trace`、`test_tracing_records_the_wait_lifecycle` |
-| 与 usage 事件对齐 | span 的 token 数 == `model.usage` 事件里的 token 数 | `test_model_span_usage_matches_the_usage_events` |
+| 与 usage 事件对齐 | span 的 token 数 == `model.usage` 事件里的 token 数；被截断但已计费的流也补齐 span 与事件 | `test_model_span_usage_matches_the_usage_events`、`test_truncated_stream_records_usage_in_span_and_event` |
+| 根 span 只记本次执行 | 恢复后每个 `run` span 报本段增量，不是跨恢复累计 | `test_run_span_tokens_are_per_execution_after_resume` |
 | 采样 | 0 全关、100 全开、按 trace 确定性 | `test_sampling_is_deterministic_and_can_disable_tracing` |
 | 观测不改变结果 | 导出必炸的 exporter 下 Run 仍 `completed` | `test_an_export_failure_never_breaks_the_run` |
 | 默认关闭（配置） | `VAGENT_TRACING` 缺省 off；非法采样百分比拒绝 | `test_config_tracing_defaults_off_and_parses_the_switch`、`test_config_rejects_an_invalid_sample_percent` |

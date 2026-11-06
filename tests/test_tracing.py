@@ -9,6 +9,7 @@ from langchain_core.messages import AIMessage
 
 from vagent.config import load_config
 from vagent.errors import AppError
+from vagent.models import StreamResponseError
 from vagent.runner import AgentRunner
 from vagent.tools import create_project_tools
 from vagent.tracing import (
@@ -143,6 +144,53 @@ async def test_model_span_usage_matches_the_usage_events(store):
     assert calls[-1]["attributes"]["inputTokens"] == 7
     assert calls[-1]["attributes"]["outputTokens"] == 3
     assert sum(call["attributes"]["outputTokens"] or 0 for call in calls) == 3
+
+
+class TruncatedStreamModel:
+    """A stream that bills tokens and then fails before a finish reason arrives."""
+
+    name = "truncated-stream"
+
+    def __init__(self, partial):
+        self.partial = partial
+
+    async def generate_stream(self, messages, tools, on_delta):
+        raise StreamResponseError("RESPONSE_TRUNCATED", "模型回复被截断", self.partial)
+
+    async def generate(self, messages, tools):
+        raise AssertionError("the runner should stream this model")
+
+
+async def test_truncated_stream_records_usage_in_span_and_event(store):
+    exporter = InMemoryExporter()
+    events = []
+    partial = AIMessage(
+        content="半截",
+        usage_metadata={"input_tokens": 11, "output_tokens": 4, "total_tokens": 15},
+    )
+    traced = AgentRunner(
+        store=store,
+        model=TruncatedStreamModel(partial),
+        tools=create_project_tools(),
+        tracing=tracer_for(exporter),
+    )
+    traced.on_event = events.append
+    result = await traced.run("coffee", "做个方案", request_id="trace-truncated")
+
+    assert result["status"] == "failed"
+    assert result["errorCode"] == "RESPONSE_TRUNCATED"
+    # The provider billed the call even though no reply reached the history.
+    assert result["inputTokens"] == 11 and result["outputTokens"] == 4
+
+    usage_events = [event for event in events if event["type"] == "model.usage"]
+    assert len(usage_events) == 1
+    assert usage_events[0]["call"]["inputTokens"] == 11
+    assert usage_events[0]["call"]["outputTokens"] == 4
+
+    span = exporter.by_name("model.call")[0]
+    assert span["status"] == "error" and span["errorCode"] == "RESPONSE_TRUNCATED"
+    assert span["attributes"]["inputTokens"] == 11
+    assert span["attributes"]["outputTokens"] == 4
 
 
 async def test_failed_run_records_an_error_span(store):
@@ -283,6 +331,36 @@ async def test_resume_continues_the_same_trace(store):
     assert runs[1]["parentSpanId"] == runs[0]["spanId"]
     assert runs[0]["attributes"]["runStatus"] == "failed"
     assert runs[1]["attributes"]["runStatus"] == "completed"
+
+
+async def test_run_span_tokens_are_per_execution_after_resume(store):
+    exporter = InMemoryExporter()
+    tracer = tracer_for(exporter)
+
+    def read_then_fail(messages, step):
+        if step == 0:
+            message = tool_call("project_update", {"expectedRevision": 0, "audience": "夜班护士"})
+            message.usage_metadata = {"input_tokens": 7, "output_tokens": 3, "total_tokens": 10}
+            return message
+        raise RuntimeError("provider down")
+
+    first = await runner(store, read_then_fail, tracing=tracer).run("coffee", "做个方案")
+    assert first["status"] == "failed" and first["inputTokens"] == 7
+
+    def finish(*_):
+        return AIMessage(
+            content="完成",
+            usage_metadata={"input_tokens": 5, "output_tokens": 2, "total_tokens": 7},
+        )
+
+    final = await runner(store, finish, tracing=tracer).resume(first["id"])
+    assert final["status"] == "completed" and final["inputTokens"] == 12
+
+    runs = exporter.by_name("run", Tracer.trace_id_for(first["id"]))
+    assert len(runs) == 2
+    # Each root span reports its own execution, not the cross-resume cumulative total.
+    assert [run["attributes"]["inputTokens"] for run in runs] == [7, 5]
+    assert [run["attributes"]["outputTokens"] for run in runs] == [3, 2]
 
 
 # --- config -----------------------------------------------------------------------
