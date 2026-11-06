@@ -23,6 +23,7 @@ from vagent.summary import (
     summary_target_bytes,
 )
 from vagent.tools import create_project_tools
+from vagent.tracing import InMemoryExporter, Tracer
 
 PROJECT = {
     "id": "coffee",
@@ -77,6 +78,26 @@ class CountingSummarizer(ExtractiveSummarizer):
     def summarize(self, messages, *, target_bytes):
         self.calls += 1
         return super().summarize(messages, target_bytes=target_bytes)
+
+
+class FailingSummarizer:
+    name = "failing"
+    fingerprint = "failing-v1"
+
+    def __init__(self):
+        self.calls = 0
+
+    def summarize(self, messages, *, target_bytes):
+        self.calls += 1
+        raise RuntimeError("摘要服务不可用")
+
+
+class OversizedSummarizer:
+    name = "oversized"
+    fingerprint = "oversized-v1"
+
+    def summarize(self, messages, *, target_bytes):
+        return "x" * (BUDGET * 2)
 
 
 def seed(store, messages, session="coffee"):
@@ -197,6 +218,77 @@ async def test_v3_run_applies_the_digest_once_and_reuses_it_after_reopen(store):
         assert resumed.calls == 0  # the persisted digest is reused, never re-summarized
         assert SUMMARY_HEADER in again.inputs[0][0].content
         assert [event["type"] for event in events].count("context.summary_reused") == 1
+
+
+async def v2_baseline(tmp_path, messages, *, name):
+    """One v2 Run over an identical seeded session: the byte-for-byte reference."""
+    with FileStore.open(tmp_path / name) as plain:
+        seed(plain, messages)
+        model = ScriptedModel(lambda *_: AIMessage(content="继续。"))
+        result = await AgentRunner(
+            store=plain,
+            model=model,
+            tools=create_project_tools(),
+            context=ContextBuilder(BUDGET, format_version=2),
+        ).run("coffee", "继续这个项目", request_id=f"{name}-run")
+    return result, model
+
+
+async def test_summary_failure_matches_v2_byte_for_byte(store, tmp_path):
+    messages = history(40)
+    seed(store, messages)
+    events = []
+    summarizer = FailingSummarizer()
+    v3_model = ScriptedModel(lambda *_: AIMessage(content="继续。"))
+    v3 = await AgentRunner(
+        store=store,
+        model=v3_model,
+        tools=create_project_tools(),
+        context=ContextBuilder(BUDGET, format_version=SUMMARY_CONTEXT_VERSION),
+        summarizer=summarizer,
+        on_event=events.append,
+    ).run("coffee", "继续这个项目", request_id="summary-failure")
+
+    v2, v2_model = await v2_baseline(tmp_path, messages, name="state-v2")
+
+    assert v3["status"] == v2["status"] == "completed"
+    assert summarizer.calls == 1
+    # A digest that was never generated must not shrink the history: the Run keeps
+    # exactly the v2 truncation, message for message and byte for byte.
+    assert messages_to_dict(v3_model.inputs[0]) == messages_to_dict(v2_model.inputs[0])
+    assert v3["contextBytes"] == v2["contextBytes"]
+    assert "context.summarized" not in [event["type"] for event in events]
+
+
+async def test_rejected_summary_does_not_emit_applied_event(store, tmp_path):
+    messages = history(40)
+    seed(store, messages)
+    events = []
+    exporter = InMemoryExporter()
+    model = ScriptedModel(lambda *_: AIMessage(content="继续。"))
+    result = await AgentRunner(
+        store=store,
+        model=model,
+        tools=create_project_tools(),
+        context=ContextBuilder(BUDGET, format_version=SUMMARY_CONTEXT_VERSION),
+        summarizer=OversizedSummarizer(),
+        on_event=events.append,
+        tracing=Tracer(exporter),
+    ).run("coffee", "继续这个项目", request_id="summary-rejected")
+
+    assert result["status"] == "completed"
+    types = [event["type"] for event in events]
+    # The digest exists but the budget refused it, so nothing was applied.
+    assert "context.summarized" not in types
+    rejected = [event for event in events if event["type"] == "context.summary_rejected"]
+    assert len(rejected) == 1 and rejected[0]["reason"] == "budget"
+    spans = exporter.by_name("context.summarize", Tracer.trace_id_for(result["id"]))
+    assert len(spans) == 1
+    assert spans[0]["attributes"]["applied"] is False
+    assert spans[0]["attributes"]["summaryBytes"] > 0
+    v2, v2_model = await v2_baseline(tmp_path, messages, name="state-v2-rejected")
+    assert messages_to_dict(model.inputs[0]) == messages_to_dict(v2_model.inputs[0])
+    assert result["contextBytes"] == v2["contextBytes"]
 
 
 def test_context_version_knob_defaults_to_v2_and_accepts_three():

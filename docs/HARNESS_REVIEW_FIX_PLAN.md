@@ -495,9 +495,34 @@
 - 新增开关 `VAGENT_CLOSING_TURN` 已写入 `.env.example`、`AGENT_HARNESS_DESIGN.md §4.2` 与 `USER_GUIDE`；FX-18 的"高级开关"一节仍应把它与其余 7 个开关统一补齐。
 - 本机运行需清掉 `HTTP(S)_PROXY/ALL_PROXY/NO_PROXY`：当前环境 `NO_PROXY` 里的 `[::1]` 会让 httpx 解析代理时抛 `InvalidURL`（与本次改动无关）。
 
+## 14. 实施记录（M1 上半：FX-08 / FX-09 / FX-10）
+
+> 2026-11-06，接着 M0 的同一工作区落地；每条先让新增用例在旧代码上失败，再修复转绿。
+
+| 项 | 状态 | 落地要点 | 新增/调整用例 |
+|---|---|---|---|
+| FX-08 | 完成 | `schema_feedback_exhausted` 遇 `HumanMessage` 时同时 `batches.clear()`：上一 Run 的末批不再参与「连续两次相同 Schema 错误」的判定；判定仍完全由消息历史推导，无持久字段 | `tests/test_harness_gaps.py`：新增会话内跨 Run 用例，并在历史级用例补「两个 Run 各自一次相同错误 → 不拦截」断言 |
+| FX-09 | 完成 | `_summarize` 只负责生成/复用并返回 `(summary, reused)`，不发事件；调用点在第二次 build 后用 `report.summary is not None` 判定采用：采用才发 `context.summarized`（`applied=true`、`reused`、`summaryBytes`）并让 span `applied=true`，未采用发 `context.summary_rejected(reason=budget)`、span `applied=false`；只要未采用就 `build_context(summarize=False)` 重建，与 v2 逐字节相同 | `tests/test_context_summary.py`：新增 2 条（摘要器失败逐字节等价、超预算不发 applied），既有用例不变 |
+| FX-10 | 完成 | `sync` 改为「当前事实集差集」：`id ∈ F` 活跃（曾被取代的复活），`id ∉ F` 的活跃记录按 kind 处理——单值 kind 指向新值，`constraint`/`plan` 一律 `"removed"`；同级约束/计划项不再互相取代；新增、取代、复活任一真正发生才一次性写盘；侧车升 `memory-v2`，`version=1` 可读 | `tests/test_long_term_memory.py`：新增 6 条（并存、删除、立即落盘、单值指向、复活、v1 兼容） |
+
+### 与规划的偏差
+
+- **FX-10 的取代目标**：规划写「`"removed"` 或指向同 kind 的新记录（可选）」。实现按 kind 是否单值决定：`goal/audience/style` 指向新值，`constraint/plan` 一律 `"removed"`——多值 kind 里指向某个兄弟事实会重新引入「误杀」语义。另补「回归即复活」：内容寻址的记录再次出现在当前事实集时清空 `supersededBy`，否则删掉再加回的事实将永久不可召回，属同一类缺陷。
+- **FX-09 的事件口径**：保留 `context.summary_reused` 作为独立的缓存命中事件；「一次事件带 applied/reused」由 `context.summarized`（仅在采用时）与 `context.summary_reused`（仅命中缓存时）共同表达，既满足「未采用不得声称 applied」，也不破坏既有观测口径。
+- **FX-09 的重建成本**：降级路径多一次纯计算的 `build`（长历史下 O(消息数×轮数)），不产生模型调用；换来的是「失败即等于 v2」这一可断言的强不变量。
+
+### 验证
+
+- 定向：`tests/test_harness_gaps.py` **5 passed**、`tests/test_context_summary.py` **11 passed**、`tests/test_long_term_memory.py` **20 passed**；连同 `test_runner` / `test_resume` / `test_context_optimization` / `test_prompt_versions` / `test_tracing` / `test_usage` / `test_wait_runtime` / `test_wait_recovery` 一起跑 **212 passed**（71 秒）。
+- 先红后绿：同上三组新增断言在旧实现上分别 **2 failed / 2 failed / 4 failed**，修复后全绿（FX-10 的「单值指向」用例在旧实现上恰好同键，故仍绿，属预期）。
+- `ruff check src/vagent tests scripts` 与 `ruff format --check` 全绿。
+- 全量：`pytest -q` **1557 passed, 4 skipped, 69 failed, 28 errors**（29 分 29 秒，本机 Windows）。失败/错误**全部**落在「子进程 + 管道」路径：ffmpeg 的 `asyncio.create_subprocess_exec` 抛 `PermissionError`（`ASSEMBLER_UNAVAILABLE`）、MCP stdio 连接失败（`MCP_CONNECT`）、`redis-server` 起不来、CLI 子进程超时或报本地目录权限——这是本次 DSH Windows 沙箱的已知边界（命名管道/受限令牌），不是本批改动。抽样复跑 `test_live_application`、`test_m3_headless`、`test_m3_multi_provider`、`test_m5_evaluation`、`test_m6_subtitle_api` 均复现为同一个 ffmpeg `PermissionError`；`test_m2_cli` 复现为 CLI 子进程的本地目录权限。失败清单里没有 `test_runner` / `test_resume` / `test_storage*` / `test_context_*` / `test_long_term_memory` / `test_usage` / `test_wait_*` / `test_job*` / `test_quality` / `test_tracing` 任何一项。
+- 因此「全绿门禁」需在非沙箱终端复跑（M0 的 1645 passed 就是这样得到的）；本机沙箱里只把定向与核心用例作为判据，未把环境失败算作回归。
+- 本机沙箱还有一个 `0o700` → Windows DACL 的问题（pytest 的 `tmp_path` 创建后本进程也不可读写）：用 `tmp/testshim/sitecustomize.py`（git-ignored，仅放进 `PYTHONPATH`）把该模式放宽到 `0o755` 再跑测试；仓库文件未改。
+
 ## 建议的下一步
 
-1. **先做 M0 的复现与 FX-01**：它是唯一"一条阻塞 Run 让所有后续 Run 不恢复"的全局故障，改动小、收益最大。
-2. FX-02/03 紧随其后，因为它们把"钱丢了找不回来"变成"最多延迟一个事务"。
-3. FX-04/05/06/07 可以并行交给第二个人；FX-04 要注意开关默认值，避免既有评估基线漂移。
-4. M1 的 FX-12 在动手前先跑 1 次尾部角色探针，探针失败就把 v4 留在 opt-in，不阻塞其它修复。
+1. **M0 已全部落地**（见 §13），不再排期；回滚与偏差记录也在该节。
+2. **M1 剩余**：FX-11（淘汰顺序与读放大）、FX-13（密钥识别）、FX-15（用量口径）相互独立，可并行；FX-11 与 FX-10 同文件，建议紧接着做，避免二次改 `sync`/`render`。
+3. **FX-12（contextVersion 4）** 动手前先跑 1 次尾部角色探针（需显式授权）；探针失败就把 v4 留在 opt-in，不阻塞其它修复。
+4. **M2 的 FX-16/FX-17** 与 M1 独立，可在 FX-12 之前先做。

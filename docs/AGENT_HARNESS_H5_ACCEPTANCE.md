@@ -70,7 +70,7 @@
 - **未完成的 span 不落盘。** span 在结束时写出（OTel 也是这个语义），进程崩溃时正在进行的 span 会丢；不补写「猜测的」结束时间。这是刻意的：宁可少一条 span，也不写假数据。
 - **没有 OTLP / collector 传输。** 只写本地 JSONL；字段即 OTel 形状，接 collector 时只需新增一个 exporter 类（`export(span)` + `previous_root(traceId)`）。
 - **不采样 span 内部事件。** 只记 span 与属性，不做 span events / links / baggage。
-- **`context.summarize` 的 cached 标记未记。** 摘要是否命中侧车缓存在事件流里有（`context.summary_reused`），span 只记 `applied` 与 `summaryBytes`，避免两处口径不一致。
+- **`context.summarize` 的 `reused` 与 `applied` 同源于一次判定。** span 记 `applied`、`reused` 与 `summaryBytes`；`applied` 只由「第二次 build 是否真正采用」决定，未采用时事件（`context.summary_rejected`）与 span 一致地为非 applied，不会出现「事件说已摘要、span 说没采用」的两套口径。
 
 ## 兼容与边界
 

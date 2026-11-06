@@ -60,6 +60,39 @@ async def test_recovery_after_one_schema_error_completes(store):
     assert result["errorCode"] is None
 
 
+async def test_schema_feedback_limit_resets_between_runs_in_one_session(store):
+    """A session keeps earlier Runs in its history; the cap is per Run, not per session."""
+
+    def script(messages, step):
+        if step == 0:
+            return tool_call("project_update", BAD_UPDATE, call_id="bad")
+        return AIMessage(content="已修正")
+
+    def runner_for(model):
+        return AgentRunner(store=store, model=model, tools=create_project_tools())
+
+    first = ScriptedModel(script)
+    one = await runner_for(first).run("coffee", "第一次", request_id="schema-run-1")
+    assert one["status"] == "completed" and first.calls == 2
+
+    # The next Run repeats the very same mistake: it still gets one feedback and
+    # completes instead of being capped by the previous Run's last batch.
+    second = ScriptedModel(script)
+    two = await runner_for(second).run("coffee", "第二次", request_id="schema-run-2")
+    assert two["status"] == "completed"
+    assert two["errorCode"] is None
+    assert second.calls == 2
+
+    # Repeating the same rejection twice inside THIS Run is still capped.
+    third = ScriptedModel(
+        lambda messages, step: tool_call("project_update", BAD_UPDATE, call_id=f"bad-{step}")
+    )
+    three = await runner_for(third).run("coffee", "第三次", request_id="schema-run-3")
+    assert three["status"] == "failed"
+    assert three["errorCode"] == "SCHEMA_FEEDBACK_LIMIT"
+    assert third.calls == 2
+
+
 def test_schema_feedback_verdict_comes_from_history():
     ok = '{"ok": true, "data": {}}'
     bad = '{"ok": false, "error": {"code": "INVALID_ARGUMENTS", "message": "x"}}'
@@ -72,6 +105,17 @@ def test_schema_feedback_verdict_comes_from_history():
 
     same = [HumanMessage(content="go"), *turn("project_update", bad, "a"), *turn("project_update", bad, "b")]
     assert schema_feedback_exhausted(same) is True
+
+    # A HumanMessage starts a new Run: the previous Run's batch is not its "first"
+    # identical rejection, so the same error in a new Run is fed back again.
+    two_runs = [
+        HumanMessage(content="first"),
+        *turn("project_update", bad, "a"),
+        AIMessage(content="已修正"),
+        HumanMessage(content="second"),
+        *turn("project_update", bad, "b"),
+    ]
+    assert schema_feedback_exhausted(two_runs) is False
 
     broken = [
         HumanMessage(content="go"),

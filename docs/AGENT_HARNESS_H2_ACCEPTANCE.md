@@ -5,18 +5,18 @@
 ## 决策
 
 - **记忆是派生索引，不是事实源。** 记录只从**结构化项目字段**（goal / audience / style / constraints / plan）投影，从不吸收模型自由文本。这样即便模型在上一次 Run 里「记错」了什么，也不会污染下一次的检索结果——项目事实仍由 `quality.py` 的确定性字段与 `MEMORY_CONFLICT` 兜底。
-- **旁路文件，不碰 `state.json`。** 索引落在 `<home>/memory.json`（`MEMORY_VERSION=1`），因此 `state.json` 的冻结 schema、168 个契约模型哈希与 `routeProbe.rowsSha256` 都不动。
+- **旁路文件，不碰 `state.json`。** 索引落在 `<home>/memory.json`（`MEMORY_VERSION=2`，读取兼容 v1），因此 `state.json` 的冻结 schema、168 个契约模型哈希与 `routeProbe.rowsSha256` 都不动。
 - **离线、确定性、零费用的嵌入。** 默认 embedder 是 hashing trick（blake2b 定点散列 + L2 归一化），同一文本在任何平台、任何进程都得到同一向量；无网络、无模型调用、无训练。用例断言的正是「模块内不出现 httpx / requests / socket / random / urlopen」。
 - **默认关闭；开启即改变签名。** `VAGENT_MEMORY` 缺省为 off，此时 `AgentRunner.memory is None`，检索块不生成，签名 payload 与今日完全一致。开启后签名 payload 增加 `memoryGuidance` 与 `memory{embedding,limit}`，所以「关→开」或「换 embedder」都会让旧 Run 拒绝恢复——这是显式契约变更，不是静默漂移。
 - **检索块只追加在稳定前缀之后。** `MEMORY_HEADER + 召回行` 拼在规则 / Skills / 项目事实 / 预算块之后，稳定前缀逐字节不变；用一张离线用例把「有记忆」的 system 文本按 `MEMORY_HEADER` 切开，前半段必须与「无记忆」构建的结果**全等**。
-- **冲突用 supersede 表达，不回写。** 同一 `(projectId, kind)` 的事实变更时，旧记录标 `supersededBy` 而非删除：检索只返回当前真相，历史仍可审计（与产物「保留旧版本」同一纪律）。记忆从不写回项目，因此不新增冲突面。
+- **取代按「当前事实集差集」，不是「同 kind 互斥」。** 记录在项目当前事实集里就活跃，不在就标 `supersededBy` 而非删除：检索只返回当前真相，历史仍可审计（与产物「保留旧版本」同一纪律）。多条 `constraints` / `plan` 是并存的同级事实，互不取代；单值字段（goal/audience/style）的旧值指向新值，其余标 `"removed"`。
 - **不做用户画像 / 任意文档 RAG。** 与计划边界一致，留作 H6 延伸。
 
 ## 工作机制
 
 - `tokens(text)`：NFKC 归一 + casefold；ASCII 词串 + 中文单字与二元组（中文无空格，bigram 承担英文里 word 的词法信号）。
 - `HashingEmbedder`：`EMBEDDING_DIM=256`、`EMBEDDING_VERSION="hashing-bigram-v1"`；每个 token 取 blake2b 前 4 字节定位桶、第 5 字节决定 ±1，末了 L2 归一化。空文本返回零向量。
-- `MemoryIndex.sync(project)`：逐条投影事实 → 跳过疑似凭据 → 以 `sha256(projectId, kind, normalize(text))` 为 id 去重（同事实重复写是 no-op）→ 同 kind 的旧记录标 `supersededBy` → 超过 `MAX_RECORDS=4096` 时裁掉最旧的。仅在新增时落盘。
+- `MemoryIndex.sync(project)`：把本轮 `project_facts` 的指纹集合 `F` 当作该项目的**当前事实集** → 跳过疑似凭据 → 记录 `id ∈ F` 且已取代的复活、`id ∉ F` 且活跃的标 `supersededBy`（单值 kind 指向新值，其余 `"removed"`）→ 新增 `id ∉ 记录` 的事实 → 只有真的发生新增/取代/复活才落盘一次最终集合。同事实重复 sync 是 no-op；超过 `MAX_RECORDS=4096` 时裁掉最旧的。
 - `recall(projectId, query, limit, cross_project=False)`：余弦 > 0 才算命中，按 `(-score, kind, id)` 稳定排序；跨项目必须显式 `cross_project=True`。
 - `render(...)`：每行 `- (kind) text`，按 UTF-8 字节裁剪到 `budget_bytes`（默认 1024），保证注入块不挤占预算。
 - 运行时接线：`runner._run` 在每次构建上下文前 `memory.sync(project)`（幂等）→ `memory.render(project.id, last_user_text(), limit=memory_limit)` → `context.build(memory_block=...)`。召回按**当次用户请求**检索，空命中就不加块。
@@ -28,7 +28,9 @@
 |---|---|---|
 | 离线嵌入 stub → 命中判据 | 余弦召回，零向量/无关查询返回空 | `test_recall_is_relevance_ordered_and_budget_clipped`、`test_cosine_ranks_related_text_above_unrelated` |
 | 去重 | 内容寻址 id，同事实重复 sync 是 no-op | `test_sync_is_idempotent_and_content_addressed` |
-| 冲突 | 同 kind 变更 → `supersededBy`，检索只返回当前真相 | `test_changing_a_fact_supersedes_the_previous_record` |
+| 取代（当前事实集） | 单值字段变更只取代旧值；删除即取代；回归即复活；同级约束互不取代 | `test_changing_a_fact_supersedes_the_previous_record`、`test_scalar_change_supersedes_only_the_old_value`、`test_adding_a_constraint_keeps_sibling_constraints_active`、`test_removing_a_constraint_supersedes_only_that_record`、`test_a_returning_fact_is_reactivated` |
+| 取代立即落盘 | 只有取代、没有新增时也写盘；无变化不写 | `test_a_removal_is_persisted_immediately_and_a_no_op_sync_does_not_write` |
+| v1 侧车兼容 | `version=1` 可读（任意真值即失效），下次写入升为 v2 | `test_v1_sidecar_is_readable_and_rewritten_as_v2` |
 | 检索注入不破坏稳定前缀 | 前缀按 `MEMORY_HEADER` 切开后与无记忆构建全等；块在 `PROJECT_HEADER` 之后 | `test_memory_on_recalls_the_fact_after_the_frozen_prefix` |
 | 默认无网络 | 模块无网络 / 随机依赖；embedder 逐位确定 | `test_memory_module_is_offline_and_free_of_io`、`test_embedding_is_deterministic_and_normalized` |
 | 恢复兼容 | 关闭时签名不变；开启后签名变化 → 旧 Run 拒绝恢复 | `test_memory_off_keeps_the_context_and_signature_untouched`、`test_memory_on_recalls_...`（签名断言） |
@@ -58,13 +60,13 @@
 
 ## 兼容与边界
 
-- `MEMORY_VERSION=1`、`EMBEDDING_VERSION="hashing-bigram-v1"` 写入旁路文件包头；升级 embedding 版本等于换锚点，旧向量会被 `len(stored) != len(vector)` 或包头指纹挡掉，需重建（派生索引可安全重建）。
+- `MEMORY_VERSION=2`（读取兼容 v1）、`EMBEDDING_VERSION="hashing-bigram-v1"` 写入旁路文件包头；升级 embedding 版本等于换锚点，旧向量会被 `len(stored) != len(vector)` 或包头指纹挡掉，需重建（派生索引可安全重建）。
 - 跨项目检索需显式 `cross_project=True`，运行时默认关闭；不做跨项目偏好记忆（计划明列为未做）。
 - 不做用户画像、不做任意文档 RAG、不做摘要（H1）与 tracing（H5）。
 
 ## 自动化验证
 
-`tests/test_long_term_memory.py`（新增，14 项）：embedder 3 项、记录投影 / 去重 / 取代 / 隐私 / 旁路容错 5 项、检索 2 项、配置开关 2 项、runner 接线 2 项。
+`tests/test_long_term_memory.py`（20 项）：embedder 3 项、记录投影 / 去重 / 取代 / 复活 / 隐私 / 旁路容错 11 项、检索 2 项、配置开关 2 项、runner 接线 2 项。
 
 复现（离线，无网络、无模型调用）：
 

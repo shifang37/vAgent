@@ -7,15 +7,15 @@
 - **新增 `contextVersion=3`，但新 Run 默认仍是 v2。** 依据：M2/M3/M5 基线与多个已交付用例把产品 Run 的 `contextVersion` 钉在 2（`docs/M3_E0_BASELINE.json`、`test_m2_clients.py`、`test_context_optimization.py`）。把默认改成 3 会改动这些基线，违反「契约基线不变」。因此 v3 为**显式开关**：`VAGENT_CONTEXT_VERSION=3` 或直接构造 `ContextBuilder(format_version=3)`；不加该变量时行为与现状逐字节相同。
 - **摘要缓存是侧车文件，不进 `state.json`。** `<home>/summaries.json`（`summaries-v1`），内容寻址：键 = SHA-256（提示词版本 + 摘要器指纹 + 被摘要消息的规范 JSON）。因此不新增 schema 集合、不动 `DatabaseV9` 与 168 个模型哈希。
 - **默认摘要器离线、确定性、零费用。** `ExtractiveSummarizer` 不调用模型，因此「同一段历史只摘要一次」天然成立；模型版摘要器可注入，同一 span 也只调用一次（侧车命中即复用）。
-- **摘要失败或超预算一律降级回截断。** 摘要只是优化，不是正确性要求；降级后与 v2 布局逐字节相同。
+- **摘要失败或超预算一律降级回截断。** 摘要只是优化，不是正确性要求；降级路径**重新构建**普通截断，消息与字节同 v2 逐字节相同。（v0.6.3 修复：此前失败时保留的是「为摘要预留窗口」的更少消息；超预算时事件也已提前发出。）
 - **稳定前缀不变。** v3 只在 v2 前缀之后追加摘要块；固定规则、Skill 元信息、项目事实前缀逐字节不变（`test_v3_without_summarize_keeps_the_exact_v2_layout`）。
 - **签名覆盖摘要指引。** v3 的 `contextSignature` 额外包含 `historySummaryGuidance`（`SUMMARY_HEADER` 文本），改文案即改签名；v2/v1 签名不受影响（`test_v3_signature_covers_the_summary_guidance`）。
 
 ## 工作机制
 
 1. `ContextBuilder.build(..., summarize=True)` 先**预留**一段摘要预算（`summary_target_bytes(budget)+64`），据此选出「放得下摘要时仍能保留的最新若干整轮」窗口；窗口之外的消息即待摘要 span。
-2. Runner 用 `span_key` 查侧车：命中则复用（发 `context.summary_reused`），未命中才调用摘要器一次并写回（发 `context.summarized`）。
-3. 第二次 `build(..., history_summary=...)` 用真实摘要重建；只有放进预算才采用，否则回退到纯截断。
+2. Runner 用 `span_key` 查侧车：命中则复用，未命中才调用摘要器一次并写回；`_summarize` 本身不发事件，由调用点按**最终是否采用**决定发什么。
+3. 第二次 `build(..., history_summary=...)` 用真实摘要重建；只有放进预算才采用（`report.summary is not None`）。采用时发一次 `context.summarized`（`applied=true`、`reused`、`summaryBytes`）并记 `context.summarize` span `applied=true`；未采用时发 `context.summary_rejected`（`reason="budget"`），span `applied=false`，且**重建**普通截断，与 v2 逐字节相同。
 4. span 是**整轮**，且摘要覆盖**整个** span（先详细、放不下则每轮一行、再放不下则等距抽样），不会只记住最早几条而丢掉临近窗口的轮次。
 
 `summary_target_bytes(budget) = min(4096, max(256, budget // 16))`。
@@ -28,21 +28,24 @@
 |---|---:|---:|---:|---:|
 | 不截断（超预算，不可用） | 30,368 | 121 | 0 | 40 / 40 |
 | v2 纯截断 | 11,903 | 45 | 75 | **17 / 40** |
+| v3 降级（摘要器失败 / 摘要超预算） | 11,903 | 45 | 75 | **17 / 40** |
 | v3 摘要（本次） | 11,151 | 39 | 81 | **23 / 40** |
 
-摘要块 599 字节 / 7 行。v3 在预算内多召回 6 条事实，且上下文反而更小：它用「更小的保留窗口 + 覆盖全 span 的摘要」换取对最早历史的记忆，而不是把它们丢给截断。
+摘要块 599 字节 / 7 行。v3 在预算内多召回 6 条事实，且上下文反而更小：它用「更小的保留窗口 + 覆盖全 span 的摘要」换取对最早历史的记忆，而不是把它们丢给截断。降级样本与 v2 完全同字节（11,903 / 45 / 75），不再残留「为摘要预留窗口」的更少消息。
 
 复现：`python tmp/measure_h1.py`（离线，无网络、无模型调用）。
 
 ## 自动化验证
 
-`tests/test_context_summary.py`（新增，9 项）：
+`tests/test_context_summary.py`（11 项）：
 
 | 场景 | 断言 |
 |---|---|
 | v3 不开摘要 | 与 v2 逐字节相同（消息、字节、裁掉数） |
 | v3 摘要 | 预算内、含 `SUMMARY_HEADER`、可召回 v2 已丢弃的 `F0`、工具配对完整 |
 | 摘要超预算 | 回退纯截断，`summary is None`，与 v2 布局一致 |
+| 摘要器失败 | 与 v2 **逐字节相同**（消息与 `contextBytes` 全等），不发 `context.summarized` |
+| 摘要被预算拒绝 | 不发 `context.summarized`；发一条 `context.summary_rejected`；span `applied=false`；消息与 v2 全等 |
 | 摘要器 | 确定性、字节受限、保留工具结果 |
 | `span_key` | 相同内容同键；换内容或换指纹则换键 |
 | 侧车 | 往返；损坏文件视为未命中并可重建 |

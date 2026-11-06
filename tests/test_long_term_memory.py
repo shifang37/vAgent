@@ -98,6 +98,91 @@ def test_changing_a_fact_supersedes_the_previous_record(index):
     assert [record["text"] for record in index.recall("coffee", "咖啡店")] == ["面向家庭的咖啡店"]
 
 
+def test_adding_a_constraint_keeps_sibling_constraints_active(index):
+    index.sync({"id": "coffee", "constraints": ["4:5 竖屏", "暖色调"]})
+    assert len(index.sync({"id": "coffee", "constraints": ["4:5 竖屏", "暖色调", "夜景"]})) == 1
+
+    assert sorted(record["text"] for record in index.records("coffee")) == sorted(
+        ["4:5 竖屏", "暖色调", "夜景"]
+    )
+    assert len(index.records("coffee", current_only=False)) == 3
+
+
+def test_removing_a_constraint_supersedes_only_that_record(index):
+    index.sync({"id": "coffee", "constraints": ["A", "B"]})
+    index.sync({"id": "coffee", "constraints": ["A"]})
+
+    assert [record["text"] for record in index.records("coffee")] == ["A"]
+    retired = [r for r in index.records("coffee", current_only=False) if r["supersededBy"]]
+    assert [record["text"] for record in retired] == ["B"]
+    assert retired[0]["supersededBy"] == "removed"
+
+
+def test_a_removal_is_persisted_immediately_and_a_no_op_sync_does_not_write(index):
+    index.sync({"id": "coffee", "constraints": ["A", "B"]})
+    index.sync({"id": "coffee", "constraints": ["A"]})
+
+    # The mark must land with the removal itself, not ride along with a later addition.
+    stored = json.loads(index.path.read_text(encoding="utf-8"))
+    assert stored["version"] == 2
+    assert [r for r in stored["records"].values() if r["text"] == "B"][0]["supersededBy"] == "removed"
+
+    before = index.path.read_text(encoding="utf-8")
+    assert index.sync({"id": "coffee", "constraints": ["A"]}) == []
+    assert index.path.read_text(encoding="utf-8") == before
+
+
+def test_scalar_change_supersedes_only_the_old_value(index):
+    index.sync({"id": "coffee", "goal": GOAL, "audience": "年轻人", "constraints": ["4:5"]})
+    replacement = "面向家庭的咖啡店"
+    index.sync({"id": "coffee", "goal": replacement, "audience": "年轻人", "constraints": ["4:5"]})
+
+    records = {record["id"]: record for record in index.records("coffee", current_only=False)}
+    old_goal = records[fingerprint("coffee", "goal", GOAL)]
+    assert old_goal["supersededBy"] == fingerprint("coffee", "goal", replacement)
+    # Unchanged facts of other kinds stay active.
+    assert records[fingerprint("coffee", "audience", "年轻人")]["supersededBy"] is None
+    assert records[fingerprint("coffee", "constraint", "4:5")]["supersededBy"] is None
+    assert len(index.records("coffee")) == 3
+
+
+def test_a_returning_fact_is_reactivated(index):
+    index.sync({"id": "coffee", "constraints": ["A", "B"]})
+    index.sync({"id": "coffee", "constraints": ["A"]})
+    assert [record["text"] for record in index.records("coffee")] == ["A"]
+
+    assert len(index.sync({"id": "coffee", "constraints": ["A", "B"]})) == 0  # B comes back
+    assert sorted(record["text"] for record in index.records("coffee")) == ["A", "B"]
+
+
+def test_v1_sidecar_is_readable_and_rewritten_as_v2(index):
+    legacy = {
+        "version": 1,
+        "embedding": "hashing-bigram-v1",
+        "records": {
+            "old-goal": {
+                "id": "old-goal",
+                "projectId": "coffee",
+                "kind": "goal",
+                "text": "旧目标",
+                "embedding": "hashing-bigram-v1",
+                "vector": index.embedder.embed("旧目标"),
+                "createdAt": "2026-01-01T00:00:00+00:00",
+                "supersededBy": "older-goal",
+            }
+        },
+    }
+    index.path.parent.mkdir(parents=True, exist_ok=True)
+    index.path.write_text(json.dumps(legacy, ensure_ascii=False), encoding="utf-8")
+
+    # A v1 record with a truthy supersededBy is inactive, exactly like v2.
+    assert index.records("coffee") == []
+    assert len(index.sync({"id": "coffee", "goal": GOAL})) == 1
+    stored = json.loads(index.path.read_text(encoding="utf-8"))
+    assert stored["version"] == 2
+    assert [record["text"] for record in index.records("coffee")] == [GOAL]
+
+
 def test_secrets_are_never_indexed(index):
     assert looks_secret("sk-abcdef0123456789")
     assert looks_secret("API_KEY = 值")

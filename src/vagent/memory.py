@@ -22,13 +22,20 @@ import re
 import unicodedata
 from pathlib import Path
 
-MEMORY_VERSION = 1
+MEMORY_VERSION = 2
+# v1 wrote the same ``supersededBy`` field with the same truthiness contract, so its
+# sidecars stay readable; every new write uses v2.
+READABLE_MEMORY_VERSIONS = (1, MEMORY_VERSION)
 MEMORY_FILE = "memory.json"
 EMBEDDING_DIM = 256
 EMBEDDING_VERSION = "hashing-bigram-v1"
 MAX_RECORDS = 4096
 DEFAULT_LIMIT = 4
 DEFAULT_BLOCK_BYTES = 1024
+# Kinds that hold at most one current value per project, so a replaced record can name
+# its successor. Multi-value kinds (constraint / plan) only ever say "removed": their
+# siblings are concurrent facts, not earlier versions of one another.
+SCALAR_KINDS = frozenset({"goal", "audience", "style"})
 
 # A fact that looks like a credential is never indexed: Keys and secret material must
 # not reach a store that a later retrieval step feeds back into the model.
@@ -132,12 +139,15 @@ def project_facts(project: dict) -> list[tuple[str, str]]:
 
 
 class MemoryIndex:
-    """``memory-v1`` sidecar: content-addressed records with superseding per kind.
+    """``memory-v2`` sidecar: the current project facts, with retired history kept.
 
-    Adding the same fact twice is a no-op (same fingerprint). Changing a fact of the
-    same ``(projectId, kind)`` marks the older record ``supersededBy`` rather than
-    deleting it, so retrieval always returns the current truth while the history stays
-    auditable — the same "keep the old version" discipline as artifacts.
+    Adding the same fact twice is a no-op (same fingerprint). Each ``sync`` is a
+    projection of the project's *current* fact set: a record stays active exactly while
+    its fingerprint is still a current fact, a fact that disappeared is marked
+    ``supersededBy`` rather than deleted (``removed``, or the successor id for a
+    single-valued kind), and a fact that comes back is reactivated. Sibling constraints
+    and plan items therefore coexist instead of retiring one another. The history stays
+    auditable, the same "keep the old version" discipline as artifacts.
     """
 
     def __init__(self, home, embedder=None, *, clock=None):
@@ -157,7 +167,7 @@ class MemoryIndex:
             payload = json.loads(raw)
         except ValueError:
             return {}
-        if not isinstance(payload, dict) or payload.get("version") != MEMORY_VERSION:
+        if not isinstance(payload, dict) or payload.get("version") not in READABLE_MEMORY_VERSIONS:
             return {}
         records = payload.get("records")
         return records if isinstance(records, dict) else {}
@@ -174,22 +184,45 @@ class MemoryIndex:
         os.replace(temporary, self.path)
 
     def sync(self, project: dict) -> list[str]:
-        """Materialize the project's confirmed facts; idempotent, returns added ids."""
+        """Project the project's current facts; returns the ids added in this call.
+
+        Supersede is derived from the current fact *set*, never from "every other
+        record of the same kind": several constraints or plan items are concurrent
+        facts, so one new sibling must not retire the others. A record is active
+        exactly while its fingerprint is one of this project's current facts; a fact
+        that disappeared is marked ``removed`` (or, for a single-valued kind, points at
+        the id that replaced it); a fact that returns is reactivated. Nothing is
+        written unless a record was really added, retired, or revived.
+        """
         project_id = project["id"]
         records = self._read()
+        current = {
+            fingerprint(project_id, kind, text): (kind, text)
+            for kind, text in project_facts(project)
+            if not looks_secret(text)
+        }
+        by_kind: dict[str, list[str]] = {}
+        for key, (kind, _) in current.items():
+            by_kind.setdefault(kind, []).append(key)
+        replaced = {
+            kind: keys[0] for kind, keys in by_kind.items() if kind in SCALAR_KINDS and len(keys) == 1
+        }
         added: list[str] = []
-        for kind, text in project_facts(project):
-            if looks_secret(text):
+        changed = False
+        for record_id, record in records.items():
+            if record.get("projectId") != project_id:
                 continue
-            key = fingerprint(project_id, kind, text)
-            for existing_id, record in records.items():
-                if (
-                    record.get("projectId") == project_id
-                    and record.get("kind") == kind
-                    and existing_id != key
-                    and not record.get("supersededBy")
-                ):
-                    record["supersededBy"] = key
+            if record_id in current:
+                if record.get("supersededBy"):
+                    # The fact is part of the project again; recall it again.
+                    record["supersededBy"] = None
+                    changed = True
+                continue
+            if record.get("supersededBy"):
+                continue  # already inactive: keep the original reason
+            record["supersededBy"] = replaced.get(record.get("kind"), "removed")
+            changed = True
+        for key, (kind, text) in current.items():
             if key in records:
                 continue
             records[key] = {
@@ -203,7 +236,8 @@ class MemoryIndex:
                 "supersededBy": None,
             }
             added.append(key)
-        if added:
+            changed = True
+        if changed:
             if len(records) > MAX_RECORDS:
                 for stale in list(records)[: len(records) - MAX_RECORDS]:
                     records.pop(stale, None)

@@ -250,6 +250,10 @@ def schema_feedback_exhausted(messages: list[BaseMessage]) -> bool:
     current: list[ToolMessage] | None = None
     for message in messages:
         if isinstance(message, HumanMessage):
+            # A new user turn starts a new Run (a session keeps earlier Runs in its
+            # history). The previous Run's last batch must not count as the first
+            # half of "two identical rejections" for this one.
+            batches.clear()
             current = None
         elif isinstance(message, AIMessage):
             if current is not None:
@@ -468,43 +472,37 @@ class AgentRunner:
             return answer
         return f"{answer.rstrip()}\n\n已完成产物：{'、'.join(missing)}"
 
-    async def _summarize(self, dropped: list[BaseMessage], record: dict) -> str | None:
+    async def _summarize(self, dropped: list[BaseMessage]) -> tuple[str | None, bool]:
         """Reuse a cached digest of ``dropped`` else ask the summarizer exactly once.
 
-        The sidecar cache is content addressed, so an explicit resume re-uses the same
-        digest instead of paying for the span again. Any failure degrades to plain
-        truncation rather than failing the Run: a summary is an optimization, not a
-        correctness requirement.
+        Returns ``(summary, reused)`` and stays silent on the event stream: only the
+        caller knows whether the digest was actually adopted, so it emits the one
+        truthful ``context.summarized`` (or ``context.summary_rejected``). The sidecar
+        cache is content addressed, so an explicit resume re-uses the same digest
+        instead of paying for the span again. Any failure degrades to plain truncation
+        rather than failing the Run: a summary is an optimization, not a correctness
+        requirement.
         """
         store = self.summary_store
         if store is None:
-            return None
+            return None, False
         fingerprint = getattr(self.summarizer, "fingerprint", self.model.name)
         key = span_key(dropped, config_fingerprint=fingerprint)
         cached = store.get(key)
         if cached is not None:
-            self.emit({"type": "context.summary_reused", "runId": record["id"]})
-            return cached
+            return cached, True
         target = summary_target_bytes(self.context.max_input_bytes)
         try:
             summary = self.summarizer.summarize(dropped, target_bytes=target)
             if inspect.isawaitable(summary):
                 summary = await summary
         except Exception:
-            return None
+            return None, False
         if not isinstance(summary, str) or not summary.strip():
-            return None
+            return None, False
         summary = summary.strip()
         store.put(key, summary, model=self.model.name)
-        self.emit(
-            {
-                "type": "context.summarized",
-                "runId": record["id"],
-                "droppedMessages": len(dropped),
-                "summaryBytes": len(summary.encode("utf-8")),
-            }
-        )
-        return summary
+        return summary, False
 
     async def run(
         self,
@@ -947,7 +945,7 @@ class AgentRunner:
                             return message.content
                     return record.get("prompt", "")
 
-                def build_context(history_summary=None):
+                def build_context(history_summary=None, *, summarize=None):
                     project = store.snapshot()["projects"][session_id]
                     memory_block = None
                     if self.memory is not None:
@@ -959,7 +957,7 @@ class AgentRunner:
                         )
                     attributes = {
                         "contextVersion": context.format_version,
-                        "summarize": summarizing,
+                        "summarize": summarizing if summarize is None else summarize,
                         "historySummary": history_summary is not None,
                         "memoryRecords": len(memory_block.splitlines()) if memory_block else 0,
                     }
@@ -972,7 +970,7 @@ class AgentRunner:
                             skills=self.skills,
                             run_budget=budget,
                             history_summary=history_summary,
-                            summarize=summarizing,
+                            summarize=summarizing if summarize is None else summarize,
                             memory_block=memory_block,
                         )
                         context_span.set(
@@ -982,22 +980,55 @@ class AgentRunner:
                     return report
 
                 report = build_context()
+                applied = False
                 if summarizing and report.dropped:
+                    dropped = report.dropped
                     with span(
                         tracer,
                         "context.summarize",
                         attributes={
-                            "droppedMessages": len(report.dropped),
+                            "droppedMessages": len(dropped),
                             "contextVersion": context.format_version,
                         },
                     ) as summary_span:
-                        summary = await self._summarize(report.dropped, record)
-                        summary_span.set(
-                            applied=bool(summary),
-                            summaryBytes=len(summary.encode("utf-8")) if summary else 0,
-                        )
-                    if summary:
-                        report = build_context(summary)
+                        summary, reused = await self._summarize(dropped)
+                        if summary:
+                            report = build_context(summary)
+                            applied = report.summary is not None
+                        summary_bytes = len(summary.encode("utf-8")) if summary else 0
+                        # `applied` is the verdict of the real second build: a digest the
+                        # budget refused is never reported as a success.
+                        summary_span.set(applied=applied, reused=reused, summaryBytes=summary_bytes)
+                        if applied:
+                            self.emit(
+                                {
+                                    "type": "context.summarized",
+                                    "runId": record["id"],
+                                    "applied": True,
+                                    "reused": reused,
+                                    "droppedMessages": len(dropped),
+                                    "summaryBytes": summary_bytes,
+                                }
+                            )
+                        elif summary:
+                            # Generated (or cached) but refused by the budget: an
+                            # explicit non-applied event keeps the count observable.
+                            self.emit(
+                                {
+                                    "type": "context.summary_rejected",
+                                    "runId": record["id"],
+                                    "reason": "budget",
+                                    "droppedMessages": len(dropped),
+                                    "summaryBytes": summary_bytes,
+                                }
+                            )
+                        if reused:
+                            self.emit({"type": "context.summary_reused", "runId": record["id"]})
+                    if not applied:
+                        # Nothing was adopted, so the history must not stay at the
+                        # summary-reserved window: rebuild the plain v2 truncation
+                        # the same Run would produce without a summarizer, byte for byte.
+                        report = build_context(summarize=False)
                 specs = report.tools
                 if closing:
                     # A tool-free follow-up is appended as data-bearing user text: the
