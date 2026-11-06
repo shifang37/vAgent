@@ -45,7 +45,7 @@ from vagent.context import (
 from vagent.errors import AppError, failure, public_error
 from vagent.journal import RunJournal
 from vagent.memory import DEFAULT_LIMIT, MemoryIndex
-from vagent.models import AgentModel, StreamResponseError
+from vagent.models import AgentModel
 from vagent.prompts import (
     DEFAULT_PROMPT_VERSION,
     SYSTEM_PROMPT_V1,
@@ -53,7 +53,13 @@ from vagent.prompts import (
 )
 from vagent.quality import requested_content_limits, updated_content_limits
 from vagent.storage import FileStore, now, repair_stale_runs
-from vagent.summary import Summarizer, SummaryStore, span_key, summary_target_bytes
+from vagent.summary import (
+    SUMMARY_PROMPT_VERSION,
+    Summarizer,
+    SummaryStore,
+    span_key,
+    summary_target_bytes,
+)
 from vagent.tools import ToolRegistry
 from vagent.tracing import Tracer, span
 from vagent.usage import extract_usage
@@ -224,6 +230,27 @@ def result_job_id(result: dict) -> str | None:
     job_ids = data.get("jobIds")
     if isinstance(job_ids, list) and job_ids and isinstance(job_ids[0], str):
         return job_ids[0]
+    return None
+
+
+def call_signature(call: dict) -> str:
+    """Name plus canonical arguments: the identity used to spot a repeated call."""
+    args = call.get("args") if isinstance(call.get("args"), dict) else {}
+    return (
+        str(call.get("name"))
+        + "\n"
+        + json.dumps(args, ensure_ascii=False, sort_keys=True, separators=(",", ":"))
+    )
+
+
+def last_call_signature(messages: list[BaseMessage]) -> str | None:
+    """The signature of the last tool call before the current batch, if any."""
+    for message in reversed(messages):
+        if isinstance(message, AIMessage):
+            calls = message.tool_calls
+            if calls:
+                return call_signature(calls[-1])
+            return None
     return None
 
 
@@ -477,7 +504,7 @@ class AgentRunner:
             return answer
         return f"{answer.rstrip()}\n\n已完成产物：{'、'.join(missing)}"
 
-    async def _summarize(self, dropped: list[BaseMessage]) -> tuple[str | None, bool]:
+    async def _summarize(self, dropped: list[BaseMessage], run_id: str) -> tuple[str | None, bool]:
         """Reuse a cached digest of ``dropped`` else ask the summarizer exactly once.
 
         Returns ``(summary, reused)`` and stays silent on the event stream: only the
@@ -491,12 +518,15 @@ class AgentRunner:
         store = self.summary_store
         if store is None:
             return None, False
-        fingerprint = getattr(self.summarizer, "fingerprint", self.model.name)
-        key = span_key(dropped, config_fingerprint=fingerprint)
+        fingerprint = (
+            getattr(self.summarizer, "fingerprint", None)
+            or f"{type(self.summarizer).__name__}:{SUMMARY_PROMPT_VERSION}"
+        )
+        target = summary_target_bytes(self.context.max_input_bytes)
+        key = span_key(dropped, config_fingerprint=fingerprint, target_bytes=target)
         cached = store.get(key)
         if cached is not None:
             return cached, True
-        target = summary_target_bytes(self.context.max_input_bytes)
         try:
             summary = self.summarizer.summarize(dropped, target_bytes=target)
             if inspect.isawaitable(summary):
@@ -506,7 +536,11 @@ class AgentRunner:
         if not isinstance(summary, str) or not summary.strip():
             return None, False
         summary = summary.strip()
-        store.put(key, summary, model=self.model.name)
+        try:
+            store.put(key, summary, model=self.model.name)
+        except (OSError, AppError):
+            # A read-only or busy home only costs the next reuse, never this answer.
+            self.emit({"type": "context.summary_uncached", "runId": run_id})
         return summary, False
 
     async def run(
@@ -888,6 +922,9 @@ class AgentRunner:
                     "model": model.name,
                     "step": attempt_step,
                     "streamed": callable(streaming),
+                    # A missing attribute would be read as "unknown"; the adapter knows
+                    # its configured retry count, so record the fact (0 when none).
+                    "retries": getattr(model, "max_retries", 0),
                 }
                 if tracer is not None and tracer.content:
                     model_attributes["prompt"] = last_user_text()
@@ -940,12 +977,17 @@ class AgentRunner:
 
             def finish_attempt(error: AppError) -> None:
                 if attempt_started is not None and not attempt_finished:
+                    usage = getattr(error, "usage", None)
+                    if usage is None and error.code in {"CANCELLED", "TIMEOUT"}:
+                        # ``await_controlled`` cancels the stream task and raises its own
+                        # error, so the received tokens come from the adapter's stash.
+                        usage = getattr(model, "last_stream_usage", None)
                     journal.finish_model_call(
                         attempt_step,
                         status="cancelled" if error.code == "CANCELLED" else "failed",
                         duration=time.monotonic() - attempt_started,
                         error_code=error.code,
-                        usage=error.usage if isinstance(error, StreamResponseError) else None,
+                        usage=usage,
                     )
 
             try:
@@ -973,16 +1015,28 @@ class AgentRunner:
                             return message.content
                     return record.get("prompt", "")
 
+                memory_failure_reported = False
+                memory_dropped_reported = False
+
                 def build_context(history_summary=None, *, summarize=None):
+                    nonlocal memory_failure_reported, memory_dropped_reported
                     project = store.snapshot()["projects"][session_id]
                     memory_block = None
                     if self.memory is not None:
                         # Sync is idempotent (content-addressed), then recall for this
-                        # request only; a memory miss leaves the block empty.
-                        self.memory.sync(project)
-                        memory_block = self.memory.render(
-                            project["id"], last_user_text(), limit=self.memory_limit
-                        )
+                        # request only; a memory miss leaves the block empty. A sidecar
+                        # write failure degrades to "no memory this step": memory is an
+                        # optimization and must never fail the Run (FX-21).
+                        try:
+                            self.memory.sync(project)
+                            memory_block = self.memory.render(
+                                project["id"], last_user_text(), limit=self.memory_limit
+                            )
+                        except (OSError, AppError):
+                            memory_block = None
+                            if not memory_failure_reported:
+                                memory_failure_reported = True
+                                self.emit({"type": "memory.write_failed", "runId": record["id"]})
                     attributes = {
                         "contextVersion": context.format_version,
                         "summarize": summarizing if summarize is None else summarize,
@@ -1004,7 +1058,11 @@ class AgentRunner:
                         context_span.set(
                             inputBytes=report.input_bytes,
                             droppedMessages=report.dropped_messages,
+                            memoryDropped=report.memory_dropped,
                         )
+                    if report.memory_dropped and not memory_dropped_reported:
+                        memory_dropped_reported = True
+                        self.emit({"type": "context.memory_dropped", "runId": record["id"]})
                     return report
 
                 report = build_context()
@@ -1019,7 +1077,7 @@ class AgentRunner:
                             "contextVersion": context.format_version,
                         },
                     ) as summary_span:
-                        summary, reused = await self._summarize(dropped)
+                        summary, reused = await self._summarize(dropped, record["id"])
                         if summary:
                             report = build_context(summary)
                             applied = report.summary is not None
@@ -1182,7 +1240,13 @@ class AgentRunner:
                             raise
                         record_cache(cache_status)
             except asyncio.CancelledError:
-                finish_attempt(AppError("CANCELLED", "执行已停止，保留已完成产物。"))
+                cancelled_error = AppError("CANCELLED", "执行已停止，保留已完成产物。")
+                # A stream killed mid-flight has no exception object to carry usage; the
+                # adapter stashes what the provider already sent so the journal bills it.
+                usage = getattr(model, "last_stream_usage", None)
+                if usage:
+                    cancelled_error.usage = usage
+                finish_attempt(cancelled_error)
                 self.emit({"type": "assistant.discarded", "runId": record["id"], "step": attempt_step})
                 raise
             except Exception as error:
@@ -1234,7 +1298,15 @@ class AgentRunner:
             keys = [f"{record['id']}:{state['model_steps']}:{call['id']}" for call in calls]
             admitted = journal.record["toolCallKeys"]
             over_budget = len(admitted) + sum(key not in admitted for key in keys) > policy.max_tool_calls
+            # A model can burn its step budget re-issuing the same read. That is not
+            # refused (a legitimate re-read exists), but it is surfaced: the result gains
+            # a notice and one event counts the repeats.
+            previous_signature = last_call_signature(state["messages"][:-1])
+            repeat_calls = 0
             for index, (call, key) in enumerate(zip(calls, keys, strict=True)):
+                signature = call_signature(call)
+                repeated = previous_signature is not None and signature == previous_signature
+                previous_signature = signature
                 started = time.monotonic()
                 execution_context = (
                     ToolExecutionContext(
@@ -1309,6 +1381,12 @@ class AgentRunner:
                     if malformed is None and not closable:
                         next_state = finish_error(next_state, safe)
                     result = failure(safe.code, str(safe))
+                if repeated and isinstance(result, dict) and result.get("ok") is True:
+                    repeat_calls += 1
+                    result = {
+                        **result,
+                        "notice": "该调用已执行过（与上一次同名同参），本次为重复调用。",
+                    }
                 if isinstance(result, DeferredToolResult):
                     # A marker is neither a completed ToolMessage nor JSON data.
                     publish_progress({**next_state, "messages": [*state["messages"], *results]})
@@ -1356,6 +1434,15 @@ class AgentRunner:
                     }
                 )
             next_state["messages"] = [*state["messages"], *results]
+            if repeat_calls:
+                self.emit(
+                    {
+                        "type": "tool.repeated",
+                        "runId": record["id"],
+                        "step": state["model_steps"],
+                        "repeatCalls": repeat_calls,
+                    }
+                )
             if durable_waits:
                 next_state["wait_deliveries"] = deliveries
             publish_progress(next_state)

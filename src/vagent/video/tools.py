@@ -520,6 +520,22 @@ class BibleSave(Arguments):
     palette: str | None = Field(default=None, min_length=1, max_length=200)
     camera_language: str | None = Field(default=None, min_length=1, max_length=300)
 
+    @field_validator("aliases", "genre")
+    @classmethod
+    def items_are_bounded(cls, values: list[str]) -> list[str]:
+        """Bound each item *without* changing the published JSON Schema.
+
+        The style prompt prefixes every shot, so one unbounded genre item would make
+        every later shot exceed the provider prompt limit (``VIDEO_PROMPT_TOO_LONG``
+        per shot) instead of failing here, once, as ``INVALID_ARGUMENTS``. The bound is
+        enforced by a validator rather than a schema ``maxLength`` so the frozen tool
+        face (and every stored Run's ``contextSignature``) stays byte-identical.
+        """
+        for value in values:
+            if len(value) > 20:
+                raise ValueError("题材/别名单项最多 20 个字符")
+        return values
+
     @model_validator(mode="after")
     def kind_specific_fields(self):
         if bool(self.id) != bool(self.expected_revision is not None):

@@ -127,6 +127,7 @@ VAGENT_DEEPSEEK_MODEL=deepseek-flash
 | `episode` / `season` | 剧本改编与分集、季成员与批量登记 | 只登记本地任务 |
 | `film` / `subtitle` / `audio` / `timeline` | 拼接成片、字幕、BGM/SFX 导入、时间线保存与渲染 | 否，本地 FFmpeg |
 | `route` | 只读报价对比 | 否 |
+| `gc` / `snapshot` / `recover` | 清理旧终态 Run 明细、刷新 last-good 快照、从快照恢复 | 否，只写本地文件 |
 | `headless` | 计划 → 显式授权 → 等待 → 本地交付 | 规划阶段调用 DeepSeek |
 | `web` | 启动本地 Web 工作台 | 按用户操作 |
 
@@ -153,6 +154,9 @@ VAGENT_DEEPSEEK_MODEL=deepseek-flash
 - `vagent usage --cost`：在既有用量输出上追加参考价目表金额（默认不显示，不写状态）。
 - `scripts/evaluate_behavior.py --home <空目录> --output <新路径> --k 2`：离线行为评测。`gate` 用例必须全样本通过，`measure` 只报告指标；`k` 不能超过样本数，`--live` 明确拒绝。
 - `scripts/compare_cost.py --home <已有数据目录>`：只读快照对比缓存感知与缓存盲口径的文本模型费用；目录不存在直接报错。
+- `vagent gc [--apply] [--days 30]`：缺省只预览，`--apply` 才清理 30 天前终态 Run 的事件、调用明细、缓存操作与等待；活动 Run 永不触碰。
+- `vagent snapshot --confirm` / `vagent recover --from last-good --confirm`：显式刷新/恢复 `state.last-good.json`；恢复前把原文件留存为 `state-invalid-<UUID>.json`。
+- `scripts/measure_state.py`：离线合成 10/20/40 个 Run，输出 `state.json` 字节数与一次空事务耗时，用于对比增长改动。
 
 ## 架构概览
 

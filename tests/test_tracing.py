@@ -235,6 +235,14 @@ def test_secret_shaped_values_and_keys_are_redacted():
     assert truncated.endswith("<1200 chars>") and len(truncated) < 600
 
 
+async def test_model_span_records_the_configured_retry_count(store):
+    exporter = InMemoryExporter()
+    traced = runner(store, two_step(), tracing=tracer_for(exporter))
+    result = await traced.run("coffee", "做个咖啡店方案", request_id="trace-retries")
+    spans = exporter.by_name("model.call", Tracer.trace_id_for(result["id"]))
+    assert spans and spans[0]["attributes"]["retries"] == 0
+
+
 async def test_content_capture_is_opt_in(store):
     exporter = InMemoryExporter()
     traced = runner(store, two_step(), tracing=tracer_for(exporter))
@@ -416,6 +424,32 @@ def test_tracing_module_stays_offline_and_dependency_free():
     text = (Path(__file__).resolve().parents[1] / "src" / "vagent" / "tracing.py").read_text(encoding="utf-8")
     for forbidden in ("httpx", "requests", "socket", "opentelemetry", "random"):
         assert forbidden not in text
+
+
+def test_span_set_redacts_secret_keys_and_values():
+    trace = Tracer(InMemoryExporter()).for_run("run-1")
+    with trace.span("probe", attributes={"safe": "值"}) as item:
+        item.set(api_key="plain-text-secret", note="Bearer abcdefgh12345678", token="sk-1234567890")
+    assert item.attributes["api_key"] == "[redacted]"
+    assert item.attributes["token"] == "[redacted]"
+    assert "abcdefgh12345678" not in item.attributes["note"]
+    assert item.attributes["safe"] == "值"
+    assert item.attributes["note"] != "Bearer abcdefgh12345678"
+
+
+def test_trace_files_rotate_at_the_size_cap_and_keep_the_previous_root(tmp_path, monkeypatch):
+    import vagent.tracing as tracing_module
+
+    exporter = JsonlExporter(tmp_path / "traces")
+    trace = Tracer(exporter).for_run("run-rotate")
+    with trace.span("run", attributes={"runId": "run-rotate"}) as root:
+        pass
+    monkeypatch.setattr(tracing_module, "MAX_TRACE_BYTES", 1)
+    with trace.span("model.call", attributes={"step": 1}):
+        pass
+    assert exporter.rotated_path(trace.trace_id).exists()
+    assert [item["name"] for item in exporter.spans(trace.trace_id)] == ["run", "model.call"]
+    assert exporter.previous_root(trace.trace_id) == root.span_id
 
 
 def test_span_set_treats_status_and_error_code_as_fields():

@@ -13,7 +13,6 @@ from __future__ import annotations
 
 import hashlib
 import json
-import os
 from pathlib import Path
 from typing import Protocol
 
@@ -153,11 +152,22 @@ class ExtractiveSummarizer:
         return ""
 
 
-def span_key(messages: list[BaseMessage], *, config_fingerprint: str) -> str:
-    """A content-addressed key: the same span and summarizer config always collide."""
+def span_key(
+    messages: list[BaseMessage],
+    *,
+    config_fingerprint: str,
+    target_bytes: int = DEFAULT_TARGET_BYTES,
+) -> str:
+    """A content-addressed key: the same span, summarizer and budget always collide.
+
+    ``target_bytes`` is part of the key: a digest generated for a large budget is often
+    rejected by a smaller budget, and without it the same oversized digest would be
+    reused and rejected forever instead of being rebuilt to fit.
+    """
     payload = {
         "promptVersion": SUMMARY_PROMPT_VERSION,
         "config": config_fingerprint,
+        "targetBytes": target_bytes,
         "span": messages_to_dict(messages),
     }
     canonical = json.dumps(payload, sort_keys=True, ensure_ascii=False, separators=(",", ":"))
@@ -235,8 +245,10 @@ class SummaryStore:
                 entries.pop(stale, None)
         ordered = {item: entries[item] for item in sorted(entries, key=by_age)}
         payload = json.dumps({"version": SUMMARY_VERSION, "summaries": ordered}, ensure_ascii=False)
-        temporary = self.path.with_name(self.path.name + ".tmp")
         self.path.parent.mkdir(parents=True, exist_ok=True)
-        temporary.write_text(payload, encoding="utf-8")
-        os.replace(temporary, self.path)
+        from vagent.storage import atomic_write_bytes
+
+        # Same atomic writer as state.json (uuid temp name, fsync, replace, FX-02 retry):
+        # a fixed ``.tmp`` name races another process and can leave a partial sidecar.
+        atomic_write_bytes(self.path, payload.encode("utf-8"))
         self._remember(ordered)

@@ -19,7 +19,14 @@ from vagent.console import read_prompt
 from vagent.errors import AppError, public_error
 from vagent.models import DemoModel
 from vagent.skills import discover_for
-from vagent.storage import FileStore
+from vagent.storage import (
+    RETENTION_DAYS,
+    FileStore,
+    collect_garbage,
+    load_snapshot,
+    record_gc_marker,
+    restore_last_good,
+)
 from vagent.tools import create_project_tools
 from vagent.usage import summarize_usage
 from vagent.video import clients
@@ -1164,6 +1171,14 @@ def parser() -> argparse.ArgumentParser:
         )
     demo = commands.add_parser("demo", help="无需 Key 的离线模拟演示")
     inspect = commands.add_parser("inspect", help="查看本地项目、产物与运行记录")
+    gc = commands.add_parser("gc", help="按保留策略清理旧终态 Run 的事件、调用明细、操作与等待；缺省只预览")
+    gc.add_argument("--apply", action="store_true", help="真正写入清理结果；缺省只输出将删除的数量")
+    gc.add_argument("--days", type=int, default=RETENTION_DAYS, help="保留天数，缺省 30")
+    snapshot = commands.add_parser("snapshot", help="刷新 state.last-good.json 快照；只写本地文件")
+    snapshot.add_argument("--confirm", action="store_true", help="确认写入 last-good 快照")
+    recover = commands.add_parser("recover", help="显式从 last-good 快照恢复损坏的 state.json")
+    recover.add_argument("--from", dest="source", choices=("last-good",), required=True)
+    recover.add_argument("--confirm", action="store_true", help="确认覆盖 state.json")
     usage = commands.add_parser("usage", help="查看模型调用和缓存 Token 用量，不调用模型")
     selection = usage.add_mutually_exclusive_group()
     selection.add_argument("-s", "--session")
@@ -1512,6 +1527,37 @@ def main() -> None:
             safe["video_permission_status"] = "unverified"
             safe["redis_configured"] = bool(safe.pop("redis_url"))
             print_json({**safe, "api_key_configured": bool(key and key.strip()), "thinking": "disabled"})
+        elif args.command == "gc":
+            if args.apply:
+                with FileStore.open(config.home) as store:
+                    report = store.transaction(lambda draft: collect_garbage(draft, days=args.days))
+                    marker = record_gc_marker(store.home, report)
+                    print_json({**report, "applied": True, "marker": str(marker)})
+            else:
+                # A dry run must not even run crash recovery: read the snapshot only.
+                state = load_snapshot(config.home)
+                report = collect_garbage(state, days=args.days, apply=False)
+                print_json({**report, "applied": False})
+        elif args.command == "snapshot":
+            if not args.confirm:
+                raise AppError(
+                    "CONFIRMATION_REQUIRED", "刷新 last-good 快照需要显式 --confirm，未写入任何内容。"
+                )
+            with FileStore.open(config.home) as store:
+                path = store.snapshot_last_good()
+                print_json({"snapshot": str(path), "bytes": path.stat().st_size})
+        elif args.command == "recover":
+            if not args.confirm:
+                raise AppError(
+                    "CONFIRMATION_REQUIRED", "覆盖 state.json 需要显式 --confirm，未写入任何内容。"
+                )
+            lock = Path(config.home).resolve() / "instance.lock"
+            lock.parent.mkdir(parents=True, exist_ok=True)
+            FileStore._acquire_lock(lock)
+            try:
+                print_json(restore_last_good(config.home))
+            finally:
+                lock.unlink(missing_ok=True)
         elif args.command == "skills":
             catalog = discover_for(config)
             print_json({"skills": catalog.list(), "diagnostics": catalog.diagnostics})

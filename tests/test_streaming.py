@@ -298,6 +298,63 @@ async def test_stream_failure_diagnostics_never_echo_provider_errors(store):
     assert "test-secret-provider-body" not in json.dumps([result, events])
 
 
+async def test_a_transport_interruption_keeps_the_usage_it_already_received(store):
+    class BrokenStream(httpx.AsyncByteStream):
+        async def __aiter__(self):
+            for frame in [
+                packet({"role": "assistant", "content": "已经收到的草稿"}),
+                packet(usage=USAGE),
+            ]:
+                yield frame
+            raise httpx.ReadError("connection reset by peer")
+
+        async def aclose(self):
+            return None
+
+    events = []
+
+    def handler(request):
+        return httpx.Response(200, stream=BrokenStream(), headers={"Content-Type": "text/event-stream"})
+
+    async with httpx.AsyncClient(transport=httpx.MockTransport(handler)) as client:
+        result = await AgentRunner(
+            store=store,
+            model=DeepSeekModel("test", http_client=client),
+            tools=create_project_tools(),
+            on_event=events.append,
+        ).run("test", "hello", request_id="stream-broken")
+
+    assert result["errorCode"] == "STREAM_INTERRUPTED" and result["resumable"]
+    call = result["modelCalls"][0]
+    assert (call["inputTokens"], call["outputTokens"]) == (20, 4)
+    assert (call["cacheHitTokens"], call["cacheMissTokens"]) == (12, 8)
+    usage_events = [event for event in events if event["type"] == "model.usage"]
+    assert usage_events and usage_events[-1]["call"]["inputTokens"] == 20
+
+
+async def test_a_cancelled_stream_records_the_tokens_it_already_received(store):
+    held = HeldStream([packet(usage=USAGE), packet({"role": "assistant", "content": "草稿"})], [])
+
+    def handler(request):
+        return httpx.Response(200, stream=held, headers={"Content-Type": "text/event-stream"})
+
+    cancelled = asyncio.Event()
+    async with httpx.AsyncClient(transport=httpx.MockTransport(handler)) as client:
+        runner = AgentRunner(
+            store=store,
+            model=DeepSeekModel("test", http_client=client),
+            tools=create_project_tools(),
+            policy=RunPolicy(max_steps=3, timeout_seconds=20),
+        )
+        task = asyncio.create_task(runner.run("test", "hello", cancelled=cancelled))
+        await asyncio.wait_for(held.entered.wait(), 30)
+        cancelled.set()
+        result = await task
+    assert result["status"] == "cancelled"
+    call = result["modelCalls"][0]
+    assert (call["inputTokens"], call["outputTokens"]) == (20, 4)
+
+
 async def test_cancelled_http_stream_closes_connection_and_preserves_saved_artifact(store):
     held = HeldStream([packet({"role": "assistant", "content": "unsaved-stream-draft"})], text_frames())
     requests = []

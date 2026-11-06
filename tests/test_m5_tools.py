@@ -344,6 +344,33 @@ def test_style_bible_round_trip(store):
     assert read["entry"]["genre"] == ["悬疑", "都市"]
 
 
+def test_bible_genre_length_is_bounded(store):
+    registry, _service, _adapter, _context = mock_tools(store)
+    too_long = call(
+        registry,
+        store,
+        "bible_save",
+        {
+            "kind": "style",
+            "name": "冷调雨夜",
+            "genre": ["悬疑" * 200],
+            "palette": "冷蓝灰",
+            "cameraLanguage": "手持跟拍",
+        },
+        "style-genre-too-long",
+    )
+    assert too_long["ok"] is False and too_long["error"]["code"] == "INVALID_ARGUMENTS"
+    assert not store.snapshot()["styles"]
+    alias_too_long = call(
+        registry,
+        store,
+        "bible_save",
+        {"kind": "character", "name": "林晚", "appearance": "短发", "aliases": ["名" * 30]},
+        "character-alias-too-long",
+    )
+    assert alias_too_long["ok"] is False and alias_too_long["error"]["code"] == "INVALID_ARGUMENTS"
+
+
 def test_kind_specific_fields_are_enforced(store):
     registry, _service, _adapter, _context = mock_tools(store)
     missing = call(

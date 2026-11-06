@@ -17,7 +17,6 @@ from __future__ import annotations
 import hashlib
 import json
 import math
-import os
 import re
 import unicodedata
 from pathlib import Path
@@ -226,10 +225,12 @@ class MemoryIndex:
             {"version": MEMORY_VERSION, "embedding": self.embedder.fingerprint, "records": ordered},
             ensure_ascii=False,
         )
-        temporary = self.path.with_name(self.path.name + ".tmp")
         self.path.parent.mkdir(parents=True, exist_ok=True)
-        temporary.write_text(payload, encoding="utf-8")
-        os.replace(temporary, self.path)
+        from vagent.storage import atomic_write_bytes
+
+        # Atomic replacement (uuid temp name + fsync + replace + FX-02 retry) keeps a
+        # concurrent reader from ever seeing a truncated memory index.
+        atomic_write_bytes(self.path, payload.encode("utf-8"))
         return ordered
 
     def _evict(self, records: dict, project_id: str) -> None:

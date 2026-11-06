@@ -18,6 +18,7 @@ from vagent.video.audio import (
     TTS_REQUEST_COST_LIMIT,
     tts_cost,
 )
+from vagent.video.media import MediaError
 from vagent.video.tts import (
     COSYVOICE_MODEL,
     COSYVOICE_PROVIDER,
@@ -282,22 +283,31 @@ async def test_local_adapter_needs_no_network():
     assert result.audio == synthesize_local_wav("雨夜咖啡店。", "local-narrator")
 
 
-async def test_an_http_aliyun_result_url_is_still_accepted():
-    audio = synthesize_local_wav("你好。", "local-female")
-
+@pytest.mark.parametrize(
+    "url",
+    [
+        # The official example's plain-http OSS URL is not acceptable.
+        "http://dashscope-result-bj.oss-cn-beijing.aliyuncs.com/a.wav",
+        # An arbitrary aliyuncs host is not one of the frozen answer hosts.
+        "https://evil-bucket.oss-cn-beijing.aliyuncs.com/a.wav",
+        # A non-443 port is a different origin.
+        "https://dashscope-result-bj.oss-cn-beijing.aliyuncs.com:8443/a.wav",
+        # Userinfo must never be accepted as part of the host check.
+        "https://user:pass@dashscope-result-bj.oss-cn-beijing.aliyuncs.com/a.wav",
+    ],
+)
+async def test_an_untrusted_result_url_is_rejected(url):
     def handler(request: httpx.Request):
         if request.url.path.endswith("/SpeechSynthesizer"):
             return httpx.Response(
                 200,
                 json={
                     "request_id": "req-http",
-                    "output": {
-                        "audio": {"url": "http://dashscope-result-bj.oss-cn-beijing.aliyuncs.com/a.wav"}
-                    },
+                    "output": {"audio": {"url": url}},
                     "usage": {"characters": 3},
                 },
             )
-        return httpx.Response(200, content=audio, headers={"content-type": "audio/wav"})
+        pytest.fail("An untrusted result URL must never be fetched")
 
     adapter = CosyVoiceAdapter(api_key="sk-test", transport=httpx.MockTransport(handler))
     request = TtsRequestV1(
@@ -306,5 +316,47 @@ async def test_an_http_aliyun_result_url_is_still_accepted():
         voice_id="longxiaochun_v2",
         text="你好。",
     )
-    result = await adapter.synthesize(request)
-    assert result.characters == 3
+    with pytest.raises(TtsError) as error:
+        await adapter.synthesize(request)
+    assert error.value.code == "PROVIDER_RESULT_UNTRUSTED"
+
+
+async def test_a_private_dns_answer_is_reported_as_an_untrusted_result():
+    def handler(request: httpx.Request):
+        if request.url.path.endswith("/SpeechSynthesizer"):
+            return httpx.Response(
+                200,
+                json={
+                    "request_id": "req-dns",
+                    "output": {
+                        "audio": {"url": "https://dashscope-result-bj.oss-cn-beijing.aliyuncs.com/a.wav"}
+                    },
+                    "usage": {"characters": 3},
+                },
+            )
+        raise AssertionError("the POST transport is never used for the download")
+
+    class PrivateDnsTransport(httpx.AsyncBaseTransport):
+        def bind_origin(self, host):
+            self.host = host
+
+        def release_origin(self):
+            self.host = None
+
+        async def handle_async_request(self, request):
+            raise MediaError("MEDIA_SOURCE_UNSAFE")
+
+    adapter = CosyVoiceAdapter(
+        api_key="sk-test",
+        transport=httpx.MockTransport(handler),
+        download_transport=PrivateDnsTransport(),
+    )
+    request = TtsRequestV1(
+        provider="cosyvoice",
+        model=COSYVOICE_MODEL,
+        voice_id="longxiaochun_v2",
+        text="你好。",
+    )
+    with pytest.raises(TtsError) as error:
+        await adapter.synthesize(request)
+    assert error.value.code == "PROVIDER_RESULT_UNTRUSTED"

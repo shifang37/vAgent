@@ -143,6 +143,8 @@ def estimate_run(run: dict, *, cache_blind: bool = False) -> dict:
         "unpricedCalls": unpriced,
         "cacheAssumedMissCalls": sum(1 for item in priced if item["cacheUsage"] == "assumed-miss"),
     }
+    untracked = _untracked_model_steps(run)
+    base["untrackedModelSteps"] = untracked
     if not priced:
         return {
             **base,
@@ -153,15 +155,32 @@ def estimate_run(run: dict, *, cache_blind: bool = False) -> dict:
         }
     if len(currencies) > 1:
         return {**base, "status": "mixed-currency", "currency": None, "amount": None}
-    return {
+    # Model steps recorded before per-call tracking began have tokens in the Run totals
+    # but no call row to price: the sum is a lower bound, and saying "priced" would be
+    # a lie about a number the operator may reconcile against an invoice.
+    partial = unpriced > 0 or untracked > 0
+    estimate = {
         **base,
-        "status": "priced" if unpriced == 0 else "partial",
+        "status": "partial" if partial else "priced",
         "currency": currencies.pop(),
         "amount": _amount(_total(priced)),
         "inputCacheHitTokens": sum(item["inputCacheHitTokens"] for item in priced),
         "inputCacheMissTokens": sum(item["inputCacheMissTokens"] for item in priced),
         "outputTokens": sum(item["outputTokens"] for item in priced),
     }
+    if untracked:
+        estimate["amountIsLowerBound"] = True
+        estimate["note"] = f"另有 {untracked} 个模型步没有调用明细，金额是已记录调用的下限。"
+    return estimate
+
+
+def _untracked_model_steps(run: dict) -> int:
+    from vagent.usage import summarize_usage
+
+    try:
+        return summarize_usage(run)["untrackedModelSteps"]
+    except KeyError:  # a partial record (a reporting script may pass one)
+        return 0
 
 
 def estimate_runs(runs, *, cache_blind: bool = False) -> dict:
@@ -191,6 +210,8 @@ def estimate_runs(runs, *, cache_blind: bool = False) -> dict:
         "pricedRuns": priced_runs,
         "partialRuns": partial_runs,
         "unpricedRuns": unpriced_runs,
+        # Any partial Run makes the aggregate a lower bound, never a full quote.
+        "amountIsLowerBound": partial_runs > 0,
         "totals": [
             {"currency": currency, "amount": _amount(amount)}
             for currency, amount in sorted(per_currency.items())

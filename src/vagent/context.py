@@ -1,5 +1,5 @@
 import json
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 
 from langchain_core.messages import (
     AIMessage,
@@ -109,6 +109,9 @@ class ContextReport:
     # the summary that now stands in for them. Both default for older callers.
     dropped: list[BaseMessage] = field(default_factory=list)
     summary: str | None = None
+    # True when the recalled-memory block was dropped to stay inside the budget: the
+    # request still runs (memory is an optimization), with one observable event.
+    memory_dropped: bool = False
 
 
 class ContextBuilder:
@@ -150,6 +153,43 @@ class ContextBuilder:
         ]
 
     def build(
+        self,
+        *,
+        system_prompt: str,
+        history: list[BaseMessage],
+        project: dict,
+        tools: list[dict],
+        skills: list[dict] | None = None,
+        run_budget: dict[str, int] | None = None,
+        history_summary: str | None = None,
+        summarize: bool = False,
+        memory_block: str | None = None,
+    ) -> ContextReport:
+        """Build the request, dropping the memory block before failing on the budget.
+
+        With memory on, a recalled block can be what pushes an otherwise valid request
+        over ``CONTEXT_LIMIT`` — turning an optimization into "memory makes the project
+        unusable". The fallback rebuilds without it and reports the drop.
+        """
+        arguments = {
+            "system_prompt": system_prompt,
+            "history": history,
+            "project": project,
+            "tools": tools,
+            "skills": skills,
+            "run_budget": run_budget,
+            "history_summary": history_summary,
+            "summarize": summarize,
+            "memory_block": memory_block,
+        }
+        try:
+            return self._build(**arguments)
+        except AppError as error:
+            if error.code != "CONTEXT_LIMIT" or not memory_block:
+                raise
+            return replace(self._build(**{**arguments, "memory_block": None}), memory_dropped=True)
+
+    def _build(
         self,
         *,
         system_prompt: str,

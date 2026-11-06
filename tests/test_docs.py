@@ -33,6 +33,14 @@ COMMANDS = (
 )
 
 
+M3_COMMANDS = (
+    "vagent gc",
+    "vagent snapshot",
+    "vagent recover --from last-good",
+    "scripts/measure_state.py",
+)
+
+
 def read(name: str) -> str:
     return (ROOT / name).read_text(encoding="utf-8")
 
@@ -47,6 +55,13 @@ def test_the_user_docs_document_every_opt_in_switch():
 def test_the_user_docs_document_the_offline_commands_and_the_sixty_second_limit():
     combined = read("README.md") + read("docs/USER_GUIDE.md")
     assert [command for command in COMMANDS if command not in combined] == []
+    assert "60 秒" in combined
+
+
+def test_the_user_docs_document_the_m3_retention_commands():
+    combined = read("README.md") + read("docs/USER_GUIDE.md")
+    assert [command for command in M3_COMMANDS if command not in combined] == []
+    assert "state.last-good.json" in combined and "16 MiB" in combined
     assert "60 秒" in combined
 
 

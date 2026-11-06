@@ -37,6 +37,7 @@ from vagent.video.audio import (
     TTS_PROVIDERS_VERSION,
     TTS_REQUEST_CHARACTER_LIMIT,
 )
+from vagent.video.media import MediaError
 
 LOCAL_PROVIDER = "local"
 LOCAL_MODEL = "local-tts-v1"
@@ -50,6 +51,18 @@ COSYVOICE_SAMPLE_RATE = 48000
 COSYVOICE_SUBMIT_PATH = "/api/v1/services/audio/tts/SpeechSynthesizer"
 SHARED_HOST = "dashscope.aliyuncs.com"
 WORKSPACE_SUFFIX = ".cn-beijing.maas.aliyuncs.com"
+# FX-24: the audio download follows the same source policy as every other media
+# download. The official example returns an ``http`` OSS URL, but a plain-http URL and
+# any host outside this exact OSS answer set are not acceptable sources for bytes that
+# later sit in a delivered video. The three hosts are the ones the Wan result policy
+# already trusts, so an operator does not learn a second, weaker rule.
+TTS_RESULT_HOSTS = frozenset(
+    {
+        "dashscope-result-sh.oss-accelerate.aliyuncs.com",
+        "dashscope-a717.oss-accelerate.aliyuncs.com",
+        "dashscope-result-bj.oss-cn-beijing.aliyuncs.com",
+    }
+)
 LOCAL_SAMPLE_RATE = 48000
 LOCAL_CHANNELS = 1
 MAX_SUBMIT_BYTES = 1024 * 1024
@@ -419,13 +432,19 @@ _ERROR_CODES = {
 
 
 def _trusted_result_url(url: str) -> bool:
-    parts = urlsplit(url)
-    # The official response example uses an http OSS URL; the download carries no
-    # credentials and the bytes are re-validated, so both schemes are accepted.
-    if parts.scheme not in {"http", "https"} or not parts.hostname or parts.username or parts.password:
+    """HTTPS on 443 at one exact OSS answer host; no userinfo, fragment or port trick."""
+    if not isinstance(url, str) or len(url) > 8192:
         return False
-    host = parts.hostname.lower()
-    return host == "aliyuncs.com" or host.endswith(".aliyuncs.com")
+    try:
+        parts = urlsplit(url)
+        port = parts.port
+    except ValueError:
+        return False
+    if parts.scheme != "https" or not parts.hostname or parts.username or parts.password:
+        return False
+    if port not in {None, 443} or parts.fragment:
+        return False
+    return parts.hostname.lower() in TTS_RESULT_HOSTS
 
 
 class CosyVoiceAdapter:
@@ -437,6 +456,7 @@ class CosyVoiceAdapter:
         api_key: str,
         workspace_id: str | None = None,
         transport: httpx.AsyncBaseTransport | None = None,
+        download_transport: httpx.AsyncBaseTransport | None = None,
         timeout: float = TTS_TIMEOUT_SECONDS,
     ):
         if not api_key:
@@ -444,6 +464,9 @@ class CosyVoiceAdapter:
         self.api_key = api_key
         self.workspace_id = workspace_id
         self.transport = transport
+        # A separate transport for the result download lets the production path pin its
+        # DNS answer while tests keep one mock transport for both requests.
+        self.download_transport = download_transport
         self.timeout = timeout
 
     @property
@@ -492,19 +515,12 @@ class CosyVoiceAdapter:
                 if not _trusted_result_url(audio_url):
                     raise TtsError("PROVIDER_RESULT_UNTRUSTED")
                 chunks: list[bytes] = []
-                total = 0
-                async with client.stream(
-                    "GET", audio_url, headers={"Accept": "audio/wav"}, follow_redirects=False
-                ) as download:
-                    if download.status_code != 200:
-                        raise TtsError("PROVIDER_UPSTREAM_ERROR", f"（下载 {download.status_code}）")
-                    async for chunk in download.aiter_bytes():
-                        total += len(chunk)
-                        if total > MAX_AUDIO_BYTES:
-                            raise TtsError("PROVIDER_RESULT_UNTRUSTED", "（音频超过 25 MB）")
-                        chunks.append(chunk)
+                await self._download(audio_url, chunks)
         except TtsError:
             raise
+        except MediaError as error:
+            # The pinned transport refused the host/DNS answer before any connection.
+            raise TtsError("PROVIDER_RESULT_UNTRUSTED") from error
         except httpx.TimeoutException:
             raise TtsError("PROVIDER_NETWORK", "（超时）") from None
         except httpx.HTTPError:
@@ -531,6 +547,45 @@ class CosyVoiceAdapter:
             if isinstance(audio.get("expires_at"), int)
             else None,
         )
+
+    async def _download(self, audio_url: str, chunks: list[bytes]) -> None:
+        """Fetch the result object over a pinned, public-DNS, TLS-only connection.
+
+        The production transport is :class:`MediaTransport`: it resolves the host once,
+        refuses a non-public answer, connects to the resolved address on 443 and lets
+        httpcore validate the certificate for the original name. A caller-injected
+        transport (tests) keeps its own behaviour; the URL policy above already ran.
+        """
+        from vagent.video.media_http import MediaTransport
+
+        transport = self.download_transport or self.transport
+        if transport is None:
+            transport = MediaTransport()
+        host = urlsplit(audio_url).hostname
+        bind = getattr(transport, "bind_origin", None)
+        if bind is not None:
+            bind(host)
+        try:
+            client = httpx.AsyncClient(
+                transport=transport,
+                timeout=httpx.Timeout(self.timeout, connect=min(10.0, self.timeout)),
+                follow_redirects=False,
+                trust_env=False,
+            )
+            async with client:
+                async with client.stream("GET", audio_url, headers={"Accept": "audio/wav"}) as download:
+                    if download.status_code != 200:
+                        raise TtsError("PROVIDER_UPSTREAM_ERROR", f"（下载 {download.status_code}）")
+                    total = 0
+                    async for chunk in download.aiter_bytes():
+                        total += len(chunk)
+                        if total > MAX_AUDIO_BYTES:
+                            raise TtsError("PROVIDER_RESULT_UNTRUSTED", "（音频超过 25 MB）")
+                        chunks.append(chunk)
+        finally:
+            release = getattr(transport, "release_origin", None)
+            if release is not None:
+                release()
 
     @staticmethod
     def _json_or_error(response: httpx.Response) -> dict:

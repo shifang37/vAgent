@@ -23,7 +23,7 @@ from vagent.memory import MemoryIndex
 from vagent.models import DeepSeekModel
 from vagent.runner import AgentRunner, RunPolicy
 from vagent.skills import discover_for, register_skill_tool
-from vagent.storage import FileStore, now
+from vagent.storage import FileStore, append_event, now
 from vagent.summary import ExtractiveSummarizer
 from vagent.tools import create_project_tools
 from vagent.tracing import TRACE_DIRECTORY, JsonlExporter, Tracer
@@ -1311,8 +1311,7 @@ class ApplicationService:
             if run_id:
 
                 def record_event(draft):
-                    events = draft["runs"][run_id].setdefault("events", [])
-                    events.append({**event, "sequence": len(events) + 1, "at": now()})
+                    append_event(draft["runs"][run_id], event)
 
                 self.store.transaction(record_event)
                 if ready:

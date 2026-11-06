@@ -115,6 +115,28 @@ def test_a_call_without_token_usage_is_reported_not_estimated():
     assert estimate["amount"] == "2.000000"
 
 
+def test_untracked_model_steps_make_the_estimate_partial():
+    run = run_of("deepseek-flash", call(1_000_000, 0, None, 1_000_000))
+    run["modelSteps"] = 3
+    run["usageStartStep"] = 2  # one older step was never given a call row
+    estimate = pricing.estimate_run(run)
+    assert estimate["status"] == "partial"
+    assert estimate["untrackedModelSteps"] == 1
+    assert estimate["amountIsLowerBound"] is True
+    assert "下限" in estimate["note"]
+    assert estimate["amount"] == "2.000000"
+    assert pricing.estimate_runs([run])["amountIsLowerBound"] is True
+
+
+def test_fully_tracked_run_stays_priced():
+    run = run_of("deepseek-flash", call(1_000_000, 0, None, 1_000_000))
+    estimate = pricing.estimate_run(run)
+    assert estimate["status"] == "priced"
+    assert estimate["untrackedModelSteps"] == 0
+    assert "amountIsLowerBound" not in estimate and "note" not in estimate
+    assert pricing.estimate_runs([run])["amountIsLowerBound"] is False
+
+
 def test_an_unpriceable_run_says_why():
     estimate = pricing.estimate_run(run_of("deepseek-flash", call(None, None)))
     assert estimate["status"] == "unpriced" and estimate["reason"] == "no-priced-calls"

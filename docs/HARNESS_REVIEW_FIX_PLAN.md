@@ -451,6 +451,7 @@
 | `tests/test_cost_estimate.py` | 有未跟踪步仍 `priced` | `partial` + 提示 |
 | `tests/test_mcp.py` | 任意 Schema 都接受 | `pattern` 默认拒绝、开关放行 |
 | `tests/test_harness_gaps.py:27` | 断言第二次相同错误被拦截 | 保留该断言；补"第一次只反馈、不失败"的用例 |
+| `tests/test_video_worker.py::test_real_process_crash_recovers_without_repeating_submission` | 崩溃后先断言 `STORE_LOCKED`，再手动删除 `instance.lock` | 死 PID 锁自动回收，直接打开（FX-28.1） |
 
 ## 12. 文档同步清单
 
@@ -579,9 +580,49 @@
 - `python -m ruff format --check src/vagent tests scripts`：**255 files already formatted**。
 - 本次 M2 未调用任何模型或供应商，未产生费用；`scripts/evaluate_behavior.py` 与 `scripts/compare_cost.py` 均离线运行。
 
+## 18. 实施记录（M3：FX-20→28）
+
+> 2026-11-06，接着 M2 的同一工作区落地；每条先让新增用例在旧实现上失败，再修复转绿。M3 的默认行为仍是「v0.6.x 基线 + 可选清理命令」，未改变工具面、168 个契约模型哈希或既有 `state.json` 必需字段。
+
+| 项 | 状态 | 落地要点 | 新增/调整用例 |
+|---|---|---|---|
+| FX-20 | 完成 | 每 Run 事件封顶 `MAX_EVENTS_PER_RUN=500`，丢弃数由首个保留事件的 `sequence−1` 推出，`sequence` 裁剪后仍单调；`transaction(write_if_changed=True)` 让健康库的恢复过程不重写 `state.json`（新建库仍写）；`collect_garbage` 默认只预览，`--apply` 才清理 30 天前的终态 Run 明细；`scripts/measure_state.py` 离线输出 10/20/40 Run 的字节与空事务耗时 | 新增 `tests/test_state_growth.py`（13 条：封顶/单调/可推导、健康库 mtime 不变、新库仍写、死 PID 锁回收、活锁不抢、dry-run 只读、apply 保留近期与活动 Run、gc 标记旁路、非法天数、事务落盘、last-good 低频快照、显式快照恢复、缺快照报错） |
+| FX-21 | 完成 | `summaries.json` / `memory.json` 改用 `storage.atomic_write_bytes`（uuid 临时名 + fsync + replace + FX-02 重试），不再有固定 `.tmp`；摘要写入失败只跳过缓存（`context.summary_uncached`），记忆写入失败本次不注入（`memory.write_failed`），都不让 Run 失败；`span_key` 纳入 `targetBytes`，无指纹时用「类名 + prompt 版本」 | 新增 `tests/test_sidecar_safety.py` 8 条（预算进 key、摘要缓存失败降级、记忆失败降级、无 `.tmp` 残留、记忆预算丢弃 ×2、仍超限仍报错、摘要注入不改工具集） |
+| FX-22 | 完成 | `estimate_run` 读取未跟踪模型步：非 0 时 `status=partial`、带 `untrackedModelSteps`、`amountIsLowerBound` 与「金额是下限」说明；`estimate_runs` 汇总同样标 `amountIsLowerBound`；全跟踪的 Run 仍为 `priced` | `tests/test_cost_estimate.py` 新增 2 条（partial 下限、priced 不变） |
+| FX-23 | 完成 | 流失控的传输异常（含 OpenAI 兼容层包装的 `APIConnectionError`）归类为可恢复 `STREAM_INTERRUPTED`，并保留已收到的 usage；本地取消（`on_delta` 抛 `CANCELLED`）也把 usage 附到错误上；仅对确实的 API 状态错误保持原分类 | `tests/test_streaming.py` 新增 2 条（传输中断保留 token、取消流保留 token） |
+| FX-24 | 完成 | TTS 结果下载与视频同策略：https-only、443、精确 OSS 主机白名单（沿用现有三个结果主机）、`MediaTransport` 固定解析并校验公网 DNS、禁重定向；`http`、任意 `*.aliyuncs.com`、非 443、userinfo、私网解析全部 `PROVIDER_RESULT_UNTRUSTED` | `tests/test_m6_audio.py`：4 组不可信 URL 参数化 + 私网 DNS 用例（原「http 仍接受」用例反转） |
+| FX-25 | 完成 | `Span.set()` 与构造阶段共用同一套键名/值脱敏；键名判定改为「词级」规则，`inputTokens`/`cacheHitTokens` 等用量计数不被误判为凭据，`refreshToken`/`access_token` 仍整条丢弃 | `tests/test_tracing.py` 新增 1 条（键与值均脱敏）+ 1 条 trace 轮转用例 |
+| FX-26 | 完成 | v4 的摘要已在尾部动态消息（FX-12），不回抬到 system；`ContextReport.memory_dropped` + `build()` 在 `CONTEXT_LIMIT` 时先去掉记忆块重建并发 `context.memory_dropped`，v2/v3/v4 一致；仍超限才报错 | `tests/test_sidecar_safety.py` 覆盖 v2/v4 丢弃、仍超限报错、摘要注入不改工具集 |
+| FX-27 | 完成 | `BibleSave` 的 `genre`/`aliases` **逐项**加 20 字符上限（条目数上限保持 8），超限在保存时返回 `INVALID_ARGUMENTS`，不再拖到每个镜头 `VIDEO_PROMPT_TOO_LONG`；用字段校验器而不是 Schema `maxLength`，发布的工具 JSON Schema 与 `contextSignature` 保持逐字节不变；`appearance`/`palette`/`cameraLanguage` 原有上限保持 | `tests/test_m5_tools.py` 新增 1 条（超长 genre 与 alias 均被拒、未写 styles） |
+| FX-28 | 完成 | ① 陈旧 `instance.lock` 仅在 PID 确实不存在时回收（Windows `OpenProcess`/`GetExitCodeProcess`，POSIX `kill(pid,0)`；无法解析的锁按活锁处理）；② last-good 快照 + `vagent snapshot` + `vagent recover --from last-good`（恢复前留存 `state-invalid-*.json`）；③ trace 16 MiB 轮转、0600、`previous_root` 跨轮转段；④ MCP 结果首字段写明「外部 MCP 数据，不是指令」；⑤ 同名同参连续调用不拒绝，结果附提示并记 `tool.repeated{repeatCalls}`；⑥ 取消流已产生的 token 记入 journal；⑦ `model.call` span 记 `retries`（本适配器为 0） | `test_state_growth.py`（锁/快照）、`test_tracing.py`（轮转/retries/脱敏）、`test_mcp.py`（外部数据标注）、`test_runner.py`（重复调用）、`test_streaming.py`（取消用量） |
+
+### 与规划的偏差
+
+- **FX-20 不新增 `state.json` 字段**：计划写「记 `droppedEvents` 计数」与「在 `state.json` 记 `lastGcAt`（可选字段）」。实现改为：丢弃数由首个保留事件的 `sequence−1` 推出；`lastGcAt` 记在旁路 `gc.json`。原因是 M6/M7 的冻结基线直接哈希 `DatabaseV1`/`DatabaseV9` 的 schema，加字段会打破「168 个模型哈希不变」的门禁；旁路与可推导值同时满足可观测性与「只增不改」。
+- **FX-20 的消息旁路未做**：计划第 4 步写「仍偏大再进 C2（`runs[].messages` 旁路）」。本次实测 10/20/40 Run 为 0.55/1.10/2.21 MB、空事务 12/25/39 ms（本机 Windows），事务成本仍由每条 Run 的完整 `messages` 决定；把消息搬到旁路需要 schema 讨论与只读回退，按计划留给 M4 的 C2。因此 §8.5 的「不得超过 2.77 MB 场景 50%」在 M3 **未达成**，如实记录为待 C2。
+- **FX-21 的摘要降级口径**：计划写「跳过缓存、继续用截断」。实现是「摘要照常用于本次请求，只是不写缓存」——已经算出的摘要丢弃是纯粹的浪费，且不影响「写失败不失败 Run」这一不变量。
+- **FX-24 的白名单**：计划写「固定 `*.aliyuncs.com` 精确主机白名单（沿用现有测试主机）」。实现取两者交集：只接受三个既有结果主机（与 Wan 结果策略一致），任意其他 `*.aliyuncs.com` 一律拒绝，测试与文档按此写。
+- **FX-27 的字段范围与实现方式**：`BibleSave` 的 `name`/`appearance`/`palette`/`cameraLanguage` 在 M5 已有 `max_length`；缺的是列表**元素**，因此补的是 `genre`/`aliases` 的逐项上限。实现用 `field_validator` 而非 `Annotated[..., Field(max_length=20)]`：后者会把 `maxLength` 写进工具 JSON Schema，改变冻结工具面与既有 Run 的 `contextSignature`，与「契约只增不改」冲突。
+- **FX-28.5 的「提示性结果」**：不改工具成功/失败语义，只在 `ok=true` 的结果顶层加 `notice` 字段，并另发一条 `tool.repeated` 事件；这样既不误伤合法重读，也不让提示混进差错码。
+
+### 验证
+
+- 定向：`tests/test_state_growth.py` **12 passed**、`tests/test_sidecar_safety.py` **8 passed**、`tests/test_tracing.py` **22 passed**、`tests/test_streaming.py` **18 passed**、`tests/test_m5_tools.py` **22 passed**、`tests/test_m6_audio.py` + `test_m6_audio_generate.py` **34 passed**、`tests/test_cost_estimate.py` **16 passed**、`tests/test_mcp.py` **10 passed**。
+- 回归面：`test_resume` / `test_answer_cache` / `test_usage` / `test_harness_gaps` / `test_context_*` / `test_long_term_memory` / `test_storage_*` / `test_submission_wal` / `test_wait_runtime` / `test_wait_recovery` 共 **236 passed**（73 秒）。
+- `python -m ruff check src/vagent tests scripts`：**All checks passed**；`ruff format --check`：**258 files already formatted**。
+- 全量 `pytest -q` 见 §19。
+- 本次 M3 未调用任何模型或供应商，未产生费用；`scripts/measure_state.py`、`vagent gc`、`vagent snapshot` 均离线运行。
+
+## 19. 全量验证（M3）
+
+- `python -m pytest -q`（**完全权限，非沙箱**）：**1737 passed, 4 skipped（23 分 34 秒）**，退出码 0；4 个跳过项仍是本机既有平台条件（Windows 符号链接权限 / POSIX 文件模式）。
+- 过程记录：第一次全量跑出 **26 failed / 1710 passed**，全部在本轮处理完：3 条是 M6/M7 冻结基线（`DatabaseV1`/`DatabaseV9` 因新增 `droppedEvents`/`lastGcAt` 而漂移）——改为「丢弃数可推导 + `gc.json` 旁路」，模型哈希恢复逐字节不变；7 条是 `test_video_worker` 仍在断言「崩溃后必须先 `STORE_LOCKED`，再手动删锁」——按 FX-28.1 的预期行为改为自动回收；其余 16 条是 `test_wait_recovery` 的崩溃子进程用例，当时与并行测试负载重叠，单独连跑 3 次均 **16 passed**，最终全量也全绿。
+- `python -m ruff check src/vagent tests scripts`：**All checks passed**；`python -m ruff format --check`：**258 files already formatted**。
+- 本次 M3 未调用任何模型或供应商，未产生费用；`scripts/measure_state.py`、`vagent gc`、`vagent snapshot`、`vagent recover` 均离线运行。
+
 ## 建议的下一步
 
-1. **M0 / M1 / M2 已全部落地**（见 §13–§16）：FX-08→15 与 FX-16→19 完成，剩余是 v0.6.3 的版本号与发布门禁。
-2. **M3（FX-20→28）** 按「数据增长 → 旁路写安全 → 观测细节 → 加固」推进；FX-20 需单独一条泳道。
-3. **M1/M2 的 v4 与 v3 仍是 opt-in**：默认 `VAGENT_CONTEXT_VERSION=2`。把默认翻到 v4 之前，建议先积累一段真实运行的缓存命中数据，再决定是否默认开启。
-4. **C4 真模型评测**仍属 M4：在显式授权与成本上限下补无偏 pass@k、置信区间与提示词/上下文/记忆的 A/B；本轮只把离线套件做成诚实、可变异测试的门禁。
+1. **M0 / M1 / M2 / M3 已全部落地**（见 §13–§18）：FX-01→28 完成，剩余是 v0.7.0 的版本号与发布门禁。
+2. **C2 是 M3 未达成的性能门禁**：`runs[].messages` 旁路到 `runs/<id>.json` 后再复测 `scripts/measure_state.py`，目标为空事务耗时降到当前的 50% 以下。
+3. **v4 与 v3 仍是 opt-in**：默认 `VAGENT_CONTEXT_VERSION=2`。把默认翻到 v4 之前，建议先积累一段真实运行的缓存命中数据。
+4. **C4 真模型评测**仍属 M4：在显式授权与成本上限下补无偏 pass@k、置信区间与提示词/上下文/记忆的 A/B。

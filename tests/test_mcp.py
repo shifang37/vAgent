@@ -158,6 +158,7 @@ class _Result:
 def test_nan_and_non_json_results_are_sanitized_and_bounded():
     payload = result_payload(_Result(structured={"score": float("nan"), "flags": [True, None]}))
     assert payload["source"] == "mcp"
+    assert "外部 MCP 数据" in payload["notice"]  # the model reads data, not instructions
     assert payload["structuredContent"] == {"score": None, "flags": [True, None]}
     assert "NaN" not in json.dumps(payload)  # valid JSON, safe to put in a context
 

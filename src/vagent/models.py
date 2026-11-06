@@ -1,3 +1,4 @@
+import asyncio
 import json
 from collections.abc import Callable
 from contextlib import aclosing
@@ -34,6 +35,39 @@ class StreamResponseError(AppError):
     def __init__(self, code, message, reply):
         super().__init__(code, message)
         self.usage = extract_usage(reply)
+
+
+def is_transport_failure(error: BaseException) -> bool:
+    """Whether a failed stream died on the wire rather than in the provider's answer.
+
+    The OpenAI-compatible client wraps transport failures in its own
+    ``APIConnectionError`` / ``APITimeoutError`` classes, so checking ``httpx`` alone
+    would misclassify them as ``EXECUTION_ERROR`` and lose the recoverable/resumable
+    classification. The original exception is still reachable through the cause chain.
+    """
+    seen: set[int] = set()
+    current: BaseException | None = error
+    for _ in range(8):
+        if current is None or id(current) in seen:
+            return False
+        seen.add(id(current))
+        # A provider answer with an HTTP status is an API error, not a broken wire.
+        if getattr(current, "status_code", None) is not None:
+            return False
+        if isinstance(current, (httpx.TransportError, httpx.TimeoutException, TimeoutError)):
+            return True
+        if isinstance(current, OSError):
+            return True
+        if type(current).__name__ in {
+            "APIConnectionError",
+            "APITimeoutError",
+            "ModelConnectionError",
+            "ConnectError",
+            "ReadError",
+        }:
+            return True
+        current = current.__cause__ or current.__context__
+    return False
 
 
 def _last_finish_reason(chunks) -> str | None:
@@ -104,6 +138,11 @@ class DeepSeekModel:
         http_client: httpx.AsyncClient | None = None,
     ):
         self.name = model
+        # Recorded on the model.call span: this adapter is configured with zero
+        # connection retries, so a retry count of 0 is a fact, not a missing value.
+        self.max_retries = 0
+        # Usage received before a cancelled stream, read by the runner's cancel path.
+        self.last_stream_usage: dict | None = None
         self.cache_config = {
             "adapter": "deepseek-v1",
             "endpoint": "https://api.deepseek.com",
@@ -130,22 +169,70 @@ class DeepSeekModel:
     ) -> AIMessage:
         chunks = []
         raw_usage, usage_metadata = {}, None
-        async with aclosing(self._client.bind_tools(tools).astream(messages, stream_usage=True)) as stream:
-            async for chunk in stream:
-                if not isinstance(chunk, AIMessageChunk):
-                    raise AppError("INVALID_RESPONSE", "模型返回了不支持的消息流。")
-                metadata = chunk.response_metadata.copy()
-                usage = metadata.pop("token_usage", None)
-                if usage is not None:
-                    raw_usage, usage_metadata = usage, chunk.usage_metadata
-                # Usage is cumulative, not a per-chunk delta. Count it once.
-                chunks.append(
-                    chunk.model_copy(update={"response_metadata": metadata, "usage_metadata": None})
-                )
-                if isinstance(chunk.content, str) and chunk.content:
-                    on_delta(chunk.content)
+        self.last_stream_usage = None
+
+        def partial_reply() -> AIMessage:
+            """The reply assembled from the deltas received so far (never persisted)."""
+            if not chunks:
+                reply = AIMessage(content="")
+            else:
+                combined = add_ai_message_chunks(chunks[0], *chunks[1:])
+                reply = message_chunk_to_message(combined)
+            reply.usage_metadata = usage_metadata
+            reply.response_metadata["token_usage"] = raw_usage
+            return reply
+
+        try:
+            async with aclosing(
+                self._client.bind_tools(tools).astream(messages, stream_usage=True)
+            ) as stream:
+                async for chunk in stream:
+                    if not isinstance(chunk, AIMessageChunk):
+                        raise AppError("INVALID_RESPONSE", "模型返回了不支持的消息流。")
+                    metadata = chunk.response_metadata.copy()
+                    usage = metadata.pop("token_usage", None)
+                    if usage is not None:
+                        raw_usage, usage_metadata = usage, chunk.usage_metadata
+                    # Usage is cumulative, not a per-chunk delta. Count it once.
+                    chunks.append(
+                        chunk.model_copy(update={"response_metadata": metadata, "usage_metadata": None})
+                    )
+                    if isinstance(chunk.content, str) and chunk.content:
+                        on_delta(chunk.content)
+        except (httpx.HTTPError, OSError) as error:
+            # The transport died mid-stream: classify it as recoverable instead of the
+            # generic EXECUTION_ERROR, and keep whatever usage the provider already sent
+            # (it may bill the aborted call).
+            raise StreamResponseError(
+                "STREAM_INTERRUPTED", "回复流中断，草稿未保存，可在剩余预算内继续。", partial_reply()
+            ) from error
+        except AppError as error:
+            # A local cancel/stop raised from ``on_delta``: still attach the received
+            # usage so the journal bills the tokens the provider already generated.
+            if getattr(error, "usage", None) is None:
+                try:
+                    error.usage = extract_usage(partial_reply())
+                except Exception:  # pragma: no cover - extraction is total in practice
+                    pass
+            raise
+        except Exception as error:
+            # The OpenAI-compatible adapter re-wraps transport failures; recover the
+            # classification instead of letting it become EXECUTION_ERROR.
+            if not is_transport_failure(error):
+                raise
+            raise StreamResponseError(
+                "STREAM_INTERRUPTED", "回复流中断，草稿未保存，可在剩余预算内继续。", partial_reply()
+            ) from error
+        except asyncio.CancelledError:
+            # The task was cancelled while the stream was open. The caller sees no
+            # exception object here, so publish the received usage on the adapter: the
+            # Run journal still bills the tokens the provider already generated.
+            self.last_stream_usage = extract_usage(partial_reply())
+            raise
         if not chunks:
-            raise AppError("STREAM_INTERRUPTED", "回复流未完成，草稿未保存，可在剩余预算内继续。")
+            raise StreamResponseError(
+                "STREAM_INTERRUPTED", "回复流未完成，草稿未保存，可在剩余预算内继续。", partial_reply()
+            )
         combined = add_ai_message_chunks(chunks[0], *chunks[1:])
         reply = message_chunk_to_message(combined)
         reply.usage_metadata = usage_metadata

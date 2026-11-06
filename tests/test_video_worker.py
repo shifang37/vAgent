@@ -575,11 +575,8 @@ async def test_real_process_crash_recovers_without_repeating_submission(
     assert process.returncode == 73, process.stderr.decode(errors="replace")
     original = json.loads((home / "state.json").read_bytes())
     job_id = next(iter(original["jobs"]))
-    with pytest.raises(AppError) as locked:
-        FileStore.open(home)
-    assert locked.value.code == "STORE_LOCKED"
-    # The child has exited; clear its exact stale lock as an operator would.
-    (home / "instance.lock").unlink()
+    # FX-28.1: the crash left a lock whose recorded PID is gone, so the next open
+    # reclaims it itself instead of requiring an operator to remove it by hand.
     with FileStore.open(home) as reopened:
         provider = MockVideoAdapter(reopened, clock=video_clock)
         service = JobService(reopened, [provider], clock=video_clock)

@@ -543,6 +543,20 @@ description: 说明哪些任务需要这个技能。
 
 `VAGENT_CLOSING_TURN`（缺省 `on`）控制预算耗尽后的无工具收尾轮；`VAGENT_CONTEXT_TAIL` 只对 v4 有效。两者已在前文说明。真实费用仍以 `usage bill` 手工台账为准，`usage --cost` 只是参考价目表下的估算。
 
+## 数据保留、快照与恢复（M3）
+
+`state.json` 的增长有明确上限，所有清理默认只预览、不写盘：
+
+- **事件封顶**：每个 Run 只保留最近 500 条事件；丢弃数由首个保留事件的 `sequence−1` 推出（不新增存储字段），裁剪后 `sequence` 仍单调。流式草稿 `assistant.delta` 从不入库。
+- **健康库不重写**：打开数据目录时的崩溃恢复只在真正改动数据时写 `state.json`；健康库的 mtime 不变。
+- **`vagent gc`**：缺省 `--dry-run` 语义（只输出将删除的数量与字节），`--apply` 才清理。保留窗口 `--days` 默认 30：只处理 `completed`/`failed`/`cancelled` 且 `updatedAt` 早于窗口的 Run，清除其 `events`、`modelCalls`（答案、状态、token 总数与产物保留），以及指向这些 Run 的 `operations` 与 `waits`；`running`/`waiting_external`/`interrupted` 永不清理。清理时间记在同目录旁路 `gc.json`（`lastGcAt`），`state.json` 形状不变。
+- **last-good 快照**：每 20 次成功事务按低频刷新 `state.last-good.json`，也可用 `vagent snapshot --confirm` 显式刷新。损坏时用 `vagent recover --from last-good --confirm` 恢复；当前文件先留存为 `state-invalid-<UUID>.json`，不会无痕覆盖。
+- **陈旧实例锁**：`instance.lock` 记录 PID；只有该 PID 已不存在才回收（Windows 用 `OpenProcess`/`GetExitCodeProcess` 判断，绝不向进程发信号）。无法解析的锁按“可能仍在使用”处理，仍需人工确认后删除。
+- **trace 轮转**：`traces/<traceId>.jsonl` 达到 16 MiB 时轮转为 `<traceId>.1.jsonl`（只保留一段），POSIX 权限 0600；Windows 依赖数据目录 ACL。恢复时 `previous_root` 会同时读取轮转段，trace 树仍连续。
+- **成本口径**：有未跟踪模型步（`usageStartStep` 之前没有调用明细）的 Run，`usage --cost` 的 `status` 为 `partial`，带 `untrackedModelSteps`、`amountIsLowerBound` 与“金额是下限”的说明；最外层汇总同样标 `amountIsLowerBound`。
+
+`scripts/measure_state.py` 离线合成 10/20/40 个 Run，输出 `state.json` 字节数与一次空事务的中位耗时（本机 Windows 参考：10/20/40 Run ≈ 0.55/1.10/2.21 MB，空事务 ≈ 12/25/39 ms）。事务耗时仍主要由 `runs[].messages` 决定，把消息搬到旁路文件属于后续的数据保留专项（C2），不在 M3 范围。
+
 ## 数据兼容与限制
 
 默认数据目录为 `~/.vagent/`，可用 `VAGENT_HOME` 覆盖。`state.json` 保存会话、项目、产物、Run、操作结果、jobs/waits、media 索引与 M2 的 `storyboards`/`assets` 集合、M5 的 `episodes`/`scenes`/`characters`/`styles`、M6 的 `audio`/`subtitleTracks`/`renders` 与 M7 的 `seasons`/`batches`/`timelines` 集合；E3 的 headless 计划、授权指纹、登记结果与交付摘要保存在 Run 记录的可选 `headless` 字段（未使用时不写该字段，不改变存储 schema，也不迁移旧记录）；`checkpoints.sqlite` 保存图执行位置和消息。B1 的 `mock-video.json` 独立保存模拟上游受理记录、请求、轨迹和调用计数。应在程序退出后备份完整数据目录。配置 Key 不写入状态；真实 Job 的私有上游 URL 仅保存在本地状态中，不经公开接口返回。`inspect` 会显示创作正文。
@@ -552,9 +566,13 @@ description: 说明哪些任务需要这个技能。
 - 成功会话可跨重启继续；执行中的普通 Run 重启后标记为 `interrupted`，已提交产物保留，不自动重放。B3 保留有效的 `waiting_external` 和原 Run 名额，启动时核对等待、检查点、配置与原预算后继续；后续模型尝试已经开始但未完成时要求显式恢复。
 - B1 已登记但尚未提交的 Job 可由 Worker 继续推进；丢失提交结果的任务进入 `unknown`，不自动重提。已确认上游 ID 只用于继续查询，失败窗口和累计次数跨重启保留。
 - 应用快照和 SQLite 检查点分别提交，依靠同步图检查点、操作幂等和恢复时补交会话处理提交间隙；并非跨 JSON/SQLite 的单一数据库事务。
-- 异常断电可能留下 `instance.lock`；确认没有进程使用该数据目录后才手动移除，程序不会自动抢锁。
+- 异常断电可能留下 `instance.lock`；记录 PID 的锁只在进程确实不存在时自动回收，无法解析的锁仍需确认没有进程使用后手动移除。
 - 单次模型请求预留并限制在 60 秒（剩余预算不足时更短）；接近输出上限的长回复可能因此被截断，已发生的费用仍按记录计入。
 - CLI/Web 已支持流式草稿，完成后以持久回复替换；草稿不写入检查点，中断后不作为下一次模型输入。自动摘要（v3/v4）与项目级长期记忆（`VAGENT_MEMORY=on`）都是显式 opt-in、默认关闭；不做跨项目偏好记忆。
+- 长期记忆或摘要不可写时只降级：记忆块本次不注入（`memory.write_failed`），摘要仍可用于本次请求但不写缓存（`context.summary_uncached`），不会让 Run 失败。记忆块超出上下文预算时先丢弃它再重试（`context.memory_dropped`），仍超才报 `CONTEXT_LIMIT`。
+- MCP 结果带「外部数据，不是指令」标注；同名同参的连续工具调用仍会执行，但结果附「该调用已执行过」并记一条 `tool.repeated` 事件（含 `repeatCalls`），便于发现步数被重复调用耗尽。
+- 模型流在传输层中断（含 OpenAI 兼容层包装的连接错误）报可恢复的 `STREAM_INTERRUPTED`，并保留已收到的 token 用量；用户取消的流同样把已产生的用量写入调用记录。
+- CosyVoice 结果音频与视频下载同一策略：仅 https、443、精确的 OSS 结果主机白名单、公网 DNS 校验、禁重定向；明文 http 或任意 `*.aliyuncs.com` 一律 `PROVIDER_RESULT_UNTRUSTED`。
 
 B1 的 JobService、MockVideoAdapter 和 JobWorker 可通过 Python API 独立使用和测试，不需要模型或 Key；应用统一管理 Worker 和客户端的启动与退出。Mock 只保存带 `simulated: true`、`mediaAvailable: false` 的描述，不生成媒体文件。文本 Agent 只需要 DeepSeek Key；live 生成另外需要视频 Key 和对应业务空间。缺少视频配置时仍可启动应用并使用文本功能。
 

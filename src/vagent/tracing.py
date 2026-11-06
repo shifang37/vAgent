@@ -19,6 +19,7 @@ from __future__ import annotations
 import contextlib
 import hashlib
 import json
+import os
 import re
 import time
 import uuid
@@ -27,19 +28,35 @@ from pathlib import Path
 
 TRACE_DIRECTORY = "traces"
 MAX_ATTRIBUTE_CHARS = 512
+# One trace file is rotated at 16 MiB, keeping the previous segment as ``<id>.1.jsonl``:
+# a long-lived Run under tracing on must not produce an unbounded single file.
+MAX_TRACE_BYTES = 16 * 1024 * 1024
 REDACTED = "[redacted]"
 
 # A span must never become a credential exfiltration path: attribute names that look like
 # secrets are dropped wholesale, values that look like keys are replaced in place.
-SECRET_KEY = re.compile(r"api[-_]?key|authorization|token|secret|password|cookie|credential", re.IGNORECASE)
+SECRET_KEY = re.compile(r"api[-_]?key|authorization|cookie|credential|password|passwd|secret", re.IGNORECASE)
 SECRET_VALUE_PATTERNS = (
     re.compile(r"\bsk-[A-Za-z0-9_\-]{8,}"),
     re.compile(r"\b(?:bearer|basic)\s+[A-Za-z0-9._\-+/=]{8,}", re.IGNORECASE),
     re.compile(r"\b[A-Fa-f0-9]{32,}\b"),
     re.compile(r"\b[A-Za-z0-9+/]{40,}={0,2}\b"),
 )
+# Word-level credential names: ``refreshToken`` / ``access_token`` are secrets, while
+# ``inputTokens`` / ``cacheHitTokens`` are usage counters and must stay readable.
+_SECRET_WORDS = frozenset(
+    {"key", "token", "secret", "password", "passwd", "authorization", "credential", "cookie", "bearer"}
+)
 
-_CURRENT: ContextVar[Span | None] = ContextVar("vagent_current_span", default=None)
+
+def _key_words(name: str) -> list[str]:
+    return [word for word in re.split(r"[^A-Za-z0-9]+|(?<=[a-z0-9])(?=[A-Z])", str(name)) if word]
+
+
+def is_secret_key(name: str) -> bool:
+    if SECRET_KEY.search(str(name)):
+        return True
+    return any(word.lower() in _SECRET_WORDS for word in _key_words(name))
 
 
 def redact_value(value):
@@ -54,7 +71,7 @@ def redact_value(value):
         return value
     if isinstance(value, dict):
         return {
-            str(key): REDACTED if SECRET_KEY.search(str(key)) else redact_value(item)
+            str(key): REDACTED if is_secret_key(str(key)) else redact_value(item)
             for key, item in value.items()
         }
     if isinstance(value, (list, tuple)):
@@ -66,9 +83,12 @@ def redact_attributes(attributes: dict | None) -> dict:
     # The key check applies at the top level too: ``{"api_key": "..."}`` must not survive
     # just because the nested branch is what usually handles names.
     return {
-        str(key): REDACTED if SECRET_KEY.search(str(key)) else redact_value(value)
+        str(key): REDACTED if is_secret_key(str(key)) else redact_value(value)
         for key, value in (attributes or {}).items()
     }
+
+
+_CURRENT: ContextVar[Span | None] = ContextVar("vagent_current_span", default=None)
 
 
 class Span:
@@ -99,12 +119,19 @@ class Span:
         self._token = None
 
     def set(self, **attributes) -> Span:
-        """Merge attributes; ``status`` / ``errorCode`` are span fields, not attributes."""
+        """Merge attributes; ``status`` / ``errorCode`` are span fields, not attributes.
+
+        The same redaction as construction time applies here: a late ``set()`` is just
+        as capable of writing a credential into the trace as an initial attribute, so
+        the key-name check must not live only in ``redact_attributes``.
+        """
         for key, value in attributes.items():
             if key == "status":
                 self.status = str(value)
             elif key == "errorCode":
                 self.error_code = None if value is None else str(value)
+            elif is_secret_key(str(key)):
+                self.attributes[str(key)] = REDACTED
             else:
                 self.attributes[key] = redact_value(value)
         return self
@@ -278,20 +305,45 @@ class JsonlExporter:
     def path(self, trace_id: str) -> Path:
         return self.directory / f"{trace_id}.jsonl"
 
+    def rotated_path(self, trace_id: str) -> Path:
+        return self.directory / f"{trace_id}.1.jsonl"
+
+    def _rotate(self, trace_id: str) -> None:
+        path = self.path(trace_id)
+        try:
+            if path.stat().st_size < MAX_TRACE_BYTES:
+                return
+        except OSError:
+            return
+        # Keep exactly one previous segment: bounded disk use, and ``previous_root``
+        # still finds the root span of the execution that ended before the rotation.
+        with contextlib.suppress(OSError):
+            os.replace(path, self.rotated_path(trace_id))
+
     def export(self, span: dict) -> None:
         self.directory.mkdir(parents=True, exist_ok=True)
+        trace_id = span["traceId"]
+        self._rotate(trace_id)
         line = json.dumps(span, ensure_ascii=False, sort_keys=True, separators=(",", ":"))
-        with self.path(span["traceId"]).open("a", encoding="utf-8", newline="\n") as handle:
+        # 0600 on POSIX: a trace can contain prompts and local paths. Windows ignores
+        # the mode bits and relies on the home directory ACL (documented in USER_GUIDE).
+        descriptor = os.open(self.path(trace_id), os.O_APPEND | os.O_CREAT | os.O_WRONLY, 0o600)
+        with os.fdopen(descriptor, "a", encoding="utf-8", newline="\n") as handle:
             handle.write(line + "\n")
+
+    def _lines(self, trace_id: str) -> list[str]:
+        lines: list[str] = []
+        for path in (self.rotated_path(trace_id), self.path(trace_id)):
+            try:
+                lines.extend(path.read_text(encoding="utf-8").splitlines())
+            except OSError:
+                continue
+        return lines
 
     def previous_root(self, trace_id: str) -> str | None:
         """The last ``run`` span already on disk, so a resume continues the same tree."""
-        try:
-            lines = self.path(trace_id).read_text(encoding="utf-8").splitlines()
-        except OSError:
-            return None
         root = None
-        for line in lines:
+        for line in self._lines(trace_id):
             try:
                 record = json.loads(line)
             except ValueError:
@@ -301,12 +353,8 @@ class JsonlExporter:
         return root
 
     def spans(self, trace_id: str) -> list[dict]:
-        try:
-            lines = self.path(trace_id).read_text(encoding="utf-8").splitlines()
-        except OSError:
-            return []
         spans = []
-        for line in lines:
+        for line in self._lines(trace_id):
             try:
                 spans.append(json.loads(line))
             except ValueError:

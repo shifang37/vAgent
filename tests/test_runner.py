@@ -395,6 +395,30 @@ async def test_current_context_rejected_before_provider(store):
     assert result["modelSteps"] == model.calls == 0
 
 
+async def test_a_repeated_identical_call_is_flagged_but_still_executed(store):
+    events = []
+
+    def respond(messages, step):
+        if step < 2:
+            return tool_call("project_read", {}, call_id=f"read-{step}")
+        return AIMessage(content="已读取。")
+
+    result = await AgentRunner(
+        store=store,
+        model=ScriptedModel(respond),
+        tools=create_project_tools(),
+        on_event=events.append,
+    ).run("coffee", "读取项目", request_id="repeat-read")
+
+    assert result["status"] == "completed" and result["toolCalls"] == 2
+    repeats = [event for event in events if event["type"] == "tool.repeated"]
+    assert len(repeats) == 1 and repeats[0]["repeatCalls"] == 1
+    tool_messages = [message for message in result["messages"] if message["type"] == "tool"]
+    assert len(tool_messages) == 2
+    assert "notice" not in tool_messages[0]["data"]["content"]
+    assert "该调用已执行过" in tool_messages[1]["data"]["content"]
+
+
 async def test_project_facts_refreshed_after_write(store):
     def respond(messages, step):
         if step == 0:
