@@ -30,6 +30,7 @@ MEMORY_FILE = "memory.json"
 EMBEDDING_DIM = 256
 EMBEDDING_VERSION = "hashing-bigram-v1"
 MAX_RECORDS = 4096
+MAX_RECORDS_PER_PROJECT = 512
 DEFAULT_LIMIT = 4
 DEFAULT_BLOCK_BYTES = 1024
 # Kinds that hold at most one current value per project, so a replaced record can name
@@ -157,8 +158,24 @@ class MemoryIndex:
             from vagent.storage import now as clock
 
         self.clock = clock
+        # ``(st_mtime_ns, st_size) -> records``: one parse serves sync + recall per step.
+        self._cache: tuple[tuple[int, int], dict] | None = None
 
     def _read(self) -> dict:
+        """The latest sidecar records, re-parsed only when the file itself changed."""
+        try:
+            stat = self.path.stat()
+        except OSError:
+            self._cache = None
+            return {}
+        stamp = (stat.st_mtime_ns, stat.st_size)
+        if self._cache is not None and self._cache[0] == stamp:
+            return self._cache[1]
+        records = self._load()
+        self._cache = (stamp, records)
+        return records
+
+    def _load(self) -> dict:
         try:
             raw = self.path.read_bytes()
         except OSError:
@@ -172,16 +189,50 @@ class MemoryIndex:
         records = payload.get("records")
         return records if isinstance(records, dict) else {}
 
-    def _write(self, records: dict) -> None:
+    def _remember(self, records: dict) -> None:
+        try:
+            stat = self.path.stat()
+        except OSError:
+            self._cache = None
+            return
+        self._cache = ((stat.st_mtime_ns, stat.st_size), records)
+
+    def _write(self, records: dict) -> dict:
+        """Write oldest first, so byte order encodes age and eviction can walk it."""
+        ordered = {
+            record_id: records[record_id]
+            for record_id in sorted(records, key=lambda key: (str(records[key].get("createdAt") or ""), key))
+        }
         payload = json.dumps(
-            {"version": MEMORY_VERSION, "embedding": self.embedder.fingerprint, "records": records},
+            {"version": MEMORY_VERSION, "embedding": self.embedder.fingerprint, "records": ordered},
             ensure_ascii=False,
-            sort_keys=True,
         )
         temporary = self.path.with_name(self.path.name + ".tmp")
         self.path.parent.mkdir(parents=True, exist_ok=True)
         temporary.write_text(payload, encoding="utf-8")
         os.replace(temporary, self.path)
+        return ordered
+
+    def _evict(self, records: dict, project_id: str) -> None:
+        """Drop superseded records first, then the oldest local ones, then the oldest global."""
+
+        def oldest(keys: list[str]) -> list[str]:
+            return sorted(keys, key=lambda key: (str(records[key].get("createdAt") or ""), key))
+
+        def victims(keys: list[str], count: int) -> list[str]:
+            ordered = oldest(keys)
+            superseded = [key for key in ordered if records[key].get("supersededBy")]
+            active = [key for key in ordered if not records[key].get("supersededBy")]
+            return (superseded + active)[:count]
+
+        local = [key for key, record in records.items() if record.get("projectId") == project_id]
+        if len(local) > MAX_RECORDS_PER_PROJECT:
+            for key in victims(local, len(local) - MAX_RECORDS_PER_PROJECT):
+                records.pop(key, None)
+        overflow = len(records) - MAX_RECORDS
+        if overflow > 0:
+            for key in victims(list(records), overflow):
+                records.pop(key, None)
 
     def sync(self, project: dict) -> list[str]:
         """Project the project's current facts; returns the ids added in this call.
@@ -238,11 +289,14 @@ class MemoryIndex:
             added.append(key)
             changed = True
         if changed:
-            if len(records) > MAX_RECORDS:
-                for stale in list(records)[: len(records) - MAX_RECORDS]:
-                    records.pop(stale, None)
-            self._write(records)
-        return added
+            self._evict(records, project_id)
+            try:
+                self._remember(self._write(records))
+            except OSError:
+                # The on-disk file did not change; never keep the mutated view cached.
+                self._cache = None
+                raise
+        return [key for key in added if key in records]
 
     def records(self, project_id: str | None = None, *, current_only: bool = True) -> list[dict]:
         records = self._read().values()

@@ -4,9 +4,10 @@ import json
 from pathlib import Path
 
 import pytest
-from conftest import ScriptedModel
+from conftest import ScriptedModel, tool_call
 from langchain_core.messages import AIMessage
 
+import vagent.memory as memory_module
 from vagent.config import load_config
 from vagent.context import MEMORY_HEADER, PROJECT_HEADER
 from vagent.errors import AppError
@@ -153,6 +154,70 @@ def test_a_returning_fact_is_reactivated(index):
 
     assert len(index.sync({"id": "coffee", "constraints": ["A", "B"]})) == 0  # B comes back
     assert sorted(record["text"] for record in index.records("coffee")) == ["A", "B"]
+
+
+def test_eviction_keeps_the_newest_and_prefers_superseded(tmp_path, monkeypatch):
+    monkeypatch.setattr(memory_module, "MAX_RECORDS", 3)
+    ticks = iter(range(1, 10))
+    index = MemoryIndex(tmp_path / "data", clock=lambda: f"2026-01-01T00:00:0{next(ticks)}+00:00")
+    for goal in ("第一版", "第二版", "第三版", "第四版"):
+        index.sync({"id": "coffee", "goal": goal})
+
+    # Four records under a three-record cap: the oldest retired record goes first,
+    # not the lexicographically smallest id.
+    assert [record["text"] for record in index.records("coffee")] == ["第四版"]
+    assert {record["text"] for record in index.records("coffee", current_only=False)} == {
+        "第二版",
+        "第三版",
+        "第四版",
+    }
+
+
+def test_eviction_stays_local_while_the_project_cap_is_the_only_pressure(tmp_path, monkeypatch):
+    monkeypatch.setattr(memory_module, "MAX_RECORDS_PER_PROJECT", 2)
+    ticks = iter(range(1, 20))
+    index = MemoryIndex(tmp_path / "data", clock=lambda: f"2026-01-01T00:00:{next(ticks)}+00:00")
+    index.sync({"id": "coffee", "goal": "A"})
+    index.sync({"id": "tea", "goal": "T"})
+    index.sync({"id": "coffee", "goal": "B"})
+    index.sync({"id": "coffee", "goal": "C"})  # coffee is now over its local cap
+
+    # The overflow is paid by coffee's oldest retired record, never the other project.
+    assert {record["text"] for record in index.records("tea")} == {"T"}
+    assert [record["text"] for record in index.records("coffee")] == ["C"]
+    assert {record["text"] for record in index.records("coffee", current_only=False)} == {"B", "C"}
+
+
+async def test_one_memory_parse_serves_sync_and_recall_across_steps(store, monkeypatch):
+    seed(store, goal=GOAL)
+    MemoryIndex(store.home).sync({"id": "coffee", "goal": GOAL})  # create the sidecar first
+    index = MemoryIndex(store.home)
+    parses = []
+    original = MemoryIndex._load
+
+    def counting(self):
+        parses.append(1)
+        return original(self)
+
+    monkeypatch.setattr(MemoryIndex, "_load", counting)
+
+    def respond(messages, step):
+        if step == 0:
+            return tool_call("project_read", {}, call_id="read-1")
+        return AIMessage(content="好。")
+
+    runner = AgentRunner(
+        store=store,
+        model=ScriptedModel(respond),
+        tools=create_project_tools(),
+        memory=index,
+        memory_limit=4,
+    )
+    result = await runner.run("coffee", "回顾咖啡店的定位", request_id="h2-parse-once")
+
+    assert result["status"] == "completed"
+    # Two model steps, each syncing and recalling: the sidecar is parsed once in total.
+    assert len(parses) == 1
 
 
 def test_v1_sidecar_is_readable_and_rewritten_as_v2(index):

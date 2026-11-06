@@ -520,9 +520,27 @@
 - 因此「全绿门禁」需在非沙箱终端复跑（M0 的 1645 passed 就是这样得到的）；本机沙箱里只把定向与核心用例作为判据，未把环境失败算作回归。
 - 本机沙箱还有一个 `0o700` → Windows DACL 的问题（pytest 的 `tmp_path` 创建后本进程也不可读写）：用 `tmp/testshim/sitecustomize.py`（git-ignored，仅放进 `PYTHONPATH`）把该模式放宽到 `0o755` 再跑测试；仓库文件未改。
 
+## 15. 实施记录（M1 续：FX-11 / FX-13 / FX-15）
+
+| 项 | 状态 | 落地要点 | 新增/调整用例 |
+|---|---|---|---|
+| FX-11 | 完成 | 侧车按 `(createdAt, id)` 从旧到新落盘；淘汰顺序改为「已取代 → 本项目最旧 → 全局最旧」，新增 `MAX_RECORDS_PER_PROJECT=512`；`MemoryIndex` / `SummaryStore` 都按 `(st_mtime_ns, st_size)` 缓存解析结果（写后刷新），一步的 `sync`+`render` 只解析一次；`SummaryStore` 条目加 `createdAt`、按时间淘汰 | `tests/test_long_term_memory.py` 新增 3 条（淘汰优先已取代、本地容量不跨项目、一步一次解析）；`tests/test_context_summary.py` 新增 1 条（摘要按时间淘汰） |
+
+### 与规划的偏差
+
+- **FX-11 的 `sync` 返回值**：规划写「`sync` 返回记录集」，实际保留 `list[str]`（本次新增的 id）以免破坏既有调用与用例；「只解析一次」由 `_read` 的 `(mtime, size)` 缓存达成，`render` 复用同一份解析结果。
+- **淘汰会删除活跃记录**：容量是兜底而非正确性约束；被淘汰的当前事实会在下一次 `sync` 重新投影。已写进 H2 验收的兼容与边界。
+
+### 验证
+
+- `tests/test_long_term_memory.py` **23 passed**、`tests/test_context_summary.py` **12 passed**。
+- 先在旧代码上跑新用例：4 条全部失败（3 条淘汰/解析 + 1 条摘要淘汰），修复后全绿。
+
+
+
 ## 建议的下一步
 
 1. **M0 已全部落地**（见 §13），不再排期；回滚与偏差记录也在该节。
-2. **M1 剩余**：FX-11（淘汰顺序与读放大）、FX-13（密钥识别）、FX-15（用量口径）相互独立，可并行；FX-11 与 FX-10 同文件，建议紧接着做，避免二次改 `sync`/`render`。
+2. **M1 剩余**：FX-13（密钥识别）与 FX-15（用量口径）相互独立，可并行；FX-11 已完成（见 §15）。
 3. **FX-12（contextVersion 4）** 动手前先跑 1 次尾部角色探针（需显式授权）；探针失败就把 v4 留在 opt-in，不阻塞其它修复。
 4. **M2 的 FX-16/FX-17** 与 M1 独立，可在 FX-12 之前先做。

@@ -16,7 +16,7 @@
 
 - `tokens(text)`：NFKC 归一 + casefold；ASCII 词串 + 中文单字与二元组（中文无空格，bigram 承担英文里 word 的词法信号）。
 - `HashingEmbedder`：`EMBEDDING_DIM=256`、`EMBEDDING_VERSION="hashing-bigram-v1"`；每个 token 取 blake2b 前 4 字节定位桶、第 5 字节决定 ±1，末了 L2 归一化。空文本返回零向量。
-- `MemoryIndex.sync(project)`：把本轮 `project_facts` 的指纹集合 `F` 当作该项目的**当前事实集** → 跳过疑似凭据 → 记录 `id ∈ F` 且已取代的复活、`id ∉ F` 且活跃的标 `supersededBy`（单值 kind 指向新值，其余 `"removed"`）→ 新增 `id ∉ 记录` 的事实 → 只有真的发生新增/取代/复活才落盘一次最终集合。同事实重复 sync 是 no-op；超过 `MAX_RECORDS=4096` 时裁掉最旧的。
+- `MemoryIndex.sync(project)`：把本轮 `project_facts` 的指纹集合 `F` 当作该项目的**当前事实集** → 跳过疑似凭据 → 记录 `id ∈ F` 且已取代的复活、`id ∉ F` 且活跃的标 `supersededBy`（单值 kind 指向新值，其余 `"removed"`）→ 新增 `id ∉ 记录` 的事实 → 只有真的发生新增/取代/复活才落盘一次最终集合。同事实重复 sync 是 no-op；落盘按 `(createdAt, id)` 从旧到新排序（字节稳定），超限时**先淘汰已取代、再本项目最旧、最后全局最旧**（`MAX_RECORDS_PER_PROJECT=512`、`MAX_RECORDS=4096`）。`MemoryIndex` 按 `(st_mtime_ns, st_size)` 缓存解析结果：一步里的 `sync` + `render` 只解析一次。
 - `recall(projectId, query, limit, cross_project=False)`：余弦 > 0 才算命中，按 `(-score, kind, id)` 稳定排序；跨项目必须显式 `cross_project=True`。
 - `render(...)`：每行 `- (kind) text`，按 UTF-8 字节裁剪到 `budget_bytes`（默认 1024），保证注入块不挤占预算。
 - 运行时接线：`runner._run` 在每次构建上下文前 `memory.sync(project)`（幂等）→ `memory.render(project.id, last_user_text(), limit=memory_limit)` → `context.build(memory_block=...)`。召回按**当次用户请求**检索，空命中就不加块。
@@ -30,6 +30,7 @@
 | 去重 | 内容寻址 id，同事实重复 sync 是 no-op | `test_sync_is_idempotent_and_content_addressed` |
 | 取代（当前事实集） | 单值字段变更只取代旧值；删除即取代；回归即复活；同级约束互不取代 | `test_changing_a_fact_supersedes_the_previous_record`、`test_scalar_change_supersedes_only_the_old_value`、`test_adding_a_constraint_keeps_sibling_constraints_active`、`test_removing_a_constraint_supersedes_only_that_record`、`test_a_returning_fact_is_reactivated` |
 | 取代立即落盘 | 只有取代、没有新增时也写盘；无变化不写 | `test_a_removal_is_persisted_immediately_and_a_no_op_sync_does_not_write` |
+| 淘汰与读放大 | 先淘汰已取代，再本项目最旧、最后全局最旧；一步只解析一次侧车 | `test_eviction_keeps_the_newest_and_prefers_superseded`、`test_eviction_stays_local_while_the_project_cap_is_the_only_pressure`、`test_one_memory_parse_serves_sync_and_recall_across_steps` |
 | v1 侧车兼容 | `version=1` 可读（任意真值即失效），下次写入升为 v2 | `test_v1_sidecar_is_readable_and_rewritten_as_v2` |
 | 检索注入不破坏稳定前缀 | 前缀按 `MEMORY_HEADER` 切开后与无记忆构建全等；块在 `PROJECT_HEADER` 之后 | `test_memory_on_recalls_the_fact_after_the_frozen_prefix` |
 | 默认无网络 | 模块无网络 / 随机依赖；embedder 逐位确定 | `test_memory_module_is_offline_and_free_of_io`、`test_embedding_is_deterministic_and_normalized` |
@@ -61,12 +62,13 @@
 ## 兼容与边界
 
 - `MEMORY_VERSION=2`（读取兼容 v1）、`EMBEDDING_VERSION="hashing-bigram-v1"` 写入旁路文件包头；升级 embedding 版本等于换锚点，旧向量会被 `len(stored) != len(vector)` 或包头指纹挡掉，需重建（派生索引可安全重建）。
+- 淘汰会真正删掉记录（包括仍活跃的）；被淘汰的当前事实会在下一次 `sync` 重新投影出来。容量上限是「防止无界增长」的兜底，不参与正确性判断。
 - 跨项目检索需显式 `cross_project=True`，运行时默认关闭；不做跨项目偏好记忆（计划明列为未做）。
 - 不做用户画像、不做任意文档 RAG、不做摘要（H1）与 tracing（H5）。
 
 ## 自动化验证
 
-`tests/test_long_term_memory.py`（20 项）：embedder 3 项、记录投影 / 去重 / 取代 / 复活 / 隐私 / 旁路容错 11 项、检索 2 项、配置开关 2 项、runner 接线 2 项。
+`tests/test_long_term_memory.py`（23 项）：embedder 3 项、记录投影 / 去重 / 取代 / 复活 / 淘汰 / 隐私 / 旁路容错 13 项、检索 2 项、配置开关 2 项、runner 接线 3 项。
 
 复现（离线，无网络、无模型调用）：
 

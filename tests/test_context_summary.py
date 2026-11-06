@@ -6,6 +6,7 @@ import pytest
 from conftest import ScriptedModel
 from langchain_core.messages import AIMessage, HumanMessage, ToolMessage, messages_to_dict
 
+import vagent.summary as summary_module
 from vagent.config import load_config
 from vagent.context import (
     SUMMARY_CONTEXT_VERSION,
@@ -174,6 +175,20 @@ def test_summary_store_round_trips_and_tolerates_corruption(tmp_path):
     assert store.get("k") is None
     store.put("k", "- 用户: 重建", model="test")  # a corrupt cache is simply rebuilt
     assert store.get("k") == "- 用户: 重建"
+
+
+def test_summary_store_evicts_the_oldest_entry_not_the_smallest_key(tmp_path, monkeypatch):
+    monkeypatch.setattr(summary_module, "MAX_ENTRIES", 2)
+    ticks = iter(range(1, 10))
+    store = SummaryStore(tmp_path, clock=lambda: f"2026-01-01T00:00:0{next(ticks)}+00:00")
+    store.put("zeta", "最早", model="test")
+    store.put("alpha", "中间", model="test")
+    store.put("beta", "最新", model="test")
+
+    assert store.get("zeta") is None
+    assert store.get("alpha") == "中间" and store.get("beta") == "最新"
+    payload = json.loads((tmp_path / "summaries.json").read_text(encoding="utf-8"))
+    assert [entry["text"] for entry in payload["summaries"].values()] == ["中间", "最新"]
 
 
 async def test_v3_run_applies_the_digest_once_and_reuses_it_after_reopen(store):

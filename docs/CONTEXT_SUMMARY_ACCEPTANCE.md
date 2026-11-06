@@ -37,7 +37,7 @@
 
 ## 自动化验证
 
-`tests/test_context_summary.py`（11 项）：
+`tests/test_context_summary.py`（12 项）：
 
 | 场景 | 断言 |
 |---|---|
@@ -48,7 +48,7 @@
 | 摘要被预算拒绝 | 不发 `context.summarized`；发一条 `context.summary_rejected`；span `applied=false`；消息与 v2 全等 |
 | 摘要器 | 确定性、字节受限、保留工具结果 |
 | `span_key` | 相同内容同键；换内容或换指纹则换键 |
-| 侧车 | 往返；损坏文件视为未命中并可重建 |
+| 侧车 | 往返；损坏文件视为未命中并可重建；超限按时间淘汰最旧（不是按键序） |
 | Runner（v3） | 应用摘要一次、发 `context.summarized`；关进程重开后同一 span 命中侧车、**不再调用摘要器**、发 `context.summary_reused` |
 | 开关 | 默认 2；`VAGENT_CONTEXT_VERSION=3` 生效；非法值报 `INVALID_CONTEXT_VERSION` |
 | 签名 | v3 与 v2 签名不同；同版本稳定 |
@@ -58,4 +58,5 @@
 - v1/v2/v3 均在 `CONTEXT_VERSIONS` 内，`for_version` 与恢复路径按记录版本重建；未识别的版本仍拒绝恢复。
 - 无摘要器、`summarize=False` 或摘要超预算时，v3 与 v2 等价，故打开 v3 不会比现状更差。
 - 模型版摘要器若注入，其调用**不计入** Run 的模型步/工具预算，也不并入 Run 的 usage 总数（属维护调用），只发 `context.summarized` 事件并在侧车留痕；本仓库默认不注入模型版，因此默认零费用。
+- 摘要侧车按 `createdAt` 时间淘汰（`MAX_ENTRIES=512`，不是按 JSON 键序），读取按 `(st_mtime_ns, st_size)` 缓存；恢复与连续步内同一 span 只解析一次。
 - 不做向量记忆（H2）与提示词工程（H3）。

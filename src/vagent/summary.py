@@ -167,10 +167,28 @@ def span_key(messages: list[BaseMessage], *, config_fingerprint: str) -> str:
 class SummaryStore:
     """``summaries-v1`` sidecar: a versioned ``key -> summary`` map, corruption tolerant."""
 
-    def __init__(self, home):
+    def __init__(self, home, *, clock=None):
         self.path = Path(home) / SUMMARY_FILE
+        if clock is None:
+            from vagent.storage import now as clock
+        self.clock = clock
+        # ``(st_mtime_ns, st_size) -> entries``: resume and repeated steps share one parse.
+        self._cache: tuple[tuple[int, int], dict] | None = None
 
     def _read(self) -> dict:
+        try:
+            stat = self.path.stat()
+        except OSError:
+            self._cache = None
+            return {}
+        stamp = (stat.st_mtime_ns, stat.st_size)
+        if self._cache is not None and self._cache[0] == stamp:
+            return self._cache[1]
+        entries = self._load()
+        self._cache = (stamp, entries)
+        return entries
+
+    def _load(self) -> dict:
         try:
             raw = self.path.read_bytes()
         except OSError:
@@ -184,6 +202,14 @@ class SummaryStore:
         entries = payload.get("summaries")
         return entries if isinstance(entries, dict) else {}
 
+    def _remember(self, entries: dict) -> None:
+        try:
+            stat = self.path.stat()
+        except OSError:
+            self._cache = None
+            return
+        self._cache = ((stat.st_mtime_ns, stat.st_size), entries)
+
     def get(self, key: str) -> str | None:
         entry = self._read().get(key)
         if isinstance(entry, dict) and isinstance(entry.get("text"), str) and entry["text"]:
@@ -191,21 +217,26 @@ class SummaryStore:
         return None
 
     def put(self, key: str, text: str, *, model: str, prompt_version: str = SUMMARY_PROMPT_VERSION) -> None:
-        """One summary = one atomic replacement; oversized caches evict oldest first."""
-        entries = self._read()
+        """One summary = one atomic replacement; an oversized cache evicts the oldest."""
+        entries = dict(self._read())
         entries[key] = {
             "text": text,
             "model": model,
             "promptVersion": prompt_version,
             "bytes": len(text.encode("utf-8")),
+            "createdAt": self.clock(),
         }
+
+        def by_age(item: str) -> tuple[str, str]:
+            return (str(entries[item].get("createdAt") or ""), item)
+
         if len(entries) > MAX_ENTRIES:
-            for stale in list(entries)[: len(entries) - MAX_ENTRIES]:
+            for stale in sorted(entries, key=by_age)[: len(entries) - MAX_ENTRIES]:
                 entries.pop(stale, None)
-        payload = json.dumps(
-            {"version": SUMMARY_VERSION, "summaries": entries}, ensure_ascii=False, sort_keys=True
-        )
+        ordered = {item: entries[item] for item in sorted(entries, key=by_age)}
+        payload = json.dumps({"version": SUMMARY_VERSION, "summaries": ordered}, ensure_ascii=False)
         temporary = self.path.with_name(self.path.name + ".tmp")
         self.path.parent.mkdir(parents=True, exist_ok=True)
         temporary.write_text(payload, encoding="utf-8")
         os.replace(temporary, self.path)
+        self._remember(ordered)
