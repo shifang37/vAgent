@@ -84,6 +84,13 @@ RECOVERABLE_ERRORS = {
     "STREAM_INTERRUPTED",
 }
 
+# FX-29 (decided 2026-11-06): a single model request stays capped at 60 s. The cap is a
+# fixed module constant rather than a policy field because the same number is charged as
+# the in-flight reservation after a crash and drives the ``MODEL_TIMEOUT`` mapping; making
+# it configurable would silently change recovery and cost accounting. Long replies that
+# approach the output limit can therefore be truncated (documented in USER_GUIDE).
+MODEL_CALL_LIMIT_SECONDS = 60.0
+
 
 @dataclass(frozen=True)
 class RunPolicy:
@@ -1156,7 +1163,7 @@ class AgentRunner:
                         return next_state
                 # Persist the attempt BEFORE calling the provider. Node replay must
                 # spend another attempt instead of resetting to older graph counters.
-                reservation = min(60.0, max(0, deadline - time.monotonic()))
+                reservation = min(MODEL_CALL_LIMIT_SECONDS, max(0, deadline - time.monotonic()))
                 journal.update(
                     modelSteps=next_state["model_steps"] + 1,
                     contextBytes=report.input_bytes,
@@ -1184,7 +1191,11 @@ class AgentRunner:
                         min(deadline, time.monotonic() + reservation),
                     )
                 except AppError as error:
-                    if error.code == "TIMEOUT" and reservation == 60.0 and time.monotonic() < deadline:
+                    if (
+                        error.code == "TIMEOUT"
+                        and reservation == MODEL_CALL_LIMIT_SECONDS
+                        and time.monotonic() < deadline
+                    ):
                         raise AppError(
                             "MODEL_TIMEOUT", "单次模型请求超时，可在剩余预算内显式恢复。"
                         ) from None

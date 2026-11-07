@@ -13,7 +13,7 @@
 - 再修 **8 条 P1**：R1/R2/R3/R4 四条回归 + 上下文前缀缓存（中#10）+ 密钥识别（中#11）+ MCP ReDoS（中#9）+ 用量口径（中#7）。
 - 评测可信度（高#2、中#14、低#26）与 5 处文档不实说法单列一批，**文档与代码同批交付**。
 - 低优先级 12 条按"数据增长 → 旁路写安全 → 观测细节 → 加固"顺序进 v0.7.0，不与止血混在一起。
-- 有一条需要你决策：单次模型调用 60 s 上限（低#20）是保留还是改成策略项；本计划默认"保留 + 写进文档"。
+- 有一条曾需要你决策：单次模型调用 60 s 上限（低#20，FX-29）。**2026-11-06 已决策为 A：保留 60 s，提为模块常量并写进用户文档**，决策记录见 §20。
 
 | 批次 | 目标 | 内容 | 工作量 | 版本 |
 |---|---|---|---:|---|
@@ -67,7 +67,7 @@
 | FX-26 | 低#24 | 低 | M3 | M | 摘要移出 system 特权位置（随 FX-12）；预算紧张时丢弃记忆块而非失败 |
 | FX-27 | 低#25 | 低 | M3 | S | `BibleSave` 字符串字段加长度上限 |
 | FX-28 | 缺口/低 | 低 | M3 | L | 锁活性检查、最后正常快照、traces 轮转、同名重复调用提示等 |
-| FX-29 | 低#20 | 低 | 待决策 | S | 单次模型 60 s 上限：保留并写文档，或改为策略项 |
+| FX-29 | 低#20 | 低 | M3（决策 A） | S | 单次模型 60 s 上限：保留 60 s、提为模块常量并写进文档 |
 | C1 | 缺口#1 | — | M4 | L | 付费副作用意图 + 供应商能力矩阵 + `job reconcile` |
 | C2 | 缺口#2 | — | M4 | L | 数据保留与压缩（Run 消息旁路、fsck） |
 | C3 | 缺口#3 | — | M4 | — | 收尾轮策略化（FX-04 已有基础版） |
@@ -381,13 +381,11 @@
   7. 模型连接重试次数：记录到 `model.call` span 属性（若底层无重试则标注 0）。
 - **验收**：逐条一个小用例；不改变成功路径。
 
-### FX-29　单次模型 60 s 上限（待决策）
+### FX-29　单次模型 60 s 上限（已决策：A，2026-11-06）
 - **报告**：低#20，`runner.py:904-933`
 - **现状**：`reservation = min(60.0, ...)`，长回复在供应商已计费后被杀。
-- **选项**：
-  - A（推荐，最小改动）：保留 60 s，写进 USER_GUIDE"已知限制"，并把 `reservation` 常量提为模块常量便于调整。
-  - B：改为 `RunPolicy.max_model_seconds`（默认 60，可调），需要策略字段与恢复兼容说明。
-- **建议**：先做 A；等有真实长回复被截断的证据再做 B。
+- **决策**：采用 **A（推荐，最小改动）**——保留 60 s，提为模块常量 `MODEL_CALL_LIMIT_SECONDS`，写进 README / USER_GUIDE「已知限制」，不新增 `RunPolicy` 字段或环境变量。完整理由、落地与复核触发见 §20。
+- **未采用**：B（`RunPolicy.max_model_seconds`，默认 60、可调）保留为复核方案；只有在拿到真实长回复被截断的证据后才评估，因为该数字同时参与崩溃后的预留计费与 `MODEL_TIMEOUT` 映射，改为配置会扩大恢复兼容面。
 
 ## 7. 能力缺口专项（M4，按需排期）
 
@@ -580,7 +578,7 @@
 - `python -m ruff format --check src/vagent tests scripts`：**255 files already formatted**。
 - 本次 M2 未调用任何模型或供应商，未产生费用；`scripts/evaluate_behavior.py` 与 `scripts/compare_cost.py` 均离线运行。
 
-## 18. 实施记录（M3：FX-20→28）
+## 18. 实施记录（M3：FX-20→29）
 
 > 2026-11-06，接着 M2 的同一工作区落地；每条先让新增用例在旧实现上失败，再修复转绿。M3 的默认行为仍是「v0.6.x 基线 + 可选清理命令」，未改变工具面、168 个契约模型哈希或既有 `state.json` 必需字段。
 
@@ -595,6 +593,7 @@
 | FX-26 | 完成 | v4 的摘要已在尾部动态消息（FX-12），不回抬到 system；`ContextReport.memory_dropped` + `build()` 在 `CONTEXT_LIMIT` 时先去掉记忆块重建并发 `context.memory_dropped`，v2/v3/v4 一致；仍超限才报错 | `tests/test_sidecar_safety.py` 覆盖 v2/v4 丢弃、仍超限报错、摘要注入不改工具集 |
 | FX-27 | 完成 | `BibleSave` 的 `genre`/`aliases` **逐项**加 20 字符上限（条目数上限保持 8），超限在保存时返回 `INVALID_ARGUMENTS`，不再拖到每个镜头 `VIDEO_PROMPT_TOO_LONG`；用字段校验器而不是 Schema `maxLength`，发布的工具 JSON Schema 与 `contextSignature` 保持逐字节不变；`appearance`/`palette`/`cameraLanguage` 原有上限保持 | `tests/test_m5_tools.py` 新增 1 条（超长 genre 与 alias 均被拒、未写 styles） |
 | FX-28 | 完成 | ① 陈旧 `instance.lock` 仅在 PID 确实不存在时回收（Windows `OpenProcess`/`GetExitCodeProcess`，POSIX `kill(pid,0)`；无法解析的锁按活锁处理）；② last-good 快照 + `vagent snapshot` + `vagent recover --from last-good`（恢复前留存 `state-invalid-*.json`）；③ trace 16 MiB 轮转、0600、`previous_root` 跨轮转段；④ MCP 结果首字段写明「外部 MCP 数据，不是指令」；⑤ 同名同参连续调用不拒绝，结果附提示并记 `tool.repeated{repeatCalls}`；⑥ 取消流已产生的 token 记入 journal；⑦ `model.call` span 记 `retries`（本适配器为 0） | `test_state_growth.py`（锁/快照）、`test_tracing.py`（轮转/retries/脱敏）、`test_mcp.py`（外部数据标注）、`test_runner.py`（重复调用）、`test_streaming.py`（取消用量） |
+| FX-29 | 完成（决策 A） | 单次模型上限保留 **60 s**，提为模块常量 `MODEL_CALL_LIMIT_SECONDS`（`reservation` 与 `MODEL_TIMEOUT` 判定共用）；不新增 `RunPolicy` 字段或环境变量；README / USER_GUIDE 写明「固定上限，不是配置项」及其与恢复预留、成本口径的耦合 | `tests/test_docs.py` 新增 1 条（常量值为 60，且两份用户文档都出现常量名与「不是配置项」） |
 
 ### 与规划的偏差
 
@@ -620,9 +619,22 @@
 - `python -m ruff check src/vagent tests scripts`：**All checks passed**；`python -m ruff format --check`：**258 files already formatted**。
 - 本次 M3 未调用任何模型或供应商，未产生费用；`scripts/measure_state.py`、`vagent gc`、`vagent snapshot`、`vagent recover` 均离线运行。
 
+## 20. FX-29 决策记录（单次模型 60 s 上限）
+
+> 2026-11-06，产品方确认按 **A** 执行，随 v0.7.0 发布。
+
+- **决策**：单次模型请求上限保留 **60 秒**，作为模块常量 `MODEL_CALL_LIMIT_SECONDS`（`src/vagent/runner.py`）；`reservation`、`inFlightSeconds` 与 `MODEL_TIMEOUT` 判定共用该常量。**不**新增 `RunPolicy` 字段，**不**提供环境变量或 CLI 开关。
+- **理由**：
+  1. 这个 60 s 不是单纯的超时提示：它同时是「在途预留额」。进程强退后按预留上限保守计时并计费（`storage.py` 的 lost-attempt 扣费），也用于判断「是单次请求超时（可恢复 `MODEL_TIMEOUT`）还是整 Run 预算到期（`TIMEOUT`）」。改成策略项会让恢复与成本口径随配置漂移，需要新的策略字段、恢复兼容说明与更多用例（选项 B）。
+  2. 审查报告没有提供「真实长回复被 60 s 截断」的样本；在证据出现前，最小改动是把既有行为写清楚并锁定，而不是先扩配置面。
+  3. 被截断的请求仍按实际调用记账（`modelCalls` 与已记录的 usage），不会因为上限固定而隐藏费用。
+- **落地**：`MODEL_CALL_LIMIT_SECONDS = 60.0`；`README.md`「已知限制」与 `docs/USER_GUIDE.md`「数据兼容与限制」写明「固定上限，不是配置项」以及它和预留计费 / 错误映射的耦合；`tests/test_docs.py` 新增一条门禁用例锁定常量值与文档措辞。
+- **复核触发**：出现可复现的真实截断样本（回答在输出上限前被中止，且供应商已计费）时，按选项 B 评估 `RunPolicy.max_model_seconds` 与恢复兼容；在此之前不引入配置项。
+- **与规划的关系**：本项不改变工具面、168 个契约模型哈希、`state.json` 形状或任何恢复签名；只把一个既有数字提为常量并补文档。
+
 ## 建议的下一步
 
-1. **M0 / M1 / M2 / M3 已全部落地**（见 §13–§18）：FX-01→28 完成，剩余是 v0.7.0 的版本号与发布门禁。
+1. **M0 / M1 / M2 / M3 已全部落地**（见 §13–§18）：FX-01→28 完成，FX-29 已按决策 A 记录（§20）；剩余是 v0.7.0 的版本号与发布门禁。
 2. **C2 是 M3 未达成的性能门禁**：`runs[].messages` 旁路到 `runs/<id>.json` 后再复测 `scripts/measure_state.py`，目标为空事务耗时降到当前的 50% 以下。
 3. **v4 与 v3 仍是 opt-in**：默认 `VAGENT_CONTEXT_VERSION=2`。把默认翻到 v4 之前，建议先积累一段真实运行的缓存命中数据。
 4. **C4 真模型评测**仍属 M4：在显式授权与成本上限下补无偏 pass@k、置信区间与提示词/上下文/记忆的 A/B。

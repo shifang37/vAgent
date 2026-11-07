@@ -65,6 +65,15 @@ def test_the_user_docs_document_the_m3_retention_commands():
     assert "60 秒" in combined
 
 
+def test_the_single_model_call_limit_is_recorded_as_a_fixed_decision():
+    from vagent.runner import MODEL_CALL_LIMIT_SECONDS
+
+    assert MODEL_CALL_LIMIT_SECONDS == 60.0
+    combined = read("README.md") + read("docs/USER_GUIDE.md")
+    assert "MODEL_CALL_LIMIT_SECONDS" in combined
+    assert "不是配置项" in combined
+
+
 def test_the_corrected_claims_stay_corrected():
     readme = read("README.md")
     assert "没有自动摘要" not in readme
