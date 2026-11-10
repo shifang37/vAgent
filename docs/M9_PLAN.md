@@ -1,6 +1,6 @@
 # M9 计划：竖屏 9:16 短剧
 
-状态：**暂缓（2026-10-29）**——产品方明确本轮「只用横屏 720p」，竖屏 E1–E4 不排期；E0 冻结结果与基线保留，将来要做竖屏时从 E1 续起（先按其 §7 核实价格）。**E0 契约已冻结（2026-10-25），E1 未开始、未改产品代码**。冻结结果见 [M9 契约](./M9_CONTRACTS.md) 与 [E0 验收](./M9_E0_ACCEPTANCE.md)，机器可读基线见 `docs/M9_E0_BASELINE.json`（SHA-256 `afd1b38f…59b694b`）。基线 `master` `6e45e92`（**v0.6.0** 发布后；schema **9**、tools/rules **18/18**、168 个契约模型、Ruff 232 文件、前端 10 模块 91 项、四组 CI [运行 40171887390](https://github.com/shifang37/vAgent/actions/runs/40171887390) success）。⚠️ 复跑期间出现过 **1 次顺序相关的偶发失败**（`test_m7_timeline_render.py` 的整集时间线渲染用例），已加固为确定性失败并单列，见 **§3.0**。本文件是**计划，不是契约**：数字以 [M9 契约](./M9_CONTRACTS.md) 为准。上一阶段收尾见 [M8 验收](./M8_ACCEPTANCE.md) 与 [v0.6.0 发布说明](./RELEASE_0.6.0.md)。
+状态：**暂缓（2026-10-29）**——产品方明确本轮「只用横屏 720p」，竖屏 E1–E4 不排期；E0 冻结结果与基线保留，将来要做竖屏时从 E1 续起（先按其 §7 核实价格）。**E0 契约已冻结（2026-10-25），E1 未开始、未改产品代码**。冻结结果见 [M9 契约](./M9_CONTRACTS.md) 与 [E0 验收](./M9_E0_ACCEPTANCE.md)，机器可读基线见 `docs/M9_E0_BASELINE.json`（SHA-256 `afd1b38f…59b694b`）。基线 `master` `6e45e92`（**v0.6.0** 发布后；schema **9**、tools/rules **18/18**、168 个契约模型、Ruff 232 文件、前端 10 模块 91 项、四组 CI [运行 40171887390](https://github.com/shifang37/vAgent/actions/runs/40171887390) success）。⚠️ 复跑期间出现过 **1 次顺序相关的偶发失败**（`test_m7_timeline_render.py` 的整集时间线渲染用例），已加固为确定性失败并单列，见 **§3.0**。本文件是**计划，不是契约**：数字以 [M9 契约](./M9_CONTRACTS.md) 为准。上一阶段收尾见 [M8 验收](./M8_ACCEPTANCE.md) 与 [v0.6.0 发布说明](./RELEASE_0.6.0.md)。⚠️ **发布版本号已改**：M9 原定 v0.7.0，该号已于 2026-11-06 用于 Harness 修复发布（[v0.7.0 发布说明](./RELEASE_0.7.0.md)），M9 E1 起仍暂缓，将来续做时按 **v0.8.0** 发布；上表与 D8 已同步。
 
 ## 1. 为什么是 M9
 
@@ -25,7 +25,7 @@ M1–M8 已经把「一句话/剧本 → 分集分场分镜 → 真实多镜头 
 | E1 | 画幅、能力表与登记（配置、契约 v7、`multi-provider-v4`、路由与预算） | 2–3 天 | submit=0（受控 HTTP） |
 | E2 | 竖屏渲染与后期（1080×1920 profile、归一化、字幕 v2、标题卡、成片校验） | 2–3 天 | submit=0（本地 FFmpeg） |
 | E3 | Web 竖屏工作台（9:16 预览、设置页画幅、竖屏时间线/字幕） | 1.5–2 天 | 受控浏览器 |
-| E4 | 验收与 **v0.7.0**（离线套件、安装态、全量回归、四组 CI、发布说明） | 2 天 | 未新增付费样本 |
+| E4 | 验收与 **v0.8.0**（离线套件、安装态、全量回归、四组 CI、发布说明） | 2 天 | 未新增付费样本 |
 
 顺序：**E0 → E1 → E2（可与 E3 前半并行）→ E3 → E4**。E1 与 E2 的分界是「能不能登记」与「能不能出片」：E1 结束时竖屏 Job 可被冻结、路由可算价、但成片仍走 16:9；E2 结束时 1080×1920 能出片。
 
@@ -35,7 +35,21 @@ M1–M8 已经把「一句话/剧本 → 分集分场分镜 → 真实多镜头 
 
 2026-10-25 在本机复跑 `pytest -q -x` 时，`tests/test_m7_timeline_render.py::test_a_full_timeline_render_freezes_the_edit_and_replays` 在全量顺序下失败（`1 failed, 808 passed, 2 skipped`），错误是 `RenderError`：混音测得 `integratedLufs=-70.0`、`truePeakDb=-1.1`，超出容差返回 `LOUDNESS_OUT_OF_RANGE`。随后**单独重跑该用例 1 passed、整个文件 5 passed**，再一次全量 `pytest -q -p no:cacheprovider` 得到 **1516 passed / 4 skipped**，与 M8 验收记录一致。结论：**这不是确定性回归，而是顺序/时序相关的偶发失败**；v0.6.0 的「全量通过」仍然成立，按 flake 记录，不作为回滚依据。
 
-加固（已落地，证据见 [E0 验收 §3.2](./M9_E0_ACCEPTANCE.md)）：`mixer.py` 在 loudnorm 之前用 `volumedetect` 探测 premix，`max_volume ≤ -90 dBFS` 时立即返回 `LOUDNESS_OUT_OF_RANGE`「（混音为静音，未交付）」，不再空跑测量/应用/复测/校正四遍；`render_service.py` 给 `AudioPlan` 增加 `dropped` 诊断（`no-dialogue-line`/`no-cue`/`outside-edit`）、按 M7 契约丢弃「落在 clip 末尾或之后」的落点、并在时间线音频全落空时返回 `RENDER_SOURCE_MISSING` 并列出条数与原因。新增 4 项用例；首轮那次失败的**触发条件仍未复现**，因此记为「已知偶发 + 已加确定性诊断与快速失败」，E4 门禁保留两次全量（`-x` 与完整）都通过的要求。
+加固（已落地，证据见 [E0 验收 §3.2](./M9_E0_ACCEPTANCE.md)）：`mixer.py` 在 loudnorm 之前用 `volumedetect` 探测 premix，`max_volume ≤ -90 dBFS` 时立即返回 `LOUDNESS_OUT_OF_RANGE`「（混音为静音，未交付）」，不再空跑测量/应用/复测/校正四遍；`render_service.py` 给 `AudioPlan` 增加 `dropped` 诊断（`no-dialogue-line`/`no-cue`/`outside-edit`）、按 M7 契约丢弃「落在 clip 末尾或之后」的落点、并在时间线音频全落空时返回 `RENDER_SOURCE_MISSING` 并列出条数与原因。新增 4 项用例；首轮那次失败的**触发条件当时仍未复现**，记为「已知偶发 + 已加确定性诊断与快速失败」，E4 门禁保留两次全量（`-x` 与完整）都通过的要求。**根因已于 2026-11-10 定位并修复，见 §3.0.1。**
+
+#### 3.0.1 根因：截断的 `volumedetect` 报告被当成静音（2026-11-10，随 v0.7.0 发布）
+
+v0.6.1 发布后该用例在最近 10 次 CI 中仍有 **3 次**失败（Windows 组，运行 42243057680 / 42223201524 / 42202551706），报错完全相同：`LOUDNESS_OUT_OF_RANGE`「（混音为静音，未交付）」。CI 日志里**没有** `（音频落空 N 条：…）` 后缀，说明时间线的 voice 轨已进入混音、`dropped` 为空——按构造混音里至少有 2 秒真实旁白，因此「静音」只能来自**测量**，而不是混音内容。v0.6.1 发布说明里「问题在用例夹具的时序」的判断据此撤回：静音 BGM 是夹具设计的一部分，但 voice 轨并未落空。
+
+在本机复现（Windows 10/11、包内 FFmpeg 7.1、同一夹具与时间线）：探测 premix 的 FFmpeg 进程偶尔在只处理**一帧**后就以退出码 0 结束整张滤镜图，`volumedetect` 于是只报告 `n_samples: 4096`、`max_volume: -91.0 dB`；`parse_volume_peak()` 取的是**第一个** `max_volume` 匹配，读到 -91.0 即 `≤ SILENCE_PEAK_DB`，直接判定「混音为静音」。修复前实测触发率：异步 `_run` **4/30**、同步 `subprocess` **3/30**（同一夹具、同一命令），与 CI 的 3/10 量级一致；写成真实 WAV 文件而非 `-f null` 时 10 次均未截断。
+
+修复（`src/vagent/video/mixer.py`）：
+
+- 新增 `parse_volume_report()`：按 `n_samples` 归组，取**样本数最多**的那条 `volumedetect` 摘要（样本数相同时取最后一条），`parse_volume_peak()` 改为它的薄封装，语义对单摘要文本保持不变。
+- `mix_tracks()` 的静音探测改为最多 `PROBE_ATTEMPTS = 3` 次：只有覆盖了时间线 **≥90%**（`PROBE_COMPLETE_RATIO`）的探测才有资格触发快速失败；始终不完整的探测**不判定静音**，直接进入原有的 loudnorm / 复测 / 校正路径，由交付门禁给出结论。
+- 新增 3 项用例：摘要选择（截断在前、完整在后仍取完整）、截断后重试成功、始终截断时不误判静音。
+
+因此「时间线整集渲染偶发失败」这一条不再以「已知偶发」形态进入发布门禁。
 
 ### 3.1 E0 契约冻结（0.5–1 天；submit=0、模型调用=0、TTS=0、凭据读取=0）——**已完成（2026-10-25）**
 
@@ -52,7 +66,7 @@ M1–M8 已经把「一句话/剧本 → 分集分场分镜 → 真实多镜头 
 | D5 | 字幕与标题卡 | 新增 `subtitle-zh-v2`（竖屏每行 ≤14 字符、底部安全区 ≥12% 高、字号按 1080×1920 重算）；标题卡用竖屏版式；**不做**竖排文字、不做逐字动画 |
 | D6 | 渲染与时间线 | 复用 `film_render` 与 `timeline` scope；装配字面量不变，画幅写进 `ExportProfile`/`RenderEngine.configuration_sha256`；时间线内画幅不一致 → `TIMELINE_FRAME_MISMATCH` |
 | D7 | 价格与预算 | 竖屏单价必须单独核实（Kling 的 0.112 USD/s 是 720p，1080p 不适用）；未核实即 `ROUTE_UNAVAILABLE`，沿用「不可推荐」语义；集级/批量上限口径不变 |
-| D8 | 发布与边界 | 发布 **v0.7.0**；不做混合画幅分集、不做跨集竖横混剪、不做移动端专属页面、不做 PyPI 公开 |
+| D8 | 发布与边界 | 发布 **v0.8.0**（原定 v0.7.0，该号已被 Harness 修复发布占用，见 [v0.7.0 发布说明](./RELEASE_0.7.0.md)）；不做混合画幅分集、不做跨集竖横混剪、不做移动端专属页面、不做 PyPI 公开 |
 
 官方复核清单（只查文档与公开页面，不发请求）：Wan t2v 的 `parameters.ratio` 是否接受 `9:16`、竖屏是否仍在同一价格桶；Kling `kling-3.0-turbo` 的 9:16/1080p 单价与 `VIDEO_UNIT` 换算；fal `kling-video/v3/standard` 是否支持 9:16 与静音输出；Wan i2v/flf2v 对首帧/尾帧的边长与比例约束（决定 `CHARACTER_ASSET_FRAME_MISMATCH` 的判定阈值）。
 
@@ -82,11 +96,11 @@ M1–M8 已经把「一句话/剧本 → 分集分场分镜 → 真实多镜头 
 - 分镜/分集/报价对比面板显示画幅与竖屏单价；`route-state.js`、`timeline-state.js`、`episode-state.js`、`render-state.js` 增补画幅断言。
 - 受控浏览器用例：切到 9:16 → 报价对比三行 → 登记 → 渲染 → 播放/Range 206 → 字幕开关，零页面/控制台错误。
 
-### 3.5 E4 验收与 v0.7.0（2 天）
+### 3.5 E4 验收与 v0.8.0（2 天）
 
 - `scripts/evaluate_m9.py` 3–4 用例（竖屏全链路、拒绝矩阵、16:9 回归不变、重放不新增）与 `tests/test_m9_evaluation.py`。
 - 门禁：全量回归（E0 之后的基线 `1520 passed / 4 skipped`）、Ruff、前端 10 模块 + 新增画幅用例、受控浏览器、安装态 wheel smoke（M9 段）、四组 CI。
-- 发布 **v0.7.0**：`pyproject.toml` 与 `src/vagent/__init__.py` 同步、`docs/RELEASE_0.7.0.md`、`dist/python/` 归档 0.6.0 产物并构建 0.7.0、tag 与推送单独确认。
+- 发布 **v0.8.0**：`pyproject.toml` 与 `src/vagent/__init__.py` 同步、`docs/RELEASE_0.8.0.md`、`dist/python/` 归档 0.7.0 产物并构建 0.8.0、tag 与推送单独确认。
 - 文档：`docs/M9_ACCEPTANCE.md`、README、M1_PLAN、M5_PLAN、AGENT_HARNESS_DESIGN §8.9 之后新增 §8.10、web/README。
 
 ## 4. 验收样例（草案）
@@ -116,7 +130,7 @@ M1–M8 已经把「一句话/剧本 → 分集分场分镜 → 真实多镜头 
 | E1 | 2–3 天 | 契约 v7、能力表 v4、路由与预算 |
 | E2 | 2–3 天 | 1080×1920 profile、字幕 v2、几何去硬编码 |
 | E3 | 1.5–2 天 | Web 竖屏面板与设置页 |
-| E4 | 2 天 | 离线套件、门禁、v0.7.0 |
+| E4 | 2 天 | 离线套件、门禁、v0.8.0 |
 | 合计 | **8–11 天** | 不含真实样本等待与授权 |
 
 ## 7. 边界（本轮不做）

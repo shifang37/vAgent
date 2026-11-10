@@ -4,7 +4,7 @@
 
 **vagent** 是一个面向视频创作的本地 Agent：用自然语言指挥它完成「剧本 → 分集 / 分场 / 分镜 → 调用视频模型生成 → 字幕 / 配音 / 混音 / 转场 → 整集成片」。它用 **Python + DeepSeek + LangGraph** 自主实现上下文、项目记忆、Skills、工具执行与费用护栏，再接入真实的视频生成与语音合成服务。
 
-当前版本 **v0.6.1**（2026-11-04）。安装为 Python 包后以 `vagent` 命令运行，提供 CLI、本地 Web 工作台、无头两阶段授权流程和只读 MCP。所有数据和 Key 都留在本机。
+当前版本 **v0.7.0**（2026-11-10）。安装为 Python 包后以 `vagent` 命令运行，提供 CLI、本地 Web 工作台、无头两阶段授权流程和只读 MCP。所有数据和 Key 都留在本机。
 
 > 一条 16:9 横屏 720p 的 AI 短剧流水线：从契约冻结到可复现的成片交付，每一步的证据都写进 `docs/`。
 
@@ -47,9 +47,11 @@
 | M7 | 季、批量队列、时间线工作台 | 完成，v0.5.0 |
 | M8 | 报价对比、提交节流、手工账单、真实样本、发布 | 完成，v0.6.0 |
 | K0–K3 | 两 Key 直用：设置页最小表单、零费用探测、免重启生效 | 完成 |
-| M9 | 9:16 竖屏 | **暂缓**。E0 契约与基线已冻结保留，E1 起未开始 |
+| M9 | 9:16 竖屏 | **暂缓**。E0 契约与基线已冻结保留，E1 起未开始；发布号改为 v0.8.0 |
+| H0–H6 | 可选能力：上下文摘要、长期记忆、提示词版本、行为评测、追踪、成本估算 | 完成，默认关闭 |
+| 审查修复 | 外部审查的 30 条问题（FX-01→29）分四批落地：止血 → 正确性 → 评测与文档 → 健壮性 | 完成，v0.7.0 |
 
-**v0.6.1 是 v0.6.0 之后的补丁版本**：收纳 Kling 3.0 Turbo 适配器的字段与错误码对齐（含错误路径上的崩溃级修复）、零费用契约回放校验器，以及混音静音快速失败。存储、工具面与全部契约基线逐字节不变，不新增付费样本。
+**v0.7.0 是 Harness 加固版本，不扩产品域**：收纳上表 H0–H6 的 6 项可选能力（全部默认关闭）与外部审查的 30 条修复，另修掉一条把截断的 `volumedetect` 报告误读为静音的偶发失败。存储仍为 **schema 9**、工具面仍为 **18/18**、168 个契约模型哈希、`contractsSha256` 与 `capabilitiesSha256` 逐字节不变；不新增付费样本，不做 9:16 竖屏。上一版 v0.6.1（2026-11-04）是 v0.6.0 之后的补丁版本。
 
 每个里程碑按固定节奏推进：**E0 冻结契约与机器可读基线 → E1–E3 实现 → E4 离线评估套件 + 安装态 wheel smoke + 受控浏览器 + 四组 CI**。契约、基线快照与验收证据全部在 [`docs/`](./docs)。
 
@@ -207,7 +209,7 @@ src/vagent/
 web/        工作台页面与 10 个纯函数状态模块（*-state.js）
 skills/     内置 SKILL.md（video-brief、shot-description），随 wheel 分发
 scripts/    evaluate_m*.py 离线验收套件、capture_m*_baseline.py 基线快照、verify_provider_contract.py 供应商契约回放、wheel_smoke.py 安装态检查
-tests/      139 个 pytest 文件与 10 个 Node 状态测试
+tests/      137 个 pytest 文件与 10 个 Node 状态测试
 ```
 
 设计依据见 [产品设计](./DESIGN.md)、[Agent 选型与 Harness 设计](./AGENT_HARNESS_DESIGN.md) 与 [M1 实施计划](./M1_PLAN.md)。
@@ -223,14 +225,14 @@ node --test tests/test_job_state.mjs          # 其余 9 个 *-state 测试同�
 .\.venv\Scripts\python.exe scripts/wheel_smoke.py   # 在临时环境安装 wheel 并跑安装态套件
 ```
 
-| 检查 | 最近结果（`master`，v0.6.1 发布前） |
+| 检查 | 最近结果（`master`，v0.7.0 发布前） |
 |---|---|
-| 全量 pytest | 1,522 passed / 4 skipped，另有 1 例已登记的偶发失败（skip 为平台条件：Windows 符号链接权限 3 例、POSIX 文件模式 1 例） |
-| Ruff check / format | 234 个文件通过 |
-| 前端 Node 测试 | 10 个状态模块 91 项 |
+| 全量 pytest | 1,741 passed / 4 skipped（1,867 秒），无失败（skip 为平台条件：Windows 符号链接权限 3 例、POSIX 文件模式 1 例） |
+| Ruff check / format | 258 个文件通过 |
+| 前端 Node 测试 | 10 个状态模块 91 项，另 11 个 JS 文件 `node --check` 通过 |
 | CI 矩阵 | ubuntu / windows × Python 3.11 / 3.12 四组，实时状态见页首 badge |
 
-离线验收套件 `scripts/evaluate_m2.py` … `evaluate_m8.py` 默认不联网，用受控上游与本地测试媒体走真实生产代码路径；`--live` 会被明确拒绝或需要单独授权。全量回归约 21–25 分钟。已知两类偶发，均按「记录而不掩盖」处理：一是与顺序相关的时间线混音静音（`tests/test_m7_timeline_render.py`，单跑必过），已加固为确定性诊断，见 [M9 计划 §3.0](./docs/M9_PLAN.md)；二是 Windows 上 M5 离线评估偶发超出夹具等待上限，评估侧的 300 秒已放宽到 600 秒，见 [M5 验收](./docs/M5_E4_ACCEPTANCE.md)。
+离线验收套件 `scripts/evaluate_m2.py` … `evaluate_m8.py` 默认不联网，用受控上游与本地测试媒体走真实生产代码路径；`--live` 会被明确拒绝或需要单独授权。全量回归约 21–25 分钟（本机实测见 [v0.7.0 发布说明](./docs/RELEASE_0.7.0.md)）。此前登记的时间线混音静音偶发已定位根因并修复：包内 FFmpeg 7.1 偶尔在探测 premix 时只处理一帧就以退出码 0 结束，`volumedetect` 只报出 4096 个样本的 -91 dB，被误读为静音；现在按样本数取完整的探测摘要、不完整则重试且不判定静音，见 [M9 计划 §3.0.1](./docs/M9_PLAN.md)。另一类偶发是 Windows 上 M5 离线评估超出夹具等待上限，评估侧上限已由 300 秒放宽到 600 秒，见 [M5 验收](./docs/M5_E4_ACCEPTANCE.md)。
 
 ## 文档索引
 
@@ -238,11 +240,11 @@ node --test tests/test_job_state.mjs          # 其余 9 个 *-state 测试同�
 |---|---|
 | 使用手册 | [USER_GUIDE](./docs/USER_GUIDE.md)（CLI 细节、headless、恢复、用量、Redis、Skills、数据兼容）· [Web 说明](./web/README.md) · [MCP 接入](./docs/MCP.md) |
 | 设计 | [DESIGN](./DESIGN.md) · [AGENT_HARNESS_DESIGN](./AGENT_HARNESS_DESIGN.md) · [M1_PLAN](./M1_PLAN.md) |
-| 计划 | [M1-B](./docs/M1B_PLAN.md) · [M1-C](./docs/M1C_PLAN.md) · [M2](./docs/M2_PLAN.md) · [M3](./docs/M3_PLAN.md) · [M5](./docs/M5_PLAN.md) · [M8](./docs/M8_PLAN.md) · [M9](./docs/M9_PLAN.md) · [两 Key 直用](./docs/KEYS_ONLY_PLAN.md) |
+| 计划 | [M1-B](./docs/M1B_PLAN.md) · [M1-C](./docs/M1C_PLAN.md) · [M2](./docs/M2_PLAN.md) · [M3](./docs/M3_PLAN.md) · [M5](./docs/M5_PLAN.md) · [M8](./docs/M8_PLAN.md) · [M9](./docs/M9_PLAN.md) · [两 Key 直用](./docs/KEYS_ONLY_PLAN.md) · [Harness 缺陷修复](./docs/HARNESS_REVIEW_FIX_PLAN.md) |
 | 契约 | [M1-B](./docs/M1B_CONTRACTS.md) · [M1-C](./docs/M1C_CONTRACTS.md) · [M2](./docs/M2_CONTRACTS.md) · [M3](./docs/M3_CONTRACTS.md) · [M5](./docs/M5_CONTRACTS.md) · [M6](./docs/M6_CONTRACTS.md) · [M7](./docs/M7_CONTRACTS.md) · [M8](./docs/M8_CONTRACTS.md) · [M9](./docs/M9_CONTRACTS.md) |
 | 阶段验收 | [M1-A](./docs/M1A_ACCEPTANCE.md) · [M1-B](./docs/M1B_ACCEPTANCE.md) · [M1-C](./docs/M1C_ACCEPTANCE.md) · [M2](./docs/M2_ACCEPTANCE.md) · [M3](./docs/M3_ACCEPTANCE.md) · [M4](./docs/M4_NORMALIZATION.md) · [M5](./docs/M5_E4_ACCEPTANCE.md) · [M6](./docs/M6_E4_ACCEPTANCE.md) · [M7](./docs/M7_ACCEPTANCE.md) · [M8](./docs/M8_ACCEPTANCE.md) · [K3](./docs/KEYS_ONLY_K3_ACCEPTANCE.md) |
 | 专项验收 | [编排](./docs/AGENT_ORCHESTRATION_ACCEPTANCE.md) · [质量校验](./docs/QUALITY_ACCEPTANCE.md) · [持久恢复](./docs/RECOVERY_ACCEPTANCE.md) · [用量观测](./docs/USAGE_ACCEPTANCE.md) · [上下文优化](./docs/CONTEXT_OPTIMIZATION_ACCEPTANCE.md) · [Redis 缓存](./docs/REDIS_CACHE_ACCEPTANCE.md) · [i2v / flf2v 样本](./docs/M2_I2V_ACCEPTANCE.md) · [Kling 对齐与契约校验](./docs/KLING_ALIGNMENT.md) |
-| 发布说明 | [v0.6.1](./docs/RELEASE_0.6.1.md) · [v0.6.0](./docs/RELEASE_0.6.0.md) · [v0.5.0](./docs/RELEASE_0.5.0.md) · [v0.4.0](./docs/RELEASE_0.4.0.md) · [v0.3.0](./docs/RELEASE_0.3.0.md) |
+| 发布说明 | [v0.7.0](./docs/RELEASE_0.7.0.md) · [v0.6.1](./docs/RELEASE_0.6.1.md) · [v0.6.0](./docs/RELEASE_0.6.0.md) · [v0.5.0](./docs/RELEASE_0.5.0.md) · [v0.4.0](./docs/RELEASE_0.4.0.md) · [v0.3.0](./docs/RELEASE_0.3.0.md) |
 | 外部依据 | [万相 API 核实](./docs/VIDEO_API_NOTES.md) · [第三方组件与分发材料](./docs/THIRD_PARTY_ASSEMBLY.md) |
 
 每个 `docs/M*_E*_ACCEPTANCE.md` 记录对应子阶段的范围、复现命令、回归数字与保留的边界；`docs/M*_E0_BASELINE.json` 是机器可读的契约基线。
