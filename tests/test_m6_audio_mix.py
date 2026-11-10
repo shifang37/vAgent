@@ -226,13 +226,19 @@ TRUNCATED_PROBE = (
     "[Parsed_volumedetect_9 @ 0x1] mean_volume: -91.0 dB\n"
     "[Parsed_volumedetect_9 @ 0x1] max_volume: -91.0 dB\n"
 )
-COMPLETE_PROBE = (
-    "[Parsed_volumedetect_9 @ 0x1] n_samples: 0\n"
-    "[Parsed_volumedetect_9 @ 0x1] n_samples: 8640000\n"
-    "[Parsed_volumedetect_9 @ 0x1] mean_volume: -33.0 dB\n"
-    "[Parsed_volumedetect_9 @ 0x1] max_volume: -12.1 dB\n"
-    "[Parsed_volumedetect_9 @ 0x1] histogram_12db: 39948\n"
-)
+
+
+def probe_report(samples: int, peak: float = -12.1) -> str:
+    return (
+        "[Parsed_volumedetect_9 @ 0x1] n_samples: 0\n"
+        f"[Parsed_volumedetect_9 @ 0x1] n_samples: {samples}\n"
+        "[Parsed_volumedetect_9 @ 0x1] mean_volume: -33.0 dB\n"
+        f"[Parsed_volumedetect_9 @ 0x1] max_volume: {peak} dB\n"
+        "[Parsed_volumedetect_9 @ 0x1] histogram_12db: 39948\n"
+    )
+
+
+COMPLETE_PROBE = probe_report(8_640_000)
 
 
 def test_volume_report_prefers_the_summary_that_measured_the_premix():
@@ -254,6 +260,9 @@ async def test_a_truncated_probe_is_retried_before_the_mix_is_called_silent(tmp_
             probes += 1
             if probes == 1:
                 return TRUNCATED_PROBE
+            # The retry is scripted too: the real probe is the flaky part here, so
+            # letting it decide would make this case fail once in ten runs.
+            return probe_report(2 * 48_000 * 2)
         return await real(
             engine,
             tracks,
