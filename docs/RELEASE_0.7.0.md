@@ -2,7 +2,7 @@
 
 **发布日期**：2026-11-10
 **版本**：0.7.0
-**范围**：v0.6.1（2026-11-04）之后的 Harness 加固，不扩产品域；`master` 自 v0.6.1 起 15 个提交
+**范围**：v0.6.1（2026-11-04）之后的 Harness 加固，不扩产品域；`master` 自 v0.6.1 起 16 个提交
 
 本版是 [Harness 缺陷修复规划](./HARNESS_REVIEW_FIX_PLAN.md) 的落地版本：把外部审查提出的 30 条问题（FX-01→29，含 R1–R4 回归）按「止血 → 正确性 → 评测与文档 → 健壮性」四批修完，同时收纳此前合入的 6 项**默认关闭**的可选能力。产品域不扩：存储仍为 **schema 9**、工具面仍为 **18/18**、168 个契约模型哈希、`contractsSha256` 与 `capabilitiesSha256` 全部逐字节不变；本版**不新增付费样本**，不做 9:16 竖屏。
 
@@ -39,7 +39,7 @@
 - **FX-16** 行为评测以 pass@1 为门禁（不再用「全部通过」冒充可信）；**FX-17** `compare_cost.py` 真只读（不执行崩溃恢复、不写状态）。
 - **FX-18** 文档补齐 7 个开关 + 3 个命令 + 60 s 已知限制；**FX-19** `tests/test_docs.py` 门禁锁定这些说法与常量值。
 
-### 5. M3 健壮性与性能：10 条（`21ef277`、`6720997`、`6eb7d4c`）
+### 5. M3 健壮性与性能：FX-20→29（覆盖 12 条低优先级）（`21ef277`、`6720997`、`6eb7d4c`）
 
 - **FX-20** `state.json` 增长与事务成本：每 Run 事件封顶 500（丢弃数由 `sequence−1` 可推导），健康库的恢复不再重写状态文件，`vagent gc` 默认只预览、`--apply` 才清理 30 天前终态 Run 明细，`scripts/measure_state.py` 给出 10/20/40 Run 的字节与空事务耗时。
 - **FX-21** 侧车写安全：`summaries.json` / `memory.json` 改用原子写（uuid 临时名 + fsync + replace + 重试），写失败只降级、不让 Run 失败。
@@ -73,7 +73,7 @@ README 的版本、验证数字与状态表更新到 v0.7.0，并新增 Harness 
 - **状态增长测量**（`scripts/measure_state.py`）：10/20/40 Run 为 **551,974 / 1,103,554 / 2,206,714 字节**，空事务中位数 **9.54 / 17.40 / 34.90 ms**，与 M3 记录的 0.55/1.10/2.21 MB、12/25/39 ms 同量级（机器负载不同）。
 - **基线保护**：`docs/M9_E0_BASELINE.json`（SHA-256 `afd1b38f…59b694b`）与 `docs/M8_E0_BASELINE.json`（`f3dc91c1…cb3706`）本版未重新生成、未改动；168 个契约模型哈希、`contractsSha256` 与 `capabilitiesSha256` 由全量用例逐项校验通过。
 - **安装态 wheel smoke**：**PASS**（`output/release-0.7.0-wheel-smoke.json`；23/23 项检查全为 true，8 组离线用例共 **40 项**，`temporaryDataCleaned=true`，退出码 0）。在独立环境 `tmp/wheel-env-070` 安装本版 wheel 后运行，`packagePath` 指向该环境的 `site-packages`（不是仓库副本）；全程离线、未配置任何供应商 Key。
-- **四组 CI**：`{{CI}}`
+- **四组 CI**：发布提交 [`3055da9`](https://github.com/shifang37/vAgent/commit/3055da9c5cae4c1c4023a3e66bc5fa1d95379e0b) 上四组矩阵全部 **success**（[运行 42794207234](https://github.com/shifang37/vAgent/actions/runs/42794207234)：ubuntu 3.11 22 分钟、ubuntu 3.12 32 分钟、windows 3.11 53 分钟、windows 3.12 64 分钟），其中包括此前 10 次里失败 3 次的整集时间线渲染用例。CI 覆盖 `ruff check` / `ruff format --check`、11 个前端文件的语法检查与 10 个模块的 Node 测试、全量 pytest、构建 wheel 并在独立环境安装后运行 `scripts/wheel_smoke.py`。标签 `v0.7.0` 指向该提交（推送标签会另触发一次同提交的运行；本文件的 CI 一行与提交计数在发布后的一次纯文档补记里定稿，代码与发布提交完全相同）。
 
 ## 构建产物
 
@@ -111,7 +111,7 @@ $env:VAGENT_HOME = Join-Path $PWD '.vagent'
 1. **「顺序相关偶发」的旧判断被推翻。** 见上文第 6 节：根因是探测报告截断，不是夹具时序；旧记录保留在 [v0.6.1 发布说明](./RELEASE_0.6.1.md) 与 [M9 计划 §3.0](./M9_PLAN.md)，本版在其后追加根因与修复。
 2. **M3 的性能门禁未达成，如实记录。** 规划 §8.5 要求空事务耗时降到 2.77 MB 场景的 50% 以下；本版实测 10/20/40 Run 为 0.55/1.10/2.21 MB、空事务 12/25/39 ms，事务成本仍由每条 Run 的完整 `messages` 决定。把 `runs[].messages` 旁路到独立文件需要 schema 讨论与只读回退，按计划留给 M4 的 C2。
 3. **`vagent gc` 与快照是可选运维命令，未接入自动流程。** 本版不自动删除任何历史数据，`gc` 默认 dry-run。
-4. **本机验证环境说明。** 全量回归与 wheel smoke 在本机 Windows（Python 3.12.10、包内 FFmpeg 7.1）上完成；CI 结论以推送后的四组矩阵为准。
+4. **本机验证环境说明。** 全量回归、安装态 wheel smoke 与状态增长测量在本机 Windows（Python 3.12.10、包内 FFmpeg 7.1）上完成；四组 CI（ubuntu / windows × Python 3.11 / 3.12）在发布提交 `3055da9` 上全部通过，与上节记录一致。
 
 ## 已知限制
 
@@ -124,7 +124,7 @@ $env:VAGENT_HOME = Join-Path $PWD '.vagent'
 
 ## 证据索引
 
-- Harness 修复： [Harness 缺陷修复规划](./HARNESS_REVIEW_FIX_PLAN.md)（§13–§20 为四批实施记录与验证）、[AGENT_HARNESS_GAP_PLAN](./AGENT_HARNESS_GAP_PLAN.md)、H0–H6 验收（[H0](./AGENT_HARNESS_H0_ACCEPTANCE.md)、[H2](./AGENT_HARNESS_H2_ACCEPTANCE.md)、[H3](./AGENT_HARNESS_H3_ACCEPTANCE.md)、[H5](./AGENT_HARNESS_H5_ACCEPTANCE.md)、[H6](./AGENT_HARNESS_H6_ACCEPTANCE.md)、[行为评测](./AGENT_BEHAVIOR_EVAL_ACCEPTANCE.md)）
+- Harness 修复： [Harness 缺陷修复规划](./HARNESS_REVIEW_FIX_PLAN.md)（§13–§20 为四批实施记录与验证）、H0–H6 验收（[H0](./AGENT_HARNESS_H0_ACCEPTANCE.md)、[H2](./AGENT_HARNESS_H2_ACCEPTANCE.md)、[H3](./AGENT_HARNESS_H3_ACCEPTANCE.md)、[H5](./AGENT_HARNESS_H5_ACCEPTANCE.md)、[H6](./AGENT_HARNESS_H6_ACCEPTANCE.md)、[上下文摘要](./CONTEXT_SUMMARY_ACCEPTANCE.md)、[行为评测](./AGENT_BEHAVIOR_EVAL_ACCEPTANCE.md)）
 - 偶发静音根因：[M9 计划 §3.0.1](./M9_PLAN.md)、`output/stress-m7-render.log`
 - 离线与安装态证据：`output/release-0.7.0-pytest.log`、`output/release-0.7.0-wheel-smoke.json`、`output/v0.7.0-measure-state.log`、`output/provider-contract.json`
 - 基线：`docs/M9_E0_BASELINE.json`（SHA-256 `afd1b38f…59b694b`）、`docs/M8_E0_BASELINE.json`（SHA-256 `f3dc91c1…cb3706`）

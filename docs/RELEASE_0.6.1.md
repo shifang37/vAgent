@@ -17,6 +17,7 @@
 
 - **本地完整回归**：**1,522 passed / 4 skipped，另 1 例已登记偶发失败**（1,201.77 秒，0:20:01；skip 为平台条件：Windows 符号链接权限 3 例、POSIX 文件模式 1 例）。唯一失败是 `tests/test_m7_timeline_render.py::test_a_full_timeline_render_freezes_the_edit_and_replays`，与本版之前的记录一致，同一条用例单跑该文件 6/6 通过。
 - **该偶发的新观察（本版未改代码）**：用例的 BGM 夹具是 1 秒数字静音，混音是否为「非静音」因此完全取决于 voice 轨是否落进剪辑窗口，voice 落空时混音按构造就是静音，断言必然失败。据此判断问题出在**用例夹具**的时序，而不是混音产品路径；修法（把 BGM 夹具换成非静音素材）留待后续单独验证，不在本版改动产品代码。
+  > **2026-11-10 补记（v0.7.0）**：这条判断已撤回。CI 失败日志里没有 `（音频落空 N 条：…）` 后缀，说明 voice 轨并未落空；真正原因是 FFmpeg 7.1 偶尔只处理一帧就结束探测滤镜图，`volumedetect` 的 4096 样本 -91 dB 报告被误读为静音。根因、复现与修复见 [v0.7.0 发布说明](./RELEASE_0.7.0.md) 与 [M9 计划 §3.0.1](./M9_PLAN.md)。
 - **静态检查**：`ruff check` 通过；`ruff format --check` **234 文件**；10 个前端状态模块 **91 项** Node 测试通过。
 - **契约回放**：37/37 通过，退出码 0（`scripts/verify_provider_contract.py`）。
 - **基线保护**：升到 0.6.1 后重新生成 `docs/M9_E0_BASELINE.json`，SHA-256 仍为 `afd1b38f…59b694b`，逐字节不变；`docs/M8_E0_BASELINE.json` 保持 `f3dc91c1…cb3706`。`src/vagent/video/assembler.py` 的 `PACKAGE_VERSION` 是冻结的装配引擎标识（写进每份成片的 `engine.packageVersion`），**不随包版本变化**，本版未改动。
@@ -63,7 +64,7 @@ $env:VAGENT_HOME = Join-Path $PWD '.vagent'
 
 - **Kling / fal 仍无真实付费样本**：缺 `VAGENT_KLING_API_KEY`/`FAL_KEY`，能力表保持「文档支持，未做真实样本」，`capabilitiesSha256` 不变。协议层已对齐并受回归保护，网络与账号这一层未验证；最小闭环约 0.98 USD（Kling 0.56、fal 0.42）。
 - 万相与 CosyVoice 的供应商实际扣费仍未核对，账本依赖人工录入，缺失时保持 `unknown` 而不是 0。
-- 时间线整集渲染的偶发失败未根除，诊断见上节。
+- 时间线整集渲染的偶发失败未根除，诊断见上节（**v0.7.0 已定位并修复**，见 [v0.7.0 发布说明](./RELEASE_0.7.0.md)）。
 - 9:16 竖屏按产品决定暂缓，M9 E0 契约与基线保留，E1 起未开始。
 - 公共 PyPI 发布未做；本版只提供仓库内构建的 wheel/sdist。
 
