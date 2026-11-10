@@ -9,6 +9,7 @@ from pathlib import Path
 import pytest
 
 from vagent.errors import AppError
+from vagent.video import mixer
 from vagent.video.assembler import bundled_engine
 from vagent.video.mixer import (
     MixError,
@@ -20,6 +21,7 @@ from vagent.video.mixer import (
     parse_ebur128,
     parse_loudnorm,
     parse_volume_peak,
+    parse_volume_report,
 )
 from vagent.video.tts import inspect_wav, synthesize_local_wav
 
@@ -212,6 +214,96 @@ def test_volume_peak_parser_reads_the_silence_floor():
     assert parse_volume_peak("max_volume: -inf dB\n") == float("-inf")
     assert parse_volume_peak("max_volume: -3.2 dB\n") == -3.2
     assert parse_volume_peak("no level here\n") is None
+
+
+# FFmpeg 7.1 prints one volumedetect summary per filter instance. A probe graph can
+# report an empty instance first, and on Windows it sometimes ends after a single
+# frame and reports that frame instead of the premix. Reading either as the mix level
+# is what made an audible timeline render fail as "混音为静音" in three CI runs.
+TRUNCATED_PROBE = (
+    "[Parsed_volumedetect_9 @ 0x1] n_samples: 0\n"
+    "[Parsed_volumedetect_9 @ 0x1] n_samples: 4096\n"
+    "[Parsed_volumedetect_9 @ 0x1] mean_volume: -91.0 dB\n"
+    "[Parsed_volumedetect_9 @ 0x1] max_volume: -91.0 dB\n"
+)
+COMPLETE_PROBE = (
+    "[Parsed_volumedetect_9 @ 0x1] n_samples: 0\n"
+    "[Parsed_volumedetect_9 @ 0x1] n_samples: 8640000\n"
+    "[Parsed_volumedetect_9 @ 0x1] mean_volume: -33.0 dB\n"
+    "[Parsed_volumedetect_9 @ 0x1] max_volume: -12.1 dB\n"
+    "[Parsed_volumedetect_9 @ 0x1] histogram_12db: 39948\n"
+)
+
+
+def test_volume_report_prefers_the_summary_that_measured_the_premix():
+    assert parse_volume_report(TRUNCATED_PROBE) == (-91.0, 4096)
+    assert parse_volume_report(COMPLETE_PROBE) == (-12.1, 8640000)
+    # The complete summary wins even when a partial one arrives first.
+    assert parse_volume_report(TRUNCATED_PROBE + COMPLETE_PROBE) == (-12.1, 8640000)
+
+
+async def test_a_truncated_probe_is_retried_before_the_mix_is_called_silent(tmp_path, monkeypatch):
+    voice = write_voice(tmp_path / "voice.wav", "今天雨很大，你带伞了吗？")
+    output = tmp_path / "mixed.wav"
+    real = mixer._run
+    probes = 0
+
+    async def scripted(engine, tracks, graph, out, *, cancelled, deadline, input_path=None, verify=False):
+        nonlocal probes
+        if out is None and graph is not None and "volumedetect" in graph:
+            probes += 1
+            if probes == 1:
+                return TRUNCATED_PROBE
+        return await real(
+            engine,
+            tracks,
+            graph,
+            out,
+            cancelled=cancelled,
+            deadline=deadline,
+            input_path=input_path,
+            verify=verify,
+        )
+
+    monkeypatch.setattr(mixer, "_run", scripted)
+    result = await mix_tracks(
+        tracks=[track(voice, "voice", 0.0, 0.0)], output=output, duration_seconds=Fraction(2)
+    )
+    assert probes == 2
+    assert output.exists()
+    assert abs(result.loudness_verification["integratedLufs"] - (-16.0)) <= 0.5
+
+
+async def test_a_probe_that_never_covers_the_timeline_does_not_claim_silence(tmp_path, monkeypatch):
+    """An unmeasured premix falls through to the delivery gate instead of being refused."""
+    voice = write_voice(tmp_path / "voice.wav", "今天雨很大，你带伞了吗？")
+    output = tmp_path / "mixed.wav"
+    real = mixer._run
+    probes = 0
+
+    async def scripted(engine, tracks, graph, out, *, cancelled, deadline, input_path=None, verify=False):
+        nonlocal probes
+        if out is None and graph is not None and "volumedetect" in graph:
+            probes += 1
+            return TRUNCATED_PROBE
+        return await real(
+            engine,
+            tracks,
+            graph,
+            out,
+            cancelled=cancelled,
+            deadline=deadline,
+            input_path=input_path,
+            verify=verify,
+        )
+
+    monkeypatch.setattr(mixer, "_run", scripted)
+    result = await mix_tracks(
+        tracks=[track(voice, "voice", 0.0, 0.0)], output=output, duration_seconds=Fraction(2)
+    )
+    assert probes == mixer.PROBE_ATTEMPTS
+    assert output.exists()
+    assert abs(result.loudness_verification["integratedLufs"] - (-16.0)) <= 0.5
 
 
 async def test_missing_file_and_empty_tracks_are_source_errors(tmp_path):

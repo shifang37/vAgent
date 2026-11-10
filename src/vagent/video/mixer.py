@@ -44,6 +44,14 @@ MIX_CHANNELS = 2
 # the premix so the failure is immediate and deterministic instead of depending on
 # how loudnorm happens to report silence.
 SILENCE_PEAK_DB = -90.0
+# A volumedetect summary only measures what that filter instance actually pulled.
+# FFmpeg occasionally ends the probe graph after a single frame and reports that
+# frame instead of the premix (``n_samples: 4096``, ``max_volume: -91.0 dB``);
+# reading such a partial report as the mix level once refused an audible render as
+# silent. An incomplete probe is retried, and a premix is only called silent when a
+# probe that covered the whole timeline says so.
+PROBE_ATTEMPTS = 3
+PROBE_COMPLETE_RATIO = 0.9
 RENDER_TIMEOUT_SECONDS = 120.0
 RENDER_JOB_TIMEOUT_SECONDS = 600.0
 MESSAGES = {
@@ -55,6 +63,7 @@ MESSAGES = {
 }
 _JSON_BLOCK = re.compile(r"\{[^{}]*\"input_i\"[^{}]*\}", re.DOTALL)
 _SILENCE_PEAK = re.compile(r"max_volume:\s*(-?(?:\d+(?:\.\d+)?|inf))\s*dB")
+_VOLUME_SAMPLES = re.compile(r"n_samples:\s*(\d+)")
 _EBU_SUMMARY = re.compile(r"Summary:\s*(?P<body>.*)\Z", re.DOTALL)
 _EBU_I = re.compile(r"Integrated loudness:\s*I:\s*(-?\d+(?:\.\d+)?) LUFS")
 _EBU_LRA = re.compile(r"LRA:\s*(-?\d+(?:\.\d+)?) LU")
@@ -232,19 +241,39 @@ def parse_ebur128(text: str) -> dict | None:
     }
 
 
+def _peak_value(raw: str) -> float:
+    return float("-inf") if raw.lstrip("-") == "inf" else float(raw)
+
+
+def parse_volume_report(text: str) -> tuple[float | None, int]:
+    """The peak and sample count of the ``volumedetect`` summary that measured audio.
+
+    FFmpeg emits one summary per filter instance, and a graph can report an empty or
+    one-frame instance before the full one. The summary with the most samples is the
+    one that measured the stream, so it wins over document order.
+    """
+    summaries = [(match.end(), int(match.group(1))) for match in _VOLUME_SAMPLES.finditer(text)]
+    best: tuple[float | None, int] = (None, 0)
+    for index, (end, samples) in enumerate(summaries):
+        stop = summaries[index + 1][0] if index + 1 < len(summaries) else len(text)
+        match = _SILENCE_PEAK.search(text[end:stop])
+        if match is not None and samples >= best[1]:
+            best = (_peak_value(match.group(1)), samples)
+    if best[1]:
+        return best
+    matches = list(_SILENCE_PEAK.finditer(text))
+    return (_peak_value(matches[-1].group(1)), 0) if matches else (None, 0)
+
+
 def parse_volume_peak(text: str) -> float | None:
     """The premix sample peak in dBFS; ``None`` when FFmpeg reported no level.
 
     ``volumedetect`` clamps digital silence to ``-91.0 dB`` on FFmpeg 7.1, so the
     silence probe below compares against :data:`SILENCE_PEAK_DB` instead of ``-inf``.
+    Callers that must not mistake a partial report for a level use
+    :func:`parse_volume_report` and check the sample count.
     """
-    match = _SILENCE_PEAK.search(text)
-    if match is None:
-        return None
-    value = match.group(1)
-    if value.lstrip("-") == "inf":
-        return float("-inf")
-    return float(value)
+    return parse_volume_report(text)[0]
 
 
 def loudness_in_tolerance(measurement: dict) -> bool:
@@ -323,18 +352,29 @@ async def mix_tracks(
     deadline = asyncio.get_running_loop().time() + RENDER_JOB_TIMEOUT_SECONDS
     try:
         graph, premix = build_filter_graph(tracks, duration_seconds)
-        probe = await _run(
-            engine,
-            tracks,
-            f"{graph};[{premix}]volumedetect[out]",
-            None,
-            cancelled=cancelled,
-            deadline=deadline,
-        )
-        peak = parse_volume_peak(probe)
-        if peak is None or peak <= SILENCE_PEAK_DB:
+        expected_samples = round(float(duration_seconds) * MIX_SAMPLE_RATE * MIX_CHANNELS)
+        complete_after = expected_samples * PROBE_COMPLETE_RATIO
+        peak: float | None = None
+        probed_samples = 0
+        for _attempt in range(PROBE_ATTEMPTS):
+            probe = await _run(
+                engine,
+                tracks,
+                f"{graph};[{premix}]volumedetect[out]",
+                None,
+                cancelled=cancelled,
+                deadline=deadline,
+            )
+            measured_peak, measured_samples = parse_volume_report(probe)
+            if measured_samples >= probed_samples:
+                peak, probed_samples = measured_peak, measured_samples
+            if probed_samples >= complete_after:
+                break
+        if probed_samples >= complete_after and peak is not None and peak <= SILENCE_PEAK_DB:
             # Deterministic fast failure: no loudnorm pass can lift silence to the
-            # target, so do not spend the encode/verify/retry passes on it.
+            # target, so do not spend the encode/verify/retry passes on it. A probe
+            # that never covered the timeline falls through to the delivery gate
+            # instead of calling an unmeasured premix silent.
             raise MixError("LOUDNESS_OUT_OF_RANGE", "（混音为静音，未交付）", stage="validate")
         first = await _run(
             engine,
