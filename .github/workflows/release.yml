@@ -1,0 +1,100 @@
+name: Release
+
+# 打 tag 即产出可下载的 wheel / sdist，并挂到 GitHub Release。
+# 这是「别人能下载」的第一条通路：不需要任何 PyPI 账号。
+on:
+  push:
+    tags: ["v*"]
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: "已存在的 tag（例如 v0.7.1）"
+        required: true
+        type: string
+
+permissions:
+  contents: read
+
+concurrency:
+  group: release-${{ inputs.tag || github.ref_name }}
+  cancel-in-progress: false
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.tag || github.ref }}
+          fetch-depth: 0
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+          cache-dependency-path: requirements-dev.lock
+      - run: python -m pip install -r requirements-dev.lock
+      - run: python -m pip install --no-deps -e .
+      - name: Tag 与包版本必须一致
+        env:
+          TAG: ${{ inputs.tag || github.ref_name }}
+        run: python scripts/check_release_version.py "$TAG"
+      - name: 构建 sdist 与 wheel
+        run: python -m build --no-isolation --outdir dist/python
+      - name: 安装态冒烟（离线，不联网、不配置 Key）
+        run: |
+          python -m pip uninstall -y shifang37-vagent
+          python -m pip install --no-deps dist/python/*.whl
+          python scripts/wheel_smoke.py
+      - name: 生成校验和
+        run: |
+          cd dist/python
+          sha256sum ./*.whl ./*.tar.gz > SHA256SUMS
+          cat SHA256SUMS
+      - uses: actions/upload-artifact@v4
+        with:
+          name: release-assets
+          path: |
+            dist/python/*.whl
+            dist/python/*.tar.gz
+            dist/python/SHA256SUMS
+          if-no-files-found: error
+
+  publish-github:
+    needs: build
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.tag || github.ref }}
+      - uses: actions/download-artifact@v4
+        with:
+          name: release-assets
+          path: dist/python
+      - name: 创建或更新 GitHub Release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ inputs.tag || github.ref_name }}
+        run: |
+          set -euo pipefail
+          version="${TAG#v}"
+          notes="docs/RELEASE_${version}.md"
+          if gh release view "$TAG" >/dev/null 2>&1; then
+            gh release upload "$TAG" dist/python/*.whl dist/python/*.tar.gz dist/python/SHA256SUMS --clobber
+          elif [ -f "$notes" ]; then
+            gh release create "$TAG" dist/python/*.whl dist/python/*.tar.gz dist/python/SHA256SUMS \
+              --title "$TAG" --notes-file "$notes"
+          else
+            gh release create "$TAG" dist/python/*.whl dist/python/*.tar.gz dist/python/SHA256SUMS \
+              --title "$TAG" --generate-notes
+          fi
+      - name: 输出安装命令
+        env:
+          TAG: ${{ inputs.tag || github.ref_name }}
+        run: |
+          set -euo pipefail
+          version="${TAG#v}"
+          wheel="shifang37_vagent-${version}-py3-none-any.whl"
+          echo "python -m pip install https://github.com/${GITHUB_REPOSITORY}/releases/download/${TAG}/${wheel}" \
+            >> "$GITHUB_STEP_SUMMARY"

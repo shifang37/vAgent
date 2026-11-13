@@ -4,7 +4,7 @@
 
 **vagent** 是一个面向视频创作的本地 Agent：用自然语言指挥它完成「剧本 → 分集 / 分场 / 分镜 → 调用视频模型生成 → 字幕 / 配音 / 混音 / 转场 → 整集成片」。它用 **Python + DeepSeek + LangGraph** 自主实现上下文、项目记忆、Skills、工具执行与费用护栏，再接入真实的视频生成与语音合成服务。
 
-当前版本 **v0.7.0**（2026-11-10）。安装为 Python 包后以 `vagent` 命令运行，提供 CLI、本地 Web 工作台、无头两阶段授权流程和只读 MCP。所有数据和 Key 都留在本机。
+当前版本 **v0.7.1**（2026-11-13）。安装为 Python 包后以 `vagent` 命令运行，提供 CLI、本地 Web 工作台、无头两阶段授权流程和只读 MCP。所有数据和 Key 都留在本机。
 
 > 一条 16:9 横屏 720p 的 AI 短剧流水线：从契约冻结到可复现的成片交付，每一步的证据都写进 `docs/`。
 
@@ -50,6 +50,9 @@
 | M9 | 9:16 竖屏 | **暂缓**。E0 契约与基线已冻结保留，E1 起未开始；发布号改为 v0.8.0 |
 | H0–H6 | 可选能力：上下文摘要、长期记忆、提示词版本、行为评测、追踪、成本估算 | 完成，默认关闭 |
 | 审查修复 | 外部审查的 30 条问题（FX-01→29）分四批落地：止血 → 正确性 → 评测与文档 → 健壮性 | 完成，v0.7.0 |
+| 分发 | MIT 许可、包元数据、GitHub Release 与 PyPI 流水线、安装文档 | 完成，v0.7.1 |
+
+**v0.7.1 只改分发，不改行为**：MIT 许可证、包元数据（许可证表达式、项目链接、分类器）、tag 触发的 Release 流水线（构建 → 安装态冒烟 → SHA256SUMS → 资产上传）、PyPI Trusted Publishing 工作流与 [分发说明](./docs/DISTRIBUTION.md)。运行时与 v0.7.0 逐字节等价：存储仍为 **schema 9**、工具面仍为 **18/18**、168 个契约模型哈希、`contractsSha256` 与 `capabilitiesSha256` 不变，未新增任何开关。
 
 **v0.7.0 是 Harness 加固版本，不扩产品域**：收纳上表 H0–H6 的 6 项可选能力（全部默认关闭）与外部审查的 30 条修复，另修掉一条把截断的 `volumedetect` 报告误读为静音的偶发失败。存储仍为 **schema 9**、工具面仍为 **18/18**、168 个契约模型哈希、`contractsSha256` 与 `capabilitiesSha256` 逐字节不变；不新增付费样本，不做 9:16 竖屏。上一版 v0.6.1（2026-11-04）是 v0.6.0 之后的补丁版本。
 
@@ -59,7 +62,27 @@
 
 ## 快速开始
 
-要求 **Python 3.11+**（本地验证使用 3.12）。运行 Agent 不需要 Node.js。
+要求 **Python 3.11+**（本地验证使用 3.12）。运行 Agent 不需要 Node.js，也不需要 clone 仓库。
+
+```powershell
+# 从仓库标签直接安装（当前可用）
+python -m pip install "git+https://github.com/shifang37/vAgent@v0.7.1"
+
+# 把数据放进当前目录而不是 ~/.vagent；然后跑无需 Key、不联网的离线演示
+$env:VAGENT_HOME = Join-Path $PWD '.vagent'
+vagent demo
+vagent inspect --session demo
+```
+
+发布到 PyPI 之后可换成一行式（`uv` 会自动准备 Python 3.11+，用户不必预装 Python）：
+
+```powershell
+uvx --from shifang37-vagent vagent web --mcp-local
+```
+
+三条安装渠道的差异、校验和与发版流程见 [分发说明](./docs/DISTRIBUTION.md)。
+
+### 从源码开发
 
 ```powershell
 git clone https://github.com/shifang37/vAgent.git
@@ -67,13 +90,6 @@ cd vAgent
 python -m venv .venv
 .\.venv\Scripts\python.exe -m pip install -r requirements-dev.lock
 .\.venv\Scripts\python.exe -m pip install --no-deps -e .
-
-# 把数据放在当前目录的被忽略目录中，而不是 ~/.vagent
-$env:VAGENT_HOME = Join-Path $PWD '.vagent'
-
-# 无需 Key、不联网的离线演示
-.\.venv\Scripts\python.exe -m vagent demo
-.\.venv\Scripts\python.exe -m vagent inspect --session demo
 ```
 
 macOS / Linux 把 `.\.venv\Scripts\python.exe` 换成 `.venv/bin/python`。只需要运行时依赖可以直接 `python -m pip install .`。
@@ -225,11 +241,12 @@ node --test tests/test_job_state.mjs          # 其余 9 个 *-state 测试同�
 .\.venv\Scripts\python.exe scripts/wheel_smoke.py   # 在临时环境安装 wheel 并跑安装态套件
 ```
 
-| 检查 | 最近结果（`master`，v0.7.0 发布前） |
+| 检查 | 最近结果（`master`，v0.7.1 发布前） |
 |---|---|
-| 全量 pytest | 1,741 passed / 4 skipped（1,867 秒），无失败（skip 为平台条件：Windows 符号链接权限 3 例、POSIX 文件模式 1 例） |
-| Ruff check / format | 258 个文件通过 |
+| 全量 pytest | 1,741 passed / 4 skipped（2,074 秒），无失败（skip 为平台条件：Windows 符号链接权限 3 例、POSIX 文件模式 1 例） |
+| Ruff check / format | 259 个文件通过 |
 | 前端 Node 测试 | 10 个状态模块 91 项，另 11 个 JS 文件 `node --check` 通过 |
+| 安装态 wheel smoke | 23/23 检查为 true，8 组离线套件 40 例全 passed，临时数据已清理（v0.7.1，详见发布说明） |
 | CI 矩阵 | ubuntu / windows × Python 3.11 / 3.12 四组，实时状态见页首 badge |
 
 离线验收套件 `scripts/evaluate_m2.py` … `evaluate_m8.py` 默认不联网，用受控上游与本地测试媒体走真实生产代码路径；`--live` 会被明确拒绝或需要单独授权。全量回归约 21–25 分钟（本机实测见 [v0.7.0 发布说明](./docs/RELEASE_0.7.0.md)）。此前登记的时间线混音静音偶发已定位根因并修复：包内 FFmpeg 7.1 偶尔在探测 premix 时只处理一帧就以退出码 0 结束，`volumedetect` 只报出 4096 个样本的 -91 dB，被误读为静音；现在按样本数取完整的探测摘要、不完整则重试且不判定静音，见 [M9 计划 §3.0.1](./docs/M9_PLAN.md)。另一类偶发是 Windows 上 M5 离线评估超出夹具等待上限，评估侧上限已由 300 秒放宽到 600 秒，见 [M5 验收](./docs/M5_E4_ACCEPTANCE.md)。
@@ -238,13 +255,14 @@ node --test tests/test_job_state.mjs          # 其余 9 个 *-state 测试同�
 
 | 类型 | 文档 |
 |---|---|
+| 分发 | [DISTRIBUTION](./docs/DISTRIBUTION.md)（安装渠道、发版流程、校验和、平台边界） |
 | 使用手册 | [USER_GUIDE](./docs/USER_GUIDE.md)（CLI 细节、headless、恢复、用量、Redis、Skills、数据兼容）· [Web 说明](./web/README.md) · [MCP 接入](./docs/MCP.md) |
 | 设计 | [DESIGN](./DESIGN.md) · [AGENT_HARNESS_DESIGN](./AGENT_HARNESS_DESIGN.md) · [M1_PLAN](./M1_PLAN.md) |
 | 计划 | [M1-B](./docs/M1B_PLAN.md) · [M1-C](./docs/M1C_PLAN.md) · [M2](./docs/M2_PLAN.md) · [M3](./docs/M3_PLAN.md) · [M5](./docs/M5_PLAN.md) · [M8](./docs/M8_PLAN.md) · [M9](./docs/M9_PLAN.md) · [两 Key 直用](./docs/KEYS_ONLY_PLAN.md) · [Harness 缺陷修复](./docs/HARNESS_REVIEW_FIX_PLAN.md) |
 | 契约 | [M1-B](./docs/M1B_CONTRACTS.md) · [M1-C](./docs/M1C_CONTRACTS.md) · [M2](./docs/M2_CONTRACTS.md) · [M3](./docs/M3_CONTRACTS.md) · [M5](./docs/M5_CONTRACTS.md) · [M6](./docs/M6_CONTRACTS.md) · [M7](./docs/M7_CONTRACTS.md) · [M8](./docs/M8_CONTRACTS.md) · [M9](./docs/M9_CONTRACTS.md) |
 | 阶段验收 | [M1-A](./docs/M1A_ACCEPTANCE.md) · [M1-B](./docs/M1B_ACCEPTANCE.md) · [M1-C](./docs/M1C_ACCEPTANCE.md) · [M2](./docs/M2_ACCEPTANCE.md) · [M3](./docs/M3_ACCEPTANCE.md) · [M4](./docs/M4_NORMALIZATION.md) · [M5](./docs/M5_E4_ACCEPTANCE.md) · [M6](./docs/M6_E4_ACCEPTANCE.md) · [M7](./docs/M7_ACCEPTANCE.md) · [M8](./docs/M8_ACCEPTANCE.md) · [K3](./docs/KEYS_ONLY_K3_ACCEPTANCE.md) |
 | 专项验收 | [编排](./docs/AGENT_ORCHESTRATION_ACCEPTANCE.md) · [质量校验](./docs/QUALITY_ACCEPTANCE.md) · [持久恢复](./docs/RECOVERY_ACCEPTANCE.md) · [用量观测](./docs/USAGE_ACCEPTANCE.md) · [上下文优化](./docs/CONTEXT_OPTIMIZATION_ACCEPTANCE.md) · [Redis 缓存](./docs/REDIS_CACHE_ACCEPTANCE.md) · [i2v / flf2v 样本](./docs/M2_I2V_ACCEPTANCE.md) · [Kling 对齐与契约校验](./docs/KLING_ALIGNMENT.md) |
-| 发布说明 | [v0.7.0](./docs/RELEASE_0.7.0.md) · [v0.6.1](./docs/RELEASE_0.6.1.md) · [v0.6.0](./docs/RELEASE_0.6.0.md) · [v0.5.0](./docs/RELEASE_0.5.0.md) · [v0.4.0](./docs/RELEASE_0.4.0.md) · [v0.3.0](./docs/RELEASE_0.3.0.md) |
+| 发布说明 | [v0.7.1](./docs/RELEASE_0.7.1.md) · [v0.7.0](./docs/RELEASE_0.7.0.md) · [v0.6.1](./docs/RELEASE_0.6.1.md) · [v0.6.0](./docs/RELEASE_0.6.0.md) · [v0.5.0](./docs/RELEASE_0.5.0.md) · [v0.4.0](./docs/RELEASE_0.4.0.md) · [v0.3.0](./docs/RELEASE_0.3.0.md) |
 | 外部依据 | [万相 API 核实](./docs/VIDEO_API_NOTES.md) · [第三方组件与分发材料](./docs/THIRD_PARTY_ASSEMBLY.md) |
 
 每个 `docs/M*_E*_ACCEPTANCE.md` 记录对应子阶段的范围、复现命令、回归数字与保留的边界；`docs/M*_E0_BASELINE.json` 是机器可读的契约基线。
@@ -257,4 +275,4 @@ node --test tests/test_job_state.mjs          # 其余 9 个 *-state 测试同�
 - 单用户、单写进程的本地工具：同一数据目录同时只允许一个 CLI / Web 写进程；JSON 存储面向小规模使用。
 - 自动摘要（`VAGENT_CONTEXT_VERSION=3/4`）与项目级长期记忆（`VAGENT_MEMORY=on`）都是显式 opt-in、默认关闭；不做跨项目偏好记忆、发送后的自动重投或换汇。
 - 单次模型请求预留并限制在 60 秒（固定上限 `MODEL_CALL_LIMIT_SECONDS`，不是配置项；剩余预算不足时更短）；接近输出上限的长回复可能因此被截断，见 [使用手册](./docs/USER_GUIDE.md)。
-- 未发布到 PyPI，需从仓库构建安装；文本模型有参考价目表与按已记录用量的估算，不是供应商账单。
+- 公开 PyPI 发布尚未执行；现在可用 `pip install "git+https://github.com/shifang37/vAgent@v0.7.1"` 或 GitHub Release 资产安装，见 [分发说明](./docs/DISTRIBUTION.md)。文本模型有参考价目表与按已记录用量的估算，不是供应商账单。
