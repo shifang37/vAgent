@@ -41,6 +41,8 @@
 
 哈希为本机构建实测值；同一提交重新构建不保证逐字节一致。wheel 不含 `docs/`，sdist 含 `docs/*.md`。
 
+**下载后请以 GitHub Release 页的 `SHA256SUMS` 为准。** Release 资产由 CI 在 Ubuntu 上重建，与上表不逐字节一致——v0.7.1 的 CI 实测值是 `e54e953efb1a26431aa71f5d20ca8f1db0d91600542d5a7f52ba0e858c97a115`（wheel，1,363,328 字节）与 `64eab1f42c46e56437ccca662168e0f8a9bafb6824333511a8c3d3b6ed04e7e5`（sdist，2,593,750 字节）。从 Release 下载 wheel 后重算 SHA-256，与 `SHA256SUMS` 逐位一致。
+
 ## 安装
 
 ```powershell
