@@ -2,13 +2,26 @@
 
 [![CI](https://github.com/shifang37/vAgent/actions/workflows/ci.yml/badge.svg)](https://github.com/shifang37/vAgent/actions/workflows/ci.yml)
 
+## 简介
+
 **vagent** 是一个面向视频创作的本地 Agent：用自然语言指挥它完成「剧本 → 分集 / 分场 / 分镜 → 调用视频模型生成 → 字幕 / 配音 / 混音 / 转场 → 整集成片」。它用 **Python + DeepSeek + LangGraph** 自主实现上下文、项目记忆、Skills、工具执行与费用护栏，再接入真实的视频生成与语音合成服务。
 
 当前版本 **v0.7.1**（2026-11-13）。安装为 Python 包后以 `vagent` 命令运行，提供 CLI、本地 Web 工作台、无头两阶段授权流程和只读 MCP。所有数据和 Key 都留在本机。
 
 > 一条 16:9 横屏 720p 的 AI 短剧流水线：从契约冻结到可复现的成片交付，每一步的证据都写进 `docs/`。
 
-## 它能做什么
+## 目的
+
+AI 视频模型一次只生成一个 5 秒镜头，要把它变成一条能交付的短剧，中间隔着大量工程问题。vagent 的目标就是把这些工程问题做成一个**本地、可恢复、可审计**的 Agent 产品：
+
+- **创作结构化**：剧本拆成分集 → 分场 → 分镜 → 镜头，每一步可改、可回滚、可只重做某一个镜头。
+- **长任务可恢复**：视频生成是分钟级异步任务，进程重启、网络中断、页面关闭后仍能从检查点与持久等待继续。
+- **费用可控**：生成必须显式确认，受单 Job / 单 Run / 集级三重上限约束，每个 Job 至多提交一次，避免误重试导致重复扣费。
+- **交付可复现**：契约先行，用 168 个契约模型哈希的机器可读基线锁定行为；拼接、字幕、混音、渲染全部在本机完成，数据和 Key 不出本机。
+
+近期目标是把横屏 720p 产品域的「离线证据齐全」推进到「账实相符」：补真实付费样本、核对供应商账单。竖屏 9:16 的契约已冻结，留待 M9 续做。
+
+## 功能
 
 ```text
 一句话 / 剧本
@@ -60,9 +73,11 @@
 
 横屏 720p 的产品域已在 M1–M8 闭环，当前不新增功能，剩余工作属于证据与体验（真实样本、账单核对）。2026-10-29 产品方确认本轮只用横屏，竖屏方向保留 [M9 契约](./docs/M9_CONTRACTS.md) 供将来续做。
 
-## 快速开始
+## 安装指南
 
 要求 **Python 3.11+**（本地验证使用 3.12）。运行 Agent 不需要 Node.js，也不需要 clone 仓库。
+
+运行时依赖（LangGraph、`langchain-deepseek`、FastAPI、httpx、pydantic v2、`imageio-ffmpeg==0.6.0`、MCP SDK、Redis 客户端等）由 `pip install` 自动解析安装；FFmpeg 二进制随包分发，不需要另行安装。开发与测试使用 `requirements-dev.lock` 锁定版本；可选的 Redis 回答缓存需要自行准备实例并设置 `VAGENT_REDIS_URL`。
 
 ```powershell
 # 从仓库标签直接安装（当前可用）
@@ -105,21 +120,31 @@ VAGENT_DEEPSEEK_MODEL=deepseek-flash
 
 也可以在 Web 设置页填写。配置优先级为 **内置默认值 < `VAGENT_HOME/config.yml` < 环境变量 / `.env`**。Key 只由本地后端持有，不进入状态文件、检查点、事件或浏览器。
 
+## 使用说明
+
+### 运行与对话
+
+安装并配置好 Key 之后就可以发起真实调用：`run` 执行一次任务，`chat` 进入多轮对话，`inspect` 查看项目、产物与运行记录。
+
 ```powershell
 .\.venv\Scripts\python.exe -m vagent run '准备咖啡店短视频方案，面向上班族，暖色调，并保存。' --session coffee
 .\.venv\Scripts\python.exe -m vagent chat --session coffee
 .\.venv\Scripts\python.exe -m vagent inspect --session coffee
 ```
 
-`run` 和 `chat` 会发起真实请求并产生 API 费用。
+`run` 和 `chat` 会发起真实请求并产生 API 费用；`demo` / `inspect` / `usage` 等离线命令不联网、不产生费用。
 
 ### 启动 Web 工作台
 
 ```powershell
 .\.venv\Scripts\python.exe -m vagent web --mcp-local
+# 反代到公网域名时：--host 保持默认，把域名交给边界校验
+.\.venv\Scripts\python.exe -m vagent web --allowed-hosts vagent.example.com --no-open
 ```
 
-打开 <http://127.0.0.1:3210>。服务只监听回环地址，校验 Host / Origin 与 CSRF Token，API 不返回 Key。缺少 Key 时自动打开配置向导。工作台包含会话对话、产物版本、分镜与镜头、成片与渲染、字幕、季、时间线、素材库、用量与账单等面板，详见 [Web 说明](./web/README.md)。
+打开 <http://127.0.0.1:3210>。服务默认只监听回环地址，校验 Host / Origin 与 CSRF Token，API 不返回 Key。缺少 Key 时自动打开配置向导。工作台包含会话对话、产物版本、分镜与镜头、成片与渲染、字幕、季、时间线、素材库、用量与账单等面板，详见 [Web 说明](./web/README.md)。
+
+要放到服务器上、用域名 + HTTPS 访问（Caddy 反代、口令、备份、排错），见 [部署文档](./deploy/DEPLOY.md)。注意它是**单用户**部署：`config.yml` 只有一份，Key 由最后保存的人提供。
 
 ### 接入视频生成
 
@@ -134,7 +159,7 @@ VAGENT_DEEPSEEK_MODEL=deepseek-flash
 
 费用护栏在所有模式下一致：生成必须显式 `confirm`；每个 Job 冻结报价并受单 Job / 单 Run / 集级三重上限约束；每个 Job 至多提交一次，提交结果未知时不重投；CNY 与 USD 只并列展示、不换汇；实际账单只能手工录入，缺失时保持 `unknown` 而不是 0。完整环境变量见 [`.env.example`](./.env.example)，字段含义见 [使用手册](./docs/USER_GUIDE.md)。
 
-## 命令行一览
+### 命令行一览
 
 | 命令 | 用途 | 是否调用模型 / 供应商 |
 |---|---|---|
@@ -151,7 +176,7 @@ VAGENT_DEEPSEEK_MODEL=deepseek-flash
 
 每个子命令都支持 `--help`。逐命令的参数、错误码与边界见 [使用手册](./docs/USER_GUIDE.md)。
 
-## 高级开关（默认关闭）
+### 高级开关（默认关闭）
 
 以下开关用于 Agent Harness 的可选能力（上下文摘要、长期记忆、提示词版本与追踪），默认关闭；在 `.env` 或环境变量中设置后重启生效。多数改动会进入 Run 的 `contextSignature`，因此恢复旧 Run 需要原配置；关掉即回到 v2 基线。
 
@@ -167,7 +192,7 @@ VAGENT_DEEPSEEK_MODEL=deepseek-flash
 
 `VAGENT_CLOSING_TURN`（缺省 `on`）控制预算耗尽后的无工具收尾轮，详见[使用手册](./docs/USER_GUIDE.md#高级开关默认关闭)。
 
-### 离线评测与成本命令
+#### 离线评测与成本命令
 
 - `vagent usage --cost`：在既有用量输出上追加参考价目表金额（默认不显示，不写状态）。
 - `scripts/evaluate_behavior.py --home <空目录> --output <新路径> --k 2`：离线行为评测。`gate` 用例必须全样本通过，`measure` 只报告指标；`k` 不能超过样本数，`--live` 明确拒绝。
