@@ -47,6 +47,9 @@ logs/
 *.log
 *.part
 
+# Deployment data holds state, media and config.yml (with the API key)
+/deploy/data/
+
 # Temporary directory created by Windows tooling
 /%SystemDrive%/
 
@@ -62,3 +65,4 @@ Desktop.ini
 /docs/AGENT_HARNESS_GAP_PLAN.md
 
 pytest-of-shifang37/
+.pytest-tmp/

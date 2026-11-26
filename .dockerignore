@@ -1,0 +1,18 @@
+# 仓库构建上下文需要的文件；其余一概不进镜像。
+.git
+.github
+.venv
+.vagent
+.pytest-tmp
+pytest-*
+tmp
+output
+deploy/data
+deploy/.env
+tests
+docs
+scripts
+**/__pycache__
+*.pyc
+*.log
+.env

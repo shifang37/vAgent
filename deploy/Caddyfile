@@ -1,0 +1,19 @@
+# 域名来自 deploy/.env 的 VAGENT_DOMAIN；Caddy 自动申请并续期 HTTPS 证书。
+#
+# 口令：先生成哈希，再用它替换下面的占位串（不要写明文密码）：
+#   docker run --rm caddy:2-alpine caddy hash-password --plaintext '你的口令'
+# 每行格式是「用户名 哈希」，可以多行给不同的人。
+#
+# 可选：想收证书到期提醒，在文件最上面加一个全局块：
+#   { email you@example.com }
+
+{$VAGENT_DOMAIN} {
+	basic_auth {
+		me $2a$14$REPLACE_WITH_YOUR_OWN_HASH
+	}
+
+	reverse_proxy app:3210 {
+		# SSE 增量事件不能被缓冲，否则聊天像卡住一样一次吐完。
+		flush_interval -1
+	}
+}

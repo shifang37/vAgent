@@ -1,0 +1,67 @@
+# vagent 单机部署：Caddy（443，证书 + 口令）→ app（容器内 3210，不发布端口）
+#
+# 只跑 vagent 一个项目。数据在 ./data（state.json / checkpoints.sqlite / media / config.yml）。
+
+name: vagent
+
+services:
+  app:
+    build:
+      context: ..
+      dockerfile: deploy/Dockerfile
+      args:
+        PIP_INDEX_URL: ${PIP_INDEX_URL:-https://pypi.org/simple}
+        PYTHON_IMAGE: ${PYTHON_IMAGE:-python:3.12-slim}
+    image: vagent:local
+    restart: unless-stopped
+    environment:
+      VAGENT_HOME: /data
+      # App 只放行这个域名的 Host / Origin；改域名后必须重建容器。
+      VAGENT_WEB_ALLOWED_HOSTS: ${VAGENT_DOMAIN:?在 deploy/.env 里设置 VAGENT_DOMAIN}
+    volumes:
+      - ./data:/data
+    expose:
+      - "3210"
+    # 小磁盘套餐（40G）必须限制日志无限增长。
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
+    healthcheck:
+      test:
+        - CMD
+        - python
+        - -c
+        - import sys,urllib.request; sys.exit(0 if urllib.request.urlopen('http://127.0.0.1:3210/api/health', timeout=3).status == 200 else 1)
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 20s
+
+  caddy:
+    image: caddy:2-alpine
+    restart: unless-stopped
+    depends_on:
+      app:
+        condition: service_healthy
+    environment:
+      VAGENT_DOMAIN: ${VAGENT_DOMAIN:?在 deploy/.env 里设置 VAGENT_DOMAIN}
+      ACME_EMAIL: ${ACME_EMAIL:-}
+    ports:
+      - "80:80"
+      - "443:443"
+      - "443:443/udp"
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
+    volumes:
+      - ./Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy_data:/data
+      - caddy_config:/config
+
+volumes:
+  caddy_data:
+  caddy_config:

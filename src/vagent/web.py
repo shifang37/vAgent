@@ -213,9 +213,16 @@ class BillRecordInput(BaseModel):
     confirm: bool = False
 
 
-def create_app(config, *, port=3210, model=None, policy=None):
+def create_app(config, *, port=3210, allowed_hosts=None, model=None, policy=None):
     token = secrets.token_urlsafe(32)
-    allowed_hosts = {f"127.0.0.1:{port}", f"localhost:{port}"}
+    # Loopback stays allowed so the default local run keeps working; a reverse
+    # proxy in front of the app names the public host explicitly instead of
+    # disabling the boundary. ``allowed_hosts`` is a comma separated string or
+    # an iterable of ``host`` / ``host:port`` values.
+    if isinstance(allowed_hosts, str):
+        allowed_hosts = allowed_hosts.split(",")
+    public_hosts = {item.strip().lower() for item in (allowed_hosts or ()) if item.strip()}
+    allowed = {f"127.0.0.1:{port}", f"localhost:{port}"} | public_hosts
     root = Path(__file__).parent / "web"
     if not root.is_dir():
         root = Path(__file__).parents[2] / "web"
@@ -230,11 +237,14 @@ def create_app(config, *, port=3210, model=None, policy=None):
 
     @app.middleware("http")
     async def local_boundary(request: Request, call_next):
-        host = request.headers.get("host", "")
-        if host not in allowed_hosts:
-            return JSONResponse({"error": {"code": "HOST_DENIED", "message": "仅允许本地访问。"}}, 403)
-        origin = request.headers.get("origin")
-        if origin and origin != f"http://{host}":
+        host = request.headers.get("host", "").lower()
+        if host not in allowed:
+            return JSONResponse({"error": {"code": "HOST_DENIED", "message": "该访问域名未获授权。"}}, 403)
+        origin = (request.headers.get("origin") or "").lower()
+        # The origin must name the very host this request reached: an https
+        # front end in front of the loopback app terminates TLS, so both
+        # schemes are accepted for the matched host only.
+        if origin and origin not in {f"http://{host}", f"https://{host}"}:
             return JSONResponse({"error": {"code": "ORIGIN_DENIED", "message": "拒绝跨来源请求。"}}, 403)
         if request.headers.get("sec-fetch-site") in {"cross-site", "same-site"}:
             return JSONResponse({"error": {"code": "ORIGIN_DENIED", "message": "仅接受同源请求。"}}, 403)

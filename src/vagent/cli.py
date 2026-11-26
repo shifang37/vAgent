@@ -1,6 +1,7 @@
 import argparse
 import asyncio
 import json
+import os
 import re
 import sys
 from contextlib import AsyncExitStack
@@ -1461,7 +1462,18 @@ def parser() -> argparse.ArgumentParser:
     headless.add_argument("--max-jobs", dest="max_jobs", type=int, help="收紧本次 Run 的共享新任务上限")
     headless.add_argument("--resume", dest="resume_run", metavar="RUN_ID", help="继续已授权或等待中的 Run")
     web = commands.add_parser("web", help="启动本地 Web 与真实 Agent 编排")
-    web.add_argument("--port", type=int, default=3210)
+    web.add_argument("--port", type=int, default=None, help="监听端口；默认 3210，也可用 VAGENT_WEB_PORT")
+    web.add_argument(
+        "--host",
+        default=None,
+        help="监听地址；默认 127.0.0.1，反向代理场景保持默认，也可用 VAGENT_WEB_HOST",
+    )
+    web.add_argument(
+        "--allowed-hosts",
+        dest="allowed_hosts",
+        default=None,
+        help="反向代理对外域名，逗号分隔；也可用 VAGENT_WEB_ALLOWED_HOSTS",
+    )
     web.add_argument("--no-open", action="store_true")
     web.add_argument("--mcp-local", action="store_true", help="启用内置只读视频规划 MCP 服务")
     route = commands.add_parser("route", help="只读路由预览：比较冻结报价，不登记任务、不调用供应商")
@@ -1501,17 +1513,26 @@ def main() -> None:
 
             from vagent.web import create_app
 
-            if not 1 <= args.port <= 65535:
+            port = args.port if args.port is not None else int(os.environ.get("VAGENT_WEB_PORT") or 3210)
+            host = args.host or os.environ.get("VAGENT_WEB_HOST") or "127.0.0.1"
+            allowed = args.allowed_hosts
+            if allowed is None:
+                allowed = os.environ.get("VAGENT_WEB_ALLOWED_HOSTS", "")
+            allowed_hosts = [item for item in re.split(r"[,\s]+", allowed) if item]
+            if not 1 <= port <= 65535:
                 raise AppError("INVALID_PORT", "端口必须为 1～65535。")
             config = replace(config, mcp_local=config.mcp_local or args.mcp_local)
-            address = f"http://127.0.0.1:{args.port}"
+            local = host in {"127.0.0.1", "localhost"}
+            address = f"http://{'127.0.0.1' if local else host}:{port}"
             print(f"vagent Web: {address}", flush=True)
-            if not args.no_open:
+            if allowed_hosts:
+                print(f"允许的对外域名: {', '.join(allowed_hosts)}", flush=True)
+            if not args.no_open and local:
                 webbrowser.open(address)
             uvicorn.run(
-                create_app(config, port=args.port),
-                host="127.0.0.1",
-                port=args.port,
+                create_app(config, port=port, allowed_hosts=allowed_hosts),
+                host=host,
+                port=port,
                 access_log=False,
                 log_level="warning",
             )

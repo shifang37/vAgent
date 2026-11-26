@@ -97,6 +97,41 @@ async def test_web_boundary_validation_missing_key_and_static_allowlist(tmp_path
         assert not service.store.snapshot()["runs"]
 
 
+async def test_web_reverse_proxy_host_allowlist_and_https_origin(tmp_path):
+    """A named public host passes the boundary; only its own https origin may write."""
+    app = create_app(
+        Config(home=tmp_path / "web", api_key=None),
+        allowed_hosts=["vagent.example.com", "Demo.Example.com:8443"],
+    )
+    async with app.router.lifespan_context(app):
+        async with httpx.AsyncClient(
+            transport=httpx.ASGITransport(app=app), base_url="http://vagent.example.com"
+        ) as client:
+            token = (await client.get("/api/session-token")).json()["token"]
+            assert (await client.get("/api/health")).status_code == 200
+            # The Host header is matched case-insensitively, loopback stays allowed.
+            upper = await client.get("/api/health", headers={"Host": "VAGENT.example.com"})
+            assert upper.status_code == 200
+            assert (await client.get("/api/health", headers={"Host": "127.0.0.1:3210"})).status_code == 200
+            # An unlisted host is still refused.
+            other = await client.get("/api/session-token", headers={"Host": "attacker.example.com"})
+            assert other.status_code == 403 and other.json()["error"]["code"] == "HOST_DENIED"
+            # TLS terminates at the proxy, so the https origin of the same host is accepted.
+            created = await client.post(
+                "/api/sessions",
+                json={},
+                headers={"Origin": "https://vagent.example.com", "X-CSRF-Token": token},
+            )
+            assert created.status_code == 201, created.text
+            # Another origin — even another allowed host — cannot write to this one.
+            for origin in ("https://evil.example.com", "http://demo.example.com:8443"):
+                denied = await client.post(
+                    "/api/sessions", json={}, headers={"Origin": origin, "X-CSRF-Token": token}
+                )
+                assert denied.status_code == 403, origin
+                assert denied.json()["error"]["code"] == "ORIGIN_DENIED"
+
+
 async def test_web_stop_resume_and_busy_share_original_budget(tmp_path):
     entered = asyncio.Event()
     hold = True
