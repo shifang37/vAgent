@@ -15,7 +15,7 @@
 | CLI | `vagent season show|save`（离线、无 Key、无 Job；`--expected-revision` 做乐观并发，`--request-id` 重放） |
 | HTTP / Web | `GET /api/seasons?projectId=`、`GET /api/seasons/{id}?projectId=`、`POST /api/sessions/{id}/seasons/save`；侧栏「季」面板支持季选择、新建、标题编辑、按点击顺序选择 1–4 集与保存，`web/season-state.js` 为纯投影并有 7 项 Node 测试 |
 | 迁移与兼容 | 打开旧库仍按 v1–v8 逐级机械升级；`DatabaseV9` 的 `batches`/`timelines` 为 JSON 对象集合，E1 保持为空，E2/E3 再各自注册域校验器，避免 v9 信封再次改形 |
-| 验收文档 | 本文件；[M7 契约](./M7_CONTRACTS.md)、[M5 计划](./M5_PLAN.md)、[M1 计划](../M1_PLAN.md)、[README](../README.md) 与 [Harness 设计](../AGENT_HARNESS_DESIGN.md) 已同步 |
+| 验收文档 | 本文件；[M7 契约](./M7_CONTRACTS.md)、[M5 计划](./M5_PLAN.md)、[M1 计划](./M1_PLAN.md)、[README](../README.md) 与 [Harness 设计](./AGENT_HARNESS_DESIGN.md) 已同步 |
 
 ## 2. schema 9 与迁移证据
 

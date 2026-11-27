@@ -254,7 +254,7 @@ scripts/    evaluate_m*.py 离线验收套件、capture_m*_baseline.py 基线快
 tests/      137 个 pytest 文件与 10 个 Node 状态测试
 ```
 
-设计依据见 [产品设计](./DESIGN.md)、[Agent 选型与 Harness 设计](./AGENT_HARNESS_DESIGN.md) 与 [M1 实施计划](./M1_PLAN.md)。
+设计依据见 [产品设计](./docs/DESIGN.md)、[Agent 选型与 Harness 设计](./docs/AGENT_HARNESS_DESIGN.md) 与 [M1 实施计划](./docs/M1_PLAN.md)。
 
 ## 开发与验证
 
@@ -283,7 +283,7 @@ node --test tests/test_job_state.mjs          # 其余 9 个 *-state 测试同�
 |---|---|
 | 分发 | [DISTRIBUTION](./docs/DISTRIBUTION.md)（安装渠道、发版流程、校验和、平台边界） |
 | 使用手册 | [USER_GUIDE](./docs/USER_GUIDE.md)（CLI 细节、headless、恢复、用量、Redis、Skills、数据兼容）· [Web 说明](./web/README.md) · [MCP 接入](./docs/MCP.md) |
-| 设计 | [DESIGN](./DESIGN.md) · [AGENT_HARNESS_DESIGN](./AGENT_HARNESS_DESIGN.md) · [M1_PLAN](./M1_PLAN.md) |
+| 设计 | [DESIGN](./docs/DESIGN.md) · [AGENT_HARNESS_DESIGN](./docs/AGENT_HARNESS_DESIGN.md) · [M1_PLAN](./docs/M1_PLAN.md) |
 | 计划 | [M1-B](./docs/M1B_PLAN.md) · [M1-C](./docs/M1C_PLAN.md) · [M2](./docs/M2_PLAN.md) · [M3](./docs/M3_PLAN.md) · [M5](./docs/M5_PLAN.md) · [M8](./docs/M8_PLAN.md) · [M9](./docs/M9_PLAN.md) · [两 Key 直用](./docs/KEYS_ONLY_PLAN.md) · [Harness 缺陷修复](./docs/HARNESS_REVIEW_FIX_PLAN.md) |
 | 契约 | [M1-B](./docs/M1B_CONTRACTS.md) · [M1-C](./docs/M1C_CONTRACTS.md) · [M2](./docs/M2_CONTRACTS.md) · [M3](./docs/M3_CONTRACTS.md) · [M5](./docs/M5_CONTRACTS.md) · [M6](./docs/M6_CONTRACTS.md) · [M7](./docs/M7_CONTRACTS.md) · [M8](./docs/M8_CONTRACTS.md) · [M9](./docs/M9_CONTRACTS.md) |
 | 阶段验收 | [M1-A](./docs/M1A_ACCEPTANCE.md) · [M1-B](./docs/M1B_ACCEPTANCE.md) · [M1-C](./docs/M1C_ACCEPTANCE.md) · [M2](./docs/M2_ACCEPTANCE.md) · [M3](./docs/M3_ACCEPTANCE.md) · [M4](./docs/M4_NORMALIZATION.md) · [M5](./docs/M5_E4_ACCEPTANCE.md) · [M6](./docs/M6_E4_ACCEPTANCE.md) · [M7](./docs/M7_ACCEPTANCE.md) · [M8](./docs/M8_ACCEPTANCE.md) · [K3](./docs/KEYS_ONLY_K3_ACCEPTANCE.md) |

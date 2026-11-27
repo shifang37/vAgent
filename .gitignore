@@ -64,5 +64,9 @@ Desktop.ini
 # Local planning notes: kept out of the repository
 /docs/AGENT_HARNESS_GAP_PLAN.md
 
+# Ad-hoc test workspaces and probe stores left by local test runs
 pytest-of-shifang37/
 .pytest-tmp/
+.pytest-*/
+.baseline-tmp*/
+.pt-*/

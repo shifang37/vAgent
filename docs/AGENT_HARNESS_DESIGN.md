@@ -1,16 +1,16 @@
 # vagent Agent 选型与 Harness 设计
 
 > 日期：2026-09-30
-> 状态：已按求职项目目标选择 LangGraph 自主设计 Harness；第一部分实现与验证状态见 [README](./README.md)。本文其余能力为逐步实施的设计目标。  
+> 状态：已按求职项目目标选择 LangGraph 自主设计 Harness；第一部分实现与验证状态见 [README](../README.md)。本文其余能力为逐步实施的设计目标。  
 > 产品定位：以 DeepSeek 为决策模型的视频创作 Agent。先建立可独立运行的 Agent，再为它接入视频生成能力。
 
-当前原型已交付 Agent 循环、项目记忆、版本化产物、基础执行护栏、上下文裁剪、Skills、SQLite 持久图检查点和显式恢复，以及 M1 验收完成的模拟与真实单镜头视频链路（含本地媒体交付）。上下文预算暂以 UTF-8 序列化字节数衡量；2026-10-17 已完成 M2 的 D0–D4（结构化分镜、多镜头生成与逐镜头重做、素材库、用量统计、分镜工作台、离线端到端套件与真实成本受控双镜头联调，见 [M2 任务规划](./docs/M2_PLAN.md) 与 [M2 验收](./docs/M2_ACCEPTANCE.md)）；其余能力仍属逐步实施的设计目标，不能把下文全部视为已实现。恢复行为及限制见 [持久恢复验收](./docs/RECOVERY_ACCEPTANCE.md)。
+当前原型已交付 Agent 循环、项目记忆、版本化产物、基础执行护栏、上下文裁剪、Skills、SQLite 持久图检查点和显式恢复，以及 M1 验收完成的模拟与真实单镜头视频链路（含本地媒体交付）。上下文预算暂以 UTF-8 序列化字节数衡量；2026-10-17 已完成 M2 的 D0–D4（结构化分镜、多镜头生成与逐镜头重做、素材库、用量统计、分镜工作台、离线端到端套件与真实成本受控双镜头联调，见 [M2 任务规划](M2_PLAN.md) 与 [M2 验收](M2_ACCEPTANCE.md)）；其余能力仍属逐步实施的设计目标，不能把下文全部视为已实现。恢复行为及限制见 [持久恢复验收](RECOVERY_ACCEPTANCE.md)。
 
-已补齐 [模型与缓存用量观测](./docs/USAGE_ACCEPTANCE.md) 和 [上下文 v2 优化](./docs/CONTEXT_OPTIMIZATION_ACCEPTANCE.md)：固定规则、Skill 元信息位于动态项目事实之前，工具定义保持确定性顺序，JSON 去除冗余空白，并保留旧检查点的上下文格式。真实缓存命中收益待 API 联调验证。
+已补齐 [模型与缓存用量观测](USAGE_ACCEPTANCE.md) 和 [上下文 v2 优化](CONTEXT_OPTIMIZATION_ACCEPTANCE.md)：固定规则、Skill 元信息位于动态项目事实之前，工具定义保持确定性顺序，JSON 去除冗余空白，并保留旧检查点的上下文格式。真实缓存命中收益待 API 联调验证。
 
 ## 1. 设计目标
 
-任务四已交付可选 [Redis 回答缓存](./docs/REDIS_CACHE_ACCEPTANCE.md)：仅在显式只读模式缓存精确匹配的最终文本，命中不请求模型；工具写权限由代码移除，状态变化自然失效，故障回退并保留现有检查点恢复机制。
+任务四已交付可选 [Redis 回答缓存](REDIS_CACHE_ACCEPTANCE.md)：仅在显式只读模式缓存精确匹配的最终文本，命中不请求模型；工具写权限由代码移除，状态变化自然失效，故障回退并保留现有检查点恢复机制。
 
 只配置 DeepSeek API Key，就能让 Agent 理解创作需求，读取项目状态，自主选择工具，保存创作方案，根据真实工具结果继续行动，并在用户反馈后修改已有产物。
 
@@ -131,7 +131,7 @@ AgentRunner ── ContextBuilder ── RunPolicy
 
 限额由配置决定。停止时保留已完成产物并说明未完成部分；用户主动继续可以创建关联的新 Run，不能自动重置预算无限执行。收尾轮只在本次执行已经产生成功写副作用时生效一次，恢复后不会重复；只读步骤不触发收尾轮，仍按原错误码结束。
 
-> **实现状态（2026-11-04 核对）**：参数纠错上限已实现——连续两次相同 Schema 错误即停止（`SCHEMA_FEEDBACK_LIMIT`）；只读工具的「有限重试」当前不做自动重试，回退为显式恢复。逐项决策见 [H0 落差收口验收](./docs/AGENT_HARNESS_H0_ACCEPTANCE.md)。
+> **实现状态（2026-11-04 核对）**：参数纠错上限已实现——连续两次相同 Schema 错误即停止（`SCHEMA_FEEDBACK_LIMIT`）；只读工具的「有限重试」当前不做自动重试，回退为显式恢复。逐项决策见 [H0 落差收口验收](AGENT_HARNESS_H0_ACCEPTANCE.md)。
 
 ## 5. 首批工具与真实 Agent 验收任务
 
@@ -200,7 +200,7 @@ created → running → completed
              └── failed           # 错误或预算耗尽，带明确原因
 ```
 
-“继续”针对可恢复检查点；新需求或回复追问建立新 Run。用户停止后，不能因 Job 回调而自动重启被停止的 Agent。 `waiting_user` 不作为独立状态：追问即一次正常完成的 Run，其后的回答建立新 Run（见 [H0 落差收口验收](./docs/AGENT_HARNESS_H0_ACCEPTANCE.md)）。
+“继续”针对可恢复检查点；新需求或回复追问建立新 Run。用户停止后，不能因 Job 回调而自动重启被停止的 Agent。 `waiting_user` 不作为独立状态：追问即一次正常完成的 Run，其后的回答建立新 Run（见 [H0 落差收口验收](AGENT_HARNESS_H0_ACCEPTANCE.md)）。
 
 ### 7.2 工具执行记录
 
@@ -222,11 +222,11 @@ created → running → completed
 
 日志记录模型名、调用步数、Token 用量、耗时、错误码及工具摘要；不记录 Key，不默认上传到第三方观测服务。
 
-当前已实现每次模型适配器调用的持久用量记录与 `vagent usage` 查询，包含 DeepSeek 缓存命中/未命中 Token、耗时、调用状态和按 Token 加权的命中率。缺失用量保持未知，恢复保留原记录与总量；这是本地用量观测，不包含服务商价格换算。字段和验证口径见 [用量观测验收](./docs/USAGE_ACCEPTANCE.md)。
+当前已实现每次模型适配器调用的持久用量记录与 `vagent usage` 查询，包含 DeepSeek 缓存命中/未命中 Token、耗时、调用状态和按 Token 加权的命中率。缺失用量保持未知，恢复保留原记录与总量；这是本地用量观测，不包含服务商价格换算。字段和验证口径见 [用量观测验收](USAGE_ACCEPTANCE.md)。
 
 ## 8. 与视频生成结合
 
-2026-10-10 已完成 M1-B 的 B0–B5：契约、持久 Job/Mock Worker、视频工具、生产等待/恢复、CLI/Web 与阶段验收。Runner 只处理通用延迟结果与原调用交付，领域解析器提供具体结果；SQLite 中断、JSON 等待与模型尝试边界均有重启补偿，见 [契约协议](./docs/M1B_CONTRACTS.md) 和 [B3 验收](./docs/M1B_B3_ACCEPTANCE.md)。应用生命周期、完整离线矩阵、5/5 真实 DeepSeek + Mock 套件及独立 wheel 已通过 [M1-B 验收](./docs/M1B_ACCEPTANCE.md)；当前状态以 README 为准。
+2026-10-10 已完成 M1-B 的 B0–B5：契约、持久 Job/Mock Worker、视频工具、生产等待/恢复、CLI/Web 与阶段验收。Runner 只处理通用延迟结果与原调用交付，领域解析器提供具体结果；SQLite 中断、JSON 等待与模型尝试边界均有重启补偿，见 [契约协议](M1B_CONTRACTS.md) 和 [B3 验收](M1B_B3_ACCEPTANCE.md)。应用生命周期、完整离线矩阵、5/5 真实 DeepSeek + Mock 套件及独立 wheel 已通过 [M1-B 验收](M1B_ACCEPTANCE.md)；当前状态以 README 为准。
 
 ### 8.1 先设计并模拟的接口
 
@@ -286,7 +286,7 @@ class CancellableProvider(Protocol):
 
 ### 8.5 M2 多镜头工作流（D0 冻结）
 
-M2 在 M1 之上加入结构化分镜、多镜头生成、逐镜头重做、图生视频与素材库。工具与版本冻结为 `toolsVersion/rulesVersion=4/4`、能力版本 `wan27-shot-beijing-v2`、`adapterVersion=wan-http-v2`；数据对象、迁移、费用护栏、确认流程与集合等待语义见 [M2 契约](./docs/M2_CONTRACTS.md)。
+M2 在 M1 之上加入结构化分镜、多镜头生成、逐镜头重做、图生视频与素材库。工具与版本冻结为 `toolsVersion/rulesVersion=4/4`、能力版本 `wan27-shot-beijing-v2`、`adapterVersion=wan-http-v2`；数据对象、迁移、费用护栏、确认流程与集合等待语义见 [M2 契约](M2_CONTRACTS.md)。
 
 | 工具 | 行为 |
 |---|---|
@@ -297,14 +297,14 @@ M2 在 M1 之上加入结构化分镜、多镜头生成、逐镜头重做、图�
 | `asset_read` | 只读列出素材库参考图元数据（assetId、来源项目、格式、尺寸、导入时间）；不含路径、私有 URL 与指纹，也不能导入或删除 |
 | `await_job` | 接受 `jobIds` 集合，一次登记等待，返回逐镜头结果与失败摘要；单元素等价 M1-C |
 
-**D1 实现状态（2026-10-16）**：schema v4 与 `storyboards`/`assets` 集合、分镜域模型（稳定 Shot ID、只增不改版本、素材引用校验）与 `storyboard_read`/`storyboard_save` 已在 mock 视图按 4/4 工具与规则版本实现；`executionVersion=3` 引入，1/2 保持原恢复路径，pre-M2 Run 按记录的 toolFeatures 还原原工具集并保持签名逐字节不变。`shot_generate`、集合等待与 live 的 4/4 协议按 D2 实施（live 暂保持 3/3）。迁移夹具、签名与回归证据见 [D1 验收](./docs/M2_D1_ACCEPTANCE.md)。
+**D1 实现状态（2026-10-16）**：schema v4 与 `storyboards`/`assets` 集合、分镜域模型（稳定 Shot ID、只增不改版本、素材引用校验）与 `storyboard_read`/`storyboard_save` 已在 mock 视图按 4/4 工具与规则版本实现；`executionVersion=3` 引入，1/2 保持原恢复路径，pre-M2 Run 按记录的 toolFeatures 还原原工具集并保持签名逐字节不变。`shot_generate`、集合等待与 live 的 4/4 协议按 D2 实施（live 暂保持 3/3）。迁移夹具、签名与回归证据见 [D1 验收](M2_D1_ACCEPTANCE.md)。
 
-**D2/D3 实现状态（2026-10-17）**：D2 交付多镜头批量原子登记、三重上限与额度快照、集合等待（execution v3 的 `jobset` 绑定）、部分失败隔离、逐镜头重做，并把 live 切换到 4/4 与 `wan27-shot-beijing-v2`（`wan-http-v2`，受控 HTTP）. D3 在同一 4/4 版本内新增只读素材工具 `asset_read`、素材库导入/读取接口与文件恢复、用量聚合读取侧、以及 CLI（`storyboard show`、`shots redo`、`assets list|import`、`usage --project`）与 Web 分镜界面（分镜面板、批量确认、序列连播、素材库页、用量面板）；显式用户动作使用独立的“客户端 Run”，不占用对话 Run 的 latest 与额度。由于 M2 视图在 4/4 内新增工具，D2 构建录制的 M2 Run 不承诺跨 D3 恢复（显式恢复返回 `RESUME_CONFIG_CHANGED`，与 D1 记录的边界一致；D2 签名哈希保存在 `tests/test_m2_compatibility.py`），`for_execution_version(1/2/3)` 继续排除全部 M2 工具，pre-M2 签名逐字节不变。证据见 [D2 验收](./docs/M2_D2_ACCEPTANCE.md)与 [D3 验收](./docs/M2_D3_ACCEPTANCE.md)。
-**D4 实现状态（2026-10-17）**：新增 `scripts/evaluate_m2.py`（默认离线的 M2 端到端套件：live 模式 + 受控上游 + 本地测试媒体 + 加速夹具时钟，7 用例）与 `tests/test_m2_evaluation.py`；`scripts/wheel_smoke.py` 扩展到安装态 M2 工作台（分镜/素材 CLI 与 HTTP 面）与离线套件。D4 未改动任何工具签名、规则文本、执行/上下文版本、能力版本、价格、来源策略或校验版本——只新增脚本与测试，因此 D3 记录的恢复边界与 pre-M2 逐字节签名证据保持不变。证据见 [M2 验收](./docs/M2_ACCEPTANCE.md)。D4 亦完成真实成本受控多镜头联调：一次登记两个镜头、集合等待后逐镜头本地交付，随后一次显式单镜头重做，共 3 次提交、9.00 CNY 估算，结果主机仍在 `wan-result-hosts-v2` 内；i2v/首尾帧与镜头延长未做真实样本。
+**D2/D3 实现状态（2026-10-17）**：D2 交付多镜头批量原子登记、三重上限与额度快照、集合等待（execution v3 的 `jobset` 绑定）、部分失败隔离、逐镜头重做，并把 live 切换到 4/4 与 `wan27-shot-beijing-v2`（`wan-http-v2`，受控 HTTP）. D3 在同一 4/4 版本内新增只读素材工具 `asset_read`、素材库导入/读取接口与文件恢复、用量聚合读取侧、以及 CLI（`storyboard show`、`shots redo`、`assets list|import`、`usage --project`）与 Web 分镜界面（分镜面板、批量确认、序列连播、素材库页、用量面板）；显式用户动作使用独立的“客户端 Run”，不占用对话 Run 的 latest 与额度。由于 M2 视图在 4/4 内新增工具，D2 构建录制的 M2 Run 不承诺跨 D3 恢复（显式恢复返回 `RESUME_CONFIG_CHANGED`，与 D1 记录的边界一致；D2 签名哈希保存在 `tests/test_m2_compatibility.py`），`for_execution_version(1/2/3)` 继续排除全部 M2 工具，pre-M2 签名逐字节不变。证据见 [D2 验收](M2_D2_ACCEPTANCE.md)与 [D3 验收](M2_D3_ACCEPTANCE.md)。
+**D4 实现状态（2026-10-17）**：新增 `scripts/evaluate_m2.py`（默认离线的 M2 端到端套件：live 模式 + 受控上游 + 本地测试媒体 + 加速夹具时钟，7 用例）与 `tests/test_m2_evaluation.py`；`scripts/wheel_smoke.py` 扩展到安装态 M2 工作台（分镜/素材 CLI 与 HTTP 面）与离线套件。D4 未改动任何工具签名、规则文本、执行/上下文版本、能力版本、价格、来源策略或校验版本——只新增脚本与测试，因此 D3 记录的恢复边界与 pre-M2 逐字节签名证据保持不变。证据见 [M2 验收](M2_ACCEPTANCE.md)。D4 亦完成真实成本受控多镜头联调：一次登记两个镜头、集合等待后逐镜头本地交付，随后一次显式单镜头重做，共 3 次提交、9.00 CNY 估算，结果主机仍在 `wan-result-hosts-v2` 内；i2v/首尾帧与镜头延长未做真实样本。
 
 ### 8.6 M3 成片、多供应商与 headless（E0 冻结，E1–E4 已实施）
 
-2026-10-21 完成 E0，实施契约见 [M3 契约](./docs/M3_CONTRACTS.md)，研究和合成证据见 [E0 验收](./docs/M3_E0_ACCEPTANCE.md)。E0 仅冻结要求与基线；**E1–E4 已按下列规则实施**（见 [E1 验收](./docs/M3_E1_ACCEPTANCE.md)、[E2 验收](./docs/M3_E2_ACCEPTANCE.md)、[E3 验收](./docs/M3_E3_ACCEPTANCE.md) 与 [M3 验收](./docs/M3_ACCEPTANCE.md)），视频 submit=0。E4 的端到端验收修复了 `film_assemble` 的 Runner 执行上下文、`film-state.js` 静态资源、设置页供应商切换与 AAC `esds` 码率归一化四个缺陷；新增付费样本未执行。
+2026-10-21 完成 E0，实施契约见 [M3 契约](M3_CONTRACTS.md)，研究和合成证据见 [E0 验收](M3_E0_ACCEPTANCE.md)。E0 仅冻结要求与基线；**E1–E4 已按下列规则实施**（见 [E1 验收](M3_E1_ACCEPTANCE.md)、[E2 验收](M3_E2_ACCEPTANCE.md)、[E3 验收](M3_E3_ACCEPTANCE.md) 与 [M3 验收](M3_ACCEPTANCE.md)），视频 submit=0。E4 的端到端验收修复了 `film_assemble` 的 Runner 执行上下文、`film-state.js` 静态资源、设置页供应商切换与 AAC `esds` 码率归一化四个缺陷；新增付费样本未执行。
 
 E1 新增 `Film`/只增不改的 `FilmVersion`，以分镜当前版本与最新已交付 ShotVersion 的有序快照生成本地成片；缺失或未完成镜头整体拒绝。`film_assemble` 为可取消的本地异步写工具：锁内取快照与登记意图，锁外执行受限子进程，锁内复核来源 revision/哈希并原子登记版本、FilmMedia 与完成操作。不能在现有同步工具锁内运行 FFmpeg。它不创建 generation Job、不增加 submit；`film_read` 只读。schema v5 仅新增空 `films` 与外壳版本，旧记录不补字段；`media` 使用独立 FilmMedia union 分支，禁止伪造生成 Job。
 
@@ -322,7 +322,7 @@ E3 headless 复用 ApplicationService/Runner/Store 与原等待/恢复机制：�
 
 ### 8.7 M6 成片后期（E0 冻结，E1–E4 已实施）
 
-M6 契约见 [M6 契约](./docs/M6_CONTRACTS.md)，E0 基线与 FFmpeg 能力见 [E0 验收](./docs/M6_E0_ACCEPTANCE.md)；**E1（字幕）与 E2（音频）已于 2026-10-22 实施，E3（转场/标题卡/整集/导出）与 E4（整集成片验收）已于 2026-10-23 实施**，证据见 [E1 验收](./docs/M6_E1_ACCEPTANCE.md)、[E2 验收](./docs/M6_E2_ACCEPTANCE.md)、[E3 验收](./docs/M6_E3_ACCEPTANCE.md) 与 [E4 验收](./docs/M6_E4_ACCEPTANCE.md)，视频 submit=0、模型调用=0、TTS 真实请求=0。
+M6 契约见 [M6 契约](M6_CONTRACTS.md)，E0 基线与 FFmpeg 能力见 [E0 验收](M6_E0_ACCEPTANCE.md)；**E1（字幕）与 E2（音频）已于 2026-10-22 实施，E3（转场/标题卡/整集/导出）与 E4（整集成片验收）已于 2026-10-23 实施**，证据见 [E1 验收](M6_E1_ACCEPTANCE.md)、[E2 验收](M6_E2_ACCEPTANCE.md)、[E3 验收](M6_E3_ACCEPTANCE.md) 与 [E4 验收](M6_E4_ACCEPTANCE.md)，视频 submit=0、模型调用=0、TTS 真实请求=0。
 
 E1 的边界选择：
 
@@ -340,7 +340,7 @@ E2（音频）的边界选择：
 
 ### 8.8 M7 多集与工作台（E0 冻结，E1–E4 已交付）
 
-M7 契约见 [M7 契约](./docs/M7_CONTRACTS.md)，E0 基线与本地裁剪探针见 [E0 验收](./docs/M7_E0_ACCEPTANCE.md) 与 `docs/M7_E0_BASELINE.json`。**E0 只冻结要求与基线，不改产品代码：视频 submit=0、模型调用=0、TTS 请求=0。** E1 已交付（见 [E1 验收](./docs/M7_E1_ACCEPTANCE.md)）：schema 9 三个空集合与 v8→v9 逐字节备份、`Season`/`SeasonVersion`、`season_save`/`season_read`、tools/rules 15/15（冻结 13/13）、CLI/Web 季面板。E2 已交付（见 [E2 验收](./docs/M7_E2_ACCEPTANCE.md)）：`Batch`/`BatchEpisode`、`season_generate`、逐集独立事务与失败隔离、显式 `resumeBatchId` 恢复、Store 崩溃恢复、CLI/Web 批量确认与恢复，tools/rules 16/16（冻结 15/15）。E3 已交付（见 [E3 验收](./docs/M7_E3_ACCEPTANCE.md)）：`Timeline`/`TimelineVersion`/`TimelineClip`/`TimelineTransition`/`TimelineSubtitleRef`/`TimelineAudioTrack`/`TimelineTitleCard`、`timeline_save`/`timeline_read`、`film_render` 的 `timeline` scope、`ffmpeg-render-timeline-v1`、`timeline-subtitle-remap-v1`、客户端 BGM/SFX 导入、CLI/HTTP/Web 工作台，tools/rules 18/18（冻结 16/16）。**E4 已验收（见 [M7 验收](./docs/M7_ACCEPTANCE.md)）**：`scripts/evaluate_m7.py` 默认离线覆盖 3 集批次/失败隔离/恢复、时间线 v1→v2 重拼、字幕 1.4 秒精确重映射、过期与非法编辑拒绝；`tests/test_m7_evaluation.py` 4 项；受控 Chrome 完成编辑/预览/导出；`scripts/wheel_smoke.py` 追加安装态 M7 套件与季/时间线工作台。既有 165 个契约模型哈希只有 E3 声明的传递 `$defs` 漂移；E4 不改模型、工具面与规则，视频 submit=0、模型调用=0、TTS 请求=0。
+M7 契约见 [M7 契约](M7_CONTRACTS.md)，E0 基线与本地裁剪探针见 [E0 验收](M7_E0_ACCEPTANCE.md) 与 `docs/M7_E0_BASELINE.json`。**E0 只冻结要求与基线，不改产品代码：视频 submit=0、模型调用=0、TTS 请求=0。** E1 已交付（见 [E1 验收](M7_E1_ACCEPTANCE.md)）：schema 9 三个空集合与 v8→v9 逐字节备份、`Season`/`SeasonVersion`、`season_save`/`season_read`、tools/rules 15/15（冻结 13/13）、CLI/Web 季面板。E2 已交付（见 [E2 验收](M7_E2_ACCEPTANCE.md)）：`Batch`/`BatchEpisode`、`season_generate`、逐集独立事务与失败隔离、显式 `resumeBatchId` 恢复、Store 崩溃恢复、CLI/Web 批量确认与恢复，tools/rules 16/16（冻结 15/15）。E3 已交付（见 [E3 验收](M7_E3_ACCEPTANCE.md)）：`Timeline`/`TimelineVersion`/`TimelineClip`/`TimelineTransition`/`TimelineSubtitleRef`/`TimelineAudioTrack`/`TimelineTitleCard`、`timeline_save`/`timeline_read`、`film_render` 的 `timeline` scope、`ffmpeg-render-timeline-v1`、`timeline-subtitle-remap-v1`、客户端 BGM/SFX 导入、CLI/HTTP/Web 工作台，tools/rules 18/18（冻结 16/16）。**E4 已验收（见 [M7 验收](M7_ACCEPTANCE.md)）**：`scripts/evaluate_m7.py` 默认离线覆盖 3 集批次/失败隔离/恢复、时间线 v1→v2 重拼、字幕 1.4 秒精确重映射、过期与非法编辑拒绝；`tests/test_m7_evaluation.py` 4 项；受控 Chrome 完成编辑/预览/导出；`scripts/wheel_smoke.py` 追加安装态 M7 套件与季/时间线工作台。既有 165 个契约模型哈希只有 E3 声明的传递 `$defs` 漂移；E4 不改模型、工具面与规则，视频 submit=0、模型调用=0、TTS 请求=0。
 
 E1 的实现边界：
 
@@ -382,17 +382,17 @@ E3 的实现边界：
 
 ### 8.9 M8 供应商路由、账单与发布（E0–E4 已完成，v0.6.0）
 
-M8 契约见 [M8 契约](./docs/M8_CONTRACTS.md)，E0 基线与路由探针见 [E0 验收](./docs/M8_E0_ACCEPTANCE.md) 与 `docs/M8_E0_BASELINE.json`。**E0 只冻结要求与基线，不改产品代码：视频 submit=0、模型调用=0、TTS 请求=0、凭据读取=0。** M8 不扩产品域：**不新增 schema、不新增工具、不改已冻结的成片/时间线/分集语义**，工具面保持 18/18、存储保持 schema 9、**168 个契约模型哈希与 `capabilitiesSha256` 全程不变**。
+M8 契约见 [M8 契约](M8_CONTRACTS.md)，E0 基线与路由探针见 [E0 验收](M8_E0_ACCEPTANCE.md) 与 `docs/M8_E0_BASELINE.json`。**E0 只冻结要求与基线，不改产品代码：视频 submit=0、模型调用=0、TTS 请求=0、凭据读取=0。** M8 不扩产品域：**不新增 schema、不新增工具、不改已冻结的成片/时间线/分集语义**，工具面保持 18/18、存储保持 schema 9、**168 个契约模型哈希与 `capabilitiesSha256` 全程不变**。
 
 实现边界：
 
-- **路由预览（E1，已交付）**：新建 `routing.py`（`provider-route-v1`：`RouteRequest`/`RouteCandidate`/`RoutePreview`），输入支持「按分镜」与「按规格」两种形式、`scope ∈ {shot, episode, batch}`，输出**每个供应商一行**（wan 的两条条目按模式选一条）。不可用原因按固定优先级复用既有错误码（`VIDEO_MODE_OFF` → `VIDEO_PROVIDER_UNAVAILABLE` → `VIDEO_KEY_MISSING` → `VIDEO_UNSUPPORTED_MODE` → `VIDEO_UNSUPPORTED_SPEC` → `VIDEO_PRICE_UNKNOWN` → `EPISODE_COST_LIMIT` → `VIDEO_COST_LIMIT`，即环境→凭据→能力→价格→记账）；只有「请求本身不可回答」才用新码 `ROUTE_UNAVAILABLE`。排序键 =（可用、币种 CNY→USD、金额、wan→kling→fal），**跨币种只并列展示，不比较也不合计**；预览无时钟、无随机，同一输入逐字节相同，E1 必须复现基线的 `routeProbe.rowsSha256`。末级必须核对**有效单 Job 上限**，否则会推荐登记必被 `VIDEO_COST_LIMIT` 拒绝的报价（默认 3.00 CNY 下 wan 的 10 秒即如此）。三个面（`vagent route preview`、`GET /api/route/preview`、Web 报价对比面板）共用同一个纯函数，**不作为模型工具**。E1 实现（[验收](./docs/M8_E1_ACCEPTANCE.md)）：`routing.py` 与 `application.py` 的 `route_preview`、CLI、HTTP、`web/route-state.js` + 分镜/分集面板对话框；按分镜请求的 `mode/durationSeconds/aspectRatio` 回显为 `null`，金额为逐镜头报价之和（跨条目时 `notes` 注明行内取第一个镜头的 `model/priceVersion`）；`reason` 优先级与「quote 全有或全无」在模块内实现；真实预览复现 `rowsSha256 = 3817d191…`，63 项后端 + 6 项前端用例，工具面/schema/168 个模型哈希不变。
-- **账单（E2，已交付）**：`billing.py` + `home/billing.json` 侧车账本（`billing-v1`），**不进 `state.json`**，因此 `DatabaseV9` 与 168 个模型哈希不动；只接受已终态 Job 的手工 reported actual，币种必须等于冻结报价，`unknown` 保持 `unknown` 且绝不计 0；一条记录 = 一次原子替换，相同内容重放 `replayed=true`，金额/币种/日期/来源不同则 `BILL_CONFLICT`，非法/在途/超限为 `BILL_RECORD_INVALID`，账本损坏复用 `INVALID_STORE` 并保留原文件。`usage` 追加按币种分列的 `billing` 块，`cost` 仍是 CNY 历史口径。E2 实现（[验收](./docs/M8_E2_ACCEPTANCE.md)）：`record_bill`/`read_ledger`/`summarize_billing`/`ledger_view`、`vagent usage bill record|show`、`POST/GET /api/usage/bill`（CSRF + `confirm=true`，冲突 409）、Web 用量面板账单区与 `web/bill-state.js`；`≤4096 条/项目`、`≤4 MB`，`invoicedOn` 默认注入时钟的当日，幂等只看业务字段（不含 `recordedAt`/`revision`）。
+- **路由预览（E1，已交付）**：新建 `routing.py`（`provider-route-v1`：`RouteRequest`/`RouteCandidate`/`RoutePreview`），输入支持「按分镜」与「按规格」两种形式、`scope ∈ {shot, episode, batch}`，输出**每个供应商一行**（wan 的两条条目按模式选一条）。不可用原因按固定优先级复用既有错误码（`VIDEO_MODE_OFF` → `VIDEO_PROVIDER_UNAVAILABLE` → `VIDEO_KEY_MISSING` → `VIDEO_UNSUPPORTED_MODE` → `VIDEO_UNSUPPORTED_SPEC` → `VIDEO_PRICE_UNKNOWN` → `EPISODE_COST_LIMIT` → `VIDEO_COST_LIMIT`，即环境→凭据→能力→价格→记账）；只有「请求本身不可回答」才用新码 `ROUTE_UNAVAILABLE`。排序键 =（可用、币种 CNY→USD、金额、wan→kling→fal），**跨币种只并列展示，不比较也不合计**；预览无时钟、无随机，同一输入逐字节相同，E1 必须复现基线的 `routeProbe.rowsSha256`。末级必须核对**有效单 Job 上限**，否则会推荐登记必被 `VIDEO_COST_LIMIT` 拒绝的报价（默认 3.00 CNY 下 wan 的 10 秒即如此）。三个面（`vagent route preview`、`GET /api/route/preview`、Web 报价对比面板）共用同一个纯函数，**不作为模型工具**。E1 实现（[验收](M8_E1_ACCEPTANCE.md)）：`routing.py` 与 `application.py` 的 `route_preview`、CLI、HTTP、`web/route-state.js` + 分镜/分集面板对话框；按分镜请求的 `mode/durationSeconds/aspectRatio` 回显为 `null`，金额为逐镜头报价之和（跨条目时 `notes` 注明行内取第一个镜头的 `model/priceVersion`）；`reason` 优先级与「quote 全有或全无」在模块内实现；真实预览复现 `rowsSha256 = 3817d191…`，63 项后端 + 6 项前端用例，工具面/schema/168 个模型哈希不变。
+- **账单（E2，已交付）**：`billing.py` + `home/billing.json` 侧车账本（`billing-v1`），**不进 `state.json`**，因此 `DatabaseV9` 与 168 个模型哈希不动；只接受已终态 Job 的手工 reported actual，币种必须等于冻结报价，`unknown` 保持 `unknown` 且绝不计 0；一条记录 = 一次原子替换，相同内容重放 `replayed=true`，金额/币种/日期/来源不同则 `BILL_CONFLICT`，非法/在途/超限为 `BILL_RECORD_INVALID`，账本损坏复用 `INVALID_STORE` 并保留原文件。`usage` 追加按币种分列的 `billing` 块，`cost` 仍是 CNY 历史口径。E2 实现（[验收](M8_E2_ACCEPTANCE.md)）：`record_bill`/`read_ledger`/`summarize_billing`/`ledger_view`、`vagent usage bill record|show`、`POST/GET /api/usage/bill`（CSRF + `confirm=true`，冲突 409）、Web 用量面板账单区与 `web/bill-state.js`；`≤4096 条/项目`、`≤4 MB`，`invoicedOn` 默认注入时钟的当日，幂等只看业务字段（不含 `recordedAt`/`revision`）。
 - **提交节流（E2，已交付）**：`providers/gate.py` 增加逐 provider 提交最小间隔（默认 2.0 秒，2.0–60.0，本地设置只允许延长）与 429 冷却（默认 60 秒，60–900，`Retry-After` 上限 900 秒且只延长不缩短）；被挡住时**保持 `pending_submit`、不写 `submitAttempts`、不发请求**，只把 `PROVIDER_BACKOFF` 记进既有 `RuntimeBlock`（`stage=submit`），下一次真正提交时清空。**任何发送后的自动重投都不做**（含 429 与 `not_accepted`），连接失败仍归 `SUBMISSION_UNKNOWN`，M1-C 的「每 Job 至多一次提交、未知永不重投」逐字保留。冷却与间隔是内存态，重启归零只影响「再等一会」，不影响重投判定。两个新配置项为 `videoSubmitIntervalSeconds` 与 `videoRateLimitCooldownSeconds`；§5.1/§5.2 的映射落成 `SUBMIT_ERROR_TABLE`/`QUERY_ERROR_TABLE` 常量；查询侧 429 只推进 `nextPollAt`，不打开提交冷却。
 - **观测（E2，已交付）**：`usage` 只报可持久推导的指标（逐 provider Job 数/状态、`error.httpStatus==429` 的 429 次数、`unknown` 提交数）；提交/查询延迟（最近 64 样本 p50/p95）、退避次数与限流命中是进程内计数器，`GET /api/usage?runtime=1` 暴露且块内固定 `"durable": false`，不进账单与验收结论。
-- **真实样本（E3，已交付 2026-10-25）**：Kling 5 秒、fal 5 秒、CosyVoice 1 集与真实 DeepSeek 1 Run 需单独授权；本轮按授权只执行 CosyVoice 1 集（19 条台词 / 19 次请求 / 估算 0.0340 CNY，19 个 48 kHz WAV、FFmpeg 解码与 Range 206 通过）与真实 DeepSeek 1 Run（4 次模型调用、`episode_plan`→`episode_save`→`episode_read`、输入 96,617 / 输出 2,176 Token），Kling/fal 因缺凭据未执行（0 请求）。真实样本暴露并修复两个缺陷：CosyVoice 流式 WAV 占位长度（新增 `normalize_streaming_wav()`）与默认 64 KiB 预算装不下 18/18 工具面（`VAGENT_CONTEXT_BYTES` 默认升到 98304）。失败不重试、不换 provider、不改冻结表；「未做真实样本」是 `routing.py` 的静态标签，不是能力表字段，因此样本成败都不改 `capabilitiesSha256`。证据见 [E3 验收](./docs/M8_E3_ACCEPTANCE.md)。
+- **真实样本（E3，已交付 2026-10-25）**：Kling 5 秒、fal 5 秒、CosyVoice 1 集与真实 DeepSeek 1 Run 需单独授权；本轮按授权只执行 CosyVoice 1 集（19 条台词 / 19 次请求 / 估算 0.0340 CNY，19 个 48 kHz WAV、FFmpeg 解码与 Range 206 通过）与真实 DeepSeek 1 Run（4 次模型调用、`episode_plan`→`episode_save`→`episode_read`、输入 96,617 / 输出 2,176 Token），Kling/fal 因缺凭据未执行（0 请求）。真实样本暴露并修复两个缺陷：CosyVoice 流式 WAV 占位长度（新增 `normalize_streaming_wav()`）与默认 64 KiB 预算装不下 18/18 工具面（`VAGENT_CONTEXT_BYTES` 默认升到 98304）。失败不重试、不换 provider、不改冻结表；「未做真实样本」是 `routing.py` 的静态标签，不是能力表字段，因此样本成败都不改 `capabilitiesSha256`。证据见 [E3 验收](M8_E3_ACCEPTANCE.md)。
 - **结构**：新类型只进 `routing.py`/`billing.py`/`providers/gate.py` 与非哈希文件（`application.py`、`cli.py`、`web.py`、`jobs.py`、`worker.py`、`video/usage.py`、前端与文档）；这是「不新增 schema」在工程上可核对的形式，也是 E4 基线比对的硬门禁。E2 另有两处非哈希改动必须在 E4 复核时确认「只是接入」：`config.py` 的两个新配置项（§5.4 要求的新配置项只能落在 `Config`/`LocalSettings` 里）与 Kling/fal 适配器 submit 分支多传一个已解析的 `Retry-After`（错误码、`submission_outcome` 与状态机不变）。
-- **验收与发布（E4，已完成 2026-10-25）**：`scripts/evaluate_m8.py` 4 个离线用例——路由矩阵（18 行 × 三供应商、4 行冻结 `routeProbe` 逐字节复现）、拒绝矩阵（10 秒/图生/集级批量/缺 Key/过期价/未发布供应商/非法参数/`--require-available`）、账单与错误映射（受控 401/超时/429 与节流、`SUBMIT_ERROR_TABLE`/`QUERY_ERROR_TABLE`、录入/重放/冲突/替换/损坏账本、逐币种汇总）、重放不新增（预览逐字节相同、同 operationKey 只登记 1 个 Job、账单重放不写盘）。`tests/test_m8_evaluation.py` 4 项；受控 Chrome 覆盖报价对比（三行、9.00 CNY/1.26 USD/1.68 USD·12 units、推荐与「不换汇」）与账单面板（USD 已录入 0.60、CNY 未录入不计 0、第 2 版、重放提示）；安装态 wheel smoke 新增 M8 评估与 CLI/HTTP 三面。全程视频 submit=0、文本模型调用=0、TTS=0，未新增付费样本；168 个模型哈希、`contractsSha256`、`capabilitiesSha256`、工具/规则哈希与 `routeProbe.rowsSha256` 不变。证据见 [M8 验收](./docs/M8_ACCEPTANCE.md) 与 `output/m8-e4-suite.json`、`output/m8-e4-browser/`。
+- **验收与发布（E4，已完成 2026-10-25）**：`scripts/evaluate_m8.py` 4 个离线用例——路由矩阵（18 行 × 三供应商、4 行冻结 `routeProbe` 逐字节复现）、拒绝矩阵（10 秒/图生/集级批量/缺 Key/过期价/未发布供应商/非法参数/`--require-available`）、账单与错误映射（受控 401/超时/429 与节流、`SUBMIT_ERROR_TABLE`/`QUERY_ERROR_TABLE`、录入/重放/冲突/替换/损坏账本、逐币种汇总）、重放不新增（预览逐字节相同、同 operationKey 只登记 1 个 Job、账单重放不写盘）。`tests/test_m8_evaluation.py` 4 项；受控 Chrome 覆盖报价对比（三行、9.00 CNY/1.26 USD/1.68 USD·12 units、推荐与「不换汇」）与账单面板（USD 已录入 0.60、CNY 未录入不计 0、第 2 版、重放提示）；安装态 wheel smoke 新增 M8 评估与 CLI/HTTP 三面。全程视频 submit=0、文本模型调用=0、TTS=0，未新增付费样本；168 个模型哈希、`contractsSha256`、`capabilitiesSha256`、工具/规则哈希与 `routeProbe.rowsSha256` 不变。证据见 [M8 验收](M8_ACCEPTANCE.md) 与 `output/m8-e4-suite.json`、`output/m8-e4-browser/`。
 
 ## 9. 首版规模边界与演进条件
 
@@ -417,7 +417,7 @@ M1-A0 必须验证：DeepSeek Key 直连、文本流、工具参数增量组装�
 
 ## 11. 设计与实现落差核对（2026-11-04）
 
-对照 [H0 落差收口验收](./docs/AGENT_HARNESS_H0_ACCEPTANCE.md)：`waiting_user` 状态、运行级排队与
+对照 [H0 落差收口验收](AGENT_HARNESS_H0_ACCEPTANCE.md)：`waiting_user` 状态、运行级排队与
 `video_generate`/`shot_redo` 的 `confirm` 三项属**有意不实现**并在上文标注理由（改动会触及冻结的
 schema 或工具面）；参数纠错上限**已实现**。另登记四项本轨道新发现的落差：`run.failed`、
 `artifact.updated` 事件未发出、只读工具无自动重试、推理模式协议元数据保留未验证。

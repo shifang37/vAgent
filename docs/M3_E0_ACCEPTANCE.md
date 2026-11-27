@@ -15,7 +15,7 @@
 | 价格与上限 | Kling 5秒估算 0.560 USD 与 4 VIDEO_UNIT，默认每 Job 0.60 USD 且4 units、每 Run 2.40 USD 且16 units；fal 0.420 USD，每 Job 0.50 USD、每 Run 2.00 USD；Wan 3/12 CNY 不变，全 Run 新 Job 共享最多4个。仅冻结估算，实际账单 unknown，默认上限不构成消费授权 |
 | 来源与配置 | 新 provider 绑定认证任务完整 URL（含 path/query 指纹）、精确 origin 与策略，公网 DNS 校验并固定连接、禁重定向；Wan 静态允许集不变。新 Key 未有已核实免费鉴权接口时标注未验证，不套用 Wan 保存探测 |
 | headless / skills | 先 planned，再以 Run ID、计划指纹与逐桶预算确认固定集合，resume 复用原授权；默认只规划仍可能产生文本编排费用。用户 skills 合并内置根，显式替换根语义与 raw 哈希保留，不执行代码 |
-| 文档同步 | [M3_PLAN](./M3_PLAN.md)、[Harness §8.6](../AGENT_HARNESS_DESIGN.md)、[README](../README.md)、[M1_PLAN](../M1_PLAN.md) 已同步，未宣称生产成片或新 provider 已交付 |
+| 文档同步 | [M3_PLAN](./M3_PLAN.md)、[Harness §8.6](./AGENT_HARNESS_DESIGN.md)、[README](../README.md)、[M1_PLAN](./M1_PLAN.md) 已同步，未宣称生产成片或新 provider 已交付 |
 
 证据分层：官方页面仅证明文档支持；合成实验仅证明固定夹具的本地行为；历史 K3/M2 真实证据不外推到新 provider。当前账号权限、地域可达性、真实编码、结果 CDN、计费与通用成片解码仍未验证。
 

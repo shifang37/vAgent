@@ -16,7 +16,7 @@
 | CLI | `vagent timeline show|sources|save`、`vagent audio list|import`、`vagent film render --timeline [--timeline-version]` |
 | HTTP | `GET /api/episodes/{id}/timeline`、`GET /api/timelines/{id}`、`POST /api/sessions/{id}/timelines/save`、`GET /api/audio`、`POST /api/audio/import`；`/api/renders` 与 `film_render` 支持 `timelineId/timelineVersion` |
 | Web | 时间线工作台（左栏「时间线」或分集面板入口）：镜头排序/裁剪/移除、边界转场、字幕轨选择、音轨勾选与增益/起点、标题卡、客户端顺序预览、保存与导出；视频模式 off 下仍可用 |
-| 文档 | 本文件、[M7 契约](./M7_CONTRACTS.md) 的 E3 实施细化、`README.md`、`M1_PLAN.md`、[M5 计划](./M5_PLAN.md)、[Harness 设计](../AGENT_HARNESS_DESIGN.md)、[Web 说明](../web/README.md) |
+| 文档 | 本文件、[M7 契约](./M7_CONTRACTS.md) 的 E3 实施细化、`README.md`、`M1_PLAN.md`、[M5 计划](./M5_PLAN.md)、[Harness 设计](./AGENT_HARNESS_DESIGN.md)、[Web 说明](../web/README.md) |
 
 ## 2. 契约实施细化（不改冻结语义）
 

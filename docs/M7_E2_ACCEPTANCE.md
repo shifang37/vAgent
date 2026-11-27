@@ -16,7 +16,7 @@
 | 工具与规则 | tools/rules **15/15 → 16/16**（mock 与 live 同步）；`season_generate` 追加到末尾；15/15、13/13 与更早变体按 `toolFeatures` 冻结，旧 prompt/规则字节不改 |
 | CLI | `vagent season generate --season ... [--episode ...|--resume ...] --confirm`；`season show --batch` 读取指定批次。离线、无真实 Key、无提交 |
 | HTTP / Web | `POST /api/sessions/{id}/seasons/generate`、`GET /api/seasons/{id}/estimate`、`GET /api/seasons/{id}?batchId=`；季面板加入批量确认对话框、逐集隔离状态与显式「恢复失败集」，`web/season-state.js` 纯投影新增 7 项 Node 测试 |
-| 验收文档 | 本文件；[M7 契约](./M7_CONTRACTS.md)、[M5 计划](./M5_PLAN.md)、[M1 计划](../M1_PLAN.md)、[README](../README.md)、[Web 说明](../web/README.md) 与 [Harness 设计](../AGENT_HARNESS_DESIGN.md) 已同步 |
+| 验收文档 | 本文件；[M7 契约](./M7_CONTRACTS.md)、[M5 计划](./M5_PLAN.md)、[M1 计划](./M1_PLAN.md)、[README](../README.md)、[Web 说明](../web/README.md) 与 [Harness 设计](./AGENT_HARNESS_DESIGN.md) 已同步 |
 
 ## 2. 批次不变量
 

@@ -11,7 +11,7 @@
 | 套件测试 | `tests/test_m8_evaluation.py` | 4 项：整套报告与关键数值、`--live` 拒绝、不覆盖报告/不复用非空目录、套件身份与纯函数 |
 | 受控浏览器 | `tmp/m8-e4-browser/seed.py`、`check.mjs`、`output/m8-e4-browser/` | Chrome 155 headless：报价对比三行候选（9.00 CNY / 1.26 USD / 1.68 USD·12 units、推荐 wan、不换汇、未做真实样本标签）、账单面板（USD 已录入 0.60、CNY 未录入不计 0、第 2 版）、同一账单重放提示「已复用」且记录数不变；3 张截图、零页面/控制台错误 |
 | 安装态 wheel | `scripts/wheel_smoke.py` | 新增 `smoke_m8_evaluation`（安装态运行 4 用例）与 `smoke_m8_surface`（`route preview` CLI/HTTP、`usage bill show` CLI/HTTP、账单重放、`usage.billing`、`runtime` 非持久块） |
-| 验收文档与发布 | 本文件、[M8 契约](./M8_CONTRACTS.md)、[M8 计划](./M8_PLAN.md)、[v0.6.0 发布说明](./RELEASE_0.6.0.md)、`README.md`、`M1_PLAN.md`、[M5 计划](./M5_PLAN.md)、[Harness 设计](../AGENT_HARNESS_DESIGN.md)、[Web 说明](../web/README.md) | 记录交付、边界、失败与复现；E3 的真实样本证据见 [E3 验收](./M8_E3_ACCEPTANCE.md) |
+| 验收文档与发布 | 本文件、[M8 契约](./M8_CONTRACTS.md)、[M8 计划](./M8_PLAN.md)、[v0.6.0 发布说明](./RELEASE_0.6.0.md)、`README.md`、`M1_PLAN.md`、[M5 计划](./M5_PLAN.md)、[Harness 设计](./AGENT_HARNESS_DESIGN.md)、[Web 说明](../web/README.md) | 记录交付、边界、失败与复现；E3 的真实样本证据见 [E3 验收](./M8_E3_ACCEPTANCE.md) |
 | 版本 | `pyproject.toml`、`src/vagent/__init__.py` | **0.5.0 → 0.6.0**；同时修正 `__version__` 自 v0.4.0 起未随 v0.5.0 更新的遗漏（`/api/health` 曾显示 0.4.0） |
 
 ## 2. 相对计划的实现决策

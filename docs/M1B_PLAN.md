@@ -2,7 +2,7 @@
 
 更新日期：2026-10-10。状态：**B0–B5 完成，M1-B 已验收**。B1 提供 schema v2、Job/Mock Worker；B2 接入四工具、模式、上下文及只读/缓存边界；B3 接入 execution v2 的持久等待、停止、计时与跨存储恢复；B4 交付自动 Worker、CLI/Web；B5 完成五类离线/真实 DeepSeek + Mock 套件、完整回归与独立 wheel。真实套件 5/5 通过，共 15 次模型调用、14 次工具调用，视频侧没有真实媒体。阶段证据见 [M1-B 验收](./M1B_ACCEPTANCE.md)，历史交付见 [B0](./M1B_B0_ACCEPTANCE.md)、[B1](./M1B_B1_ACCEPTANCE.md)、[B2](./M1B_B2_ACCEPTANCE.md)、[B3](./M1B_B3_ACCEPTANCE.md) 与 [B4](./M1B_B4_ACCEPTANCE.md)。
 
-依据：[M1 总计划](../M1_PLAN.md)、[Harness 设计](../AGENT_HARNESS_DESIGN.md)、[M1-A 验收](./M1A_ACCEPTANCE.md)。规划基线为 `a03f249`；当前能力以 [README](../README.md) 为准。数据、Job/Worker、模式配置、Agent 工具、持久等待及 CLI/Web 入口已按 [M1-B 契约](./M1B_CONTRACTS.md) 落地。
+依据：[M1 总计划](./M1_PLAN.md)、[Harness 设计](./AGENT_HARNESS_DESIGN.md)、[M1-A 验收](./M1A_ACCEPTANCE.md)。规划基线为 `a03f249`；当前能力以 [README](../README.md) 为准。数据、Job/Worker、模式配置、Agent 工具、持久等待及 CLI/Web 入口已按 [M1-B 契约](./M1B_CONTRACTS.md) 落地。
 
 M1-B 的交付目标是：用户通过 Agent 登记一个模拟视频任务，Worker 独立推进任务；Agent 可以先回复任务 ID，也可以持久等待结果。刷新页面或重启进程后，任务、原工具调用和预算保持一致，已确认的提交不重复执行。
 

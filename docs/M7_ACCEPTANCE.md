@@ -11,7 +11,7 @@
 | 套件测试 | `tests/test_m7_evaluation.py` | 4 项：整套报告与关键数值、`--live` 拒绝、不覆盖报告/不复用非空目录、套件身份与纯函数 |
 | 受控浏览器 | `tmp/m7-e4-browser/check.mjs`、`output/m7-e4-browser/` | Chrome 155 headless：时间线面板 v2/14 镜头/65.6 秒、客户端顺序预览、上移镜头并保存 v3、导出成片 v3、Range 206、零页面错误 |
 | 安装态 wheel | `scripts/wheel_smoke.py` | 新增 `smoke_m7_evaluation`（安装态运行 3 用例）与 `smoke_m7_workbench`（季/批次/时间线 CLI、HTTP 读面、音频导入、成片 Range） |
-| 验收文档 | 本文件、[M7 契约](./M7_CONTRACTS.md)、[M5 计划](./M5_PLAN.md)、[E3 验收](./M7_E3_ACCEPTANCE.md)、`README.md`、`M1_PLAN.md`、[Harness 设计](../AGENT_HARNESS_DESIGN.md)、[Web 说明](../web/README.md) | 记录交付、边界、失败与复现 |
+| 验收文档 | 本文件、[M7 契约](./M7_CONTRACTS.md)、[M5 计划](./M5_PLAN.md)、[E3 验收](./M7_E3_ACCEPTANCE.md)、`README.md`、`M1_PLAN.md`、[Harness 设计](./AGENT_HARNESS_DESIGN.md)、[Web 说明](../web/README.md) | 记录交付、边界、失败与复现 |
 
 ## 2. 相对计划的实现决策
 
