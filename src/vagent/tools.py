@@ -13,7 +13,7 @@ from pydantic.alias_generators import to_camel
 
 from vagent.errors import AppError, failure, public_error
 from vagent.quality import check_project_memory, content_check, project_memory_conflicts
-from vagent.storage import FileStore, now
+from vagent.storage import FileStore, now, project_of_session
 from vagent.waiting import DeferredToolResult, ToolExecutionContext
 
 MAX_TOOL_ARGUMENT_BYTES = 32 * 1024
@@ -504,10 +504,9 @@ class ToolRegistry:
         run = state["runs"].get(context.run_id)
         if (
             context.project_id != project_id
-            or context.project_id != context.session_id
+            or project_of_session(state, context.session_id) != context.project_id
             or context.operation_key != operation_key
             or context.project_id not in state["projects"]
-            or context.session_id not in state["sessions"]
             or run is None
             or run["sessionId"] != context.session_id
         ):

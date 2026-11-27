@@ -406,6 +406,20 @@ def migrated_state(state: dict) -> dict:
     return upgraded
 
 
+def project_of_session(state: dict, session_id: str) -> str | None:
+    """The project a session works in, or ``None`` when the session does not exist.
+
+    A pre-v10 session carries no binding; its own id names its project, which is
+    the historical convention and stays valid after migration. The binding is
+    written by the first ``ensure_session`` and never changes afterwards, so this
+    resolver is the only place that needs to know the fallback.
+    """
+    session = state["sessions"].get(session_id)
+    if session is None:
+        return None
+    return session.get("projectId") or session_id
+
+
 def repair_stale_runs(store: "FileStore") -> list[str]:
     """Close persisted ``running`` Runs that no live execution owns.
 
@@ -961,6 +975,11 @@ class FileStore:
             draft["sessions"][session_id]["projectId"] = target
 
         self.transaction(create)
+
+    def project_of(self, session_id: str) -> str | None:
+        """Resolve a session's project without copying the whole state."""
+        with self._mutex:
+            return project_of_session(self._state, session_id)
 
     @staticmethod
     def operation_fingerprint(name: str, args: dict) -> str:

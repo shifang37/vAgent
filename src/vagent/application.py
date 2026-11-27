@@ -23,7 +23,7 @@ from vagent.memory import MemoryIndex
 from vagent.models import DeepSeekModel
 from vagent.runner import AgentRunner, RunPolicy
 from vagent.skills import discover_for, register_skill_tool
-from vagent.storage import FileStore, append_event, now
+from vagent.storage import FileStore, append_event, now, project_of_session
 from vagent.summary import ExtractiveSummarizer
 from vagent.tools import create_project_tools
 from vagent.tracing import TRACE_DIRECTORY, JsonlExporter, Tracer
@@ -221,11 +221,23 @@ class ApplicationService:
         if self.wait_coordinator:
             self.wait_coordinator.notify()
 
-    def jobs(self, session_id=None):
+    def jobs(self, session_id=None, *, project_id=None):
+        """Jobs of one session's project (or one explicit project; all when omitted).
+
+        A session sees every Job of its project, not only the ones it registered
+        itself: that is what lets a second session continue the previous one. An
+        unknown session keeps the historical empty answer instead of a 404.
+        """
         if session_id is not None:
             assert_id(session_id)
+            project_id = project_of_session(self.store.snapshot(), session_id)
+            if project_id is None:
+                return []
+        elif project_id is not None:
+            assert_id(project_id)
         return [
-            job_view(self.media.refresh(job)) for job in reversed(self.video_jobs.list(session_id=session_id))
+            job_view(self.media.refresh(job))
+            for job in reversed(self.video_jobs.list(project_id=project_id))
         ]
 
     def job(self, job_id):
@@ -1098,14 +1110,19 @@ class ApplicationService:
 
     def sessions(self):
         state = self.store.snapshot()
-        return [
-            {
-                "id": key,
-                "title": state["projects"][key]["goal"][:45] or self._first_prompt(state, key),
-                "latestRunId": value.get("latestRunId"),
-            }
-            for key, value in reversed(list(state["sessions"].items()))
-        ]
+        rows = []
+        for key, value in reversed(list(state["sessions"].items())):
+            project_id = project_of_session(state, key) or key
+            project = state["projects"].get(project_id) or {}
+            rows.append(
+                {
+                    "id": key,
+                    "projectId": project_id,
+                    "title": project.get("goal", "")[:45] or self._first_prompt(state, key),
+                    "latestRunId": value.get("latestRunId"),
+                }
+            )
+        return rows
 
     @staticmethod
     def _first_prompt(state, key):
@@ -1123,6 +1140,10 @@ class ApplicationService:
         if session_id not in state["sessions"]:
             raise AppError("NOT_FOUND", "没有这个会话。")
         saved = state["sessions"][session_id]
+        project_id = project_of_session(state, session_id) or session_id
+        project = state["projects"].get(project_id)
+        if project is None:
+            raise AppError("PROJECT_NOT_FOUND", "这个会话绑定的项目不存在。")
         run = state["runs"].get(saved.get("latestRunId"))
         # An unfinished run has a provisional transcript; committed history stays intact.
         messages = (run or saved)["messages"]
@@ -1135,14 +1156,15 @@ class ApplicationService:
                 )
         return {
             "id": session_id,
-            "project": state["projects"][session_id],
+            "projectId": project_id,
+            "project": project,
             "messages": visible,
             "run": self.run_view(run) if run else None,
-            "artifacts": [a for a in state["artifacts"].values() if a["projectId"] == session_id],
-            "jobs": self.jobs(session_id),
-            "storyboard": current_storyboard_view(state, session_id),
-            "episode": self.episode(session_id),
-            "season": self.season(session_id),
+            "artifacts": [a for a in state["artifacts"].values() if a["projectId"] == project_id],
+            "jobs": self.jobs(project_id=project_id),
+            "storyboard": current_storyboard_view(state, project_id),
+            "episode": self.episode(project_id),
+            "season": self.season(project_id),
             "wait": self._wait_view(state["waits"].get((run or {}).get("activeWaitId"))),
             "draft": copy.deepcopy(self.drafts.get(session_id)),
         }

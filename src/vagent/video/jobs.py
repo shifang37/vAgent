@@ -11,6 +11,7 @@ from uuid import uuid4
 from pydantic import ValidationError
 
 from vagent.errors import AppError, failure
+from vagent.storage import project_of_session
 from vagent.video.assets import AssetService, verified_reference_data
 from vagent.video.batches import (
     BATCH_AMOUNT_LIMIT,
@@ -263,7 +264,11 @@ def headless_plan_fingerprint(plan: dict) -> str:
 
 
 def _preview_context(project_id: str) -> ToolExecutionContext:
-    """A stand-in context for read-only previews: it owns no Jobs, so usage is zero."""
+    """A stand-in context for read-only previews: it owns no Jobs, so usage is zero.
+
+    A preview never validates a session (no Run, no write), so the synthetic
+    session id is only a placeholder; callers pass the resolved project id.
+    """
     return ToolExecutionContext(
         project_id=project_id,
         session_id=project_id,
@@ -345,8 +350,7 @@ def _check_context(state: dict, context: ToolExecutionContext) -> None:
     run = state["runs"].get(context.run_id)
     if (
         context.project_id not in state["projects"]
-        or context.session_id not in state["sessions"]
-        or context.project_id != context.session_id
+        or project_of_session(state, context.session_id) != context.project_id
         or run is None
         or run["sessionId"] != context.session_id
     ):

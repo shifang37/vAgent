@@ -16,7 +16,7 @@ from uuid import uuid4
 from pydantic import ValidationError
 
 from vagent.errors import AppError
-from vagent.storage import now
+from vagent.storage import now, project_of_session
 from vagent.video.audio import (
     NARRATOR_SPEAKER,
     TTS_EPISODE_CHARACTER_LIMIT,
@@ -398,7 +398,7 @@ class AudioService:
         run = state["runs"].get(context.run_id)
         if (
             run is None
-            or context.project_id != context.session_id
+            or project_of_session(state, context.session_id) != context.project_id
             or context.project_id not in state["projects"]
             or run.get("sessionId") != context.session_id
         ):

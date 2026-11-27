@@ -13,6 +13,7 @@ from collections import defaultdict
 from datetime import UTC, datetime
 from decimal import Decimal
 
+from vagent.storage import project_of_session
 from vagent.video.billing import read_ledger, summarize_billing
 
 TERMINAL_JOB_STATUSES = {"succeeded", "failed", "unknown", "download_failed"}
@@ -129,7 +130,12 @@ def summarize_records(
     ]
     assets = state["assets"]
     project_assets = [raw for raw in assets.values() if project_id is None or raw["projectId"] == project_id]
-    runs = [raw for raw in state["runs"].values() if project_id is None or raw["sessionId"] == project_id]
+    # A Run belongs to its session's project, which is not always the session id.
+    runs = [
+        raw
+        for raw in state["runs"].values()
+        if project_id is None or project_of_session(state, raw["sessionId"]) == project_id
+    ]
     timeline = sorted(daily.values(), key=lambda item: item["date"])[-DAILY_LIMIT:]
     ledger, ledger_status = (None, "missing") if home is None else read_ledger(home)
     report = {

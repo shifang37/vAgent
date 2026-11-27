@@ -15,7 +15,7 @@ from uuid import UUID, uuid5
 from vagent.context import CONTEXT_VERSION
 from vagent.errors import AppError
 from vagent.runner import RunPolicy
-from vagent.storage import RunRecord, now
+from vagent.storage import RunRecord, now, project_of_session
 from vagent.video.storyboards import shot_of, storyboard_in_state
 from vagent.video.tools import LIVE_VIDEO_RULES_VERSION, LIVE_VIDEO_TOOLS_VERSION
 from vagent.video.tools import VIDEO_RULES_VERSION as MOCK_VIDEO_RULES_VERSION
@@ -57,6 +57,14 @@ def client_run_id(session_id: str, client_request_id: str) -> str:
     return str(uuid5(CLIENT_RUN_NAMESPACE, f"vagent-client-run:{session_id}:{client_request_id}"))
 
 
+def project_of(service, session_id: str) -> str:
+    """The project this local action works in; a session never names a project directly."""
+    project_id = project_of_session(service.store.snapshot(), session_id)
+    if project_id is None:
+        raise AppError("NOT_FOUND", "当前数据目录中没有这个会话，未登记任务。")
+    return project_id
+
+
 def client_features(service, mode: str) -> dict:
     """The tool features a client Run records, exactly as an Agent Run would."""
     return {
@@ -77,11 +85,14 @@ def client_context(
     session_id: str,
     client_request_id: str,
     group: str,
+    project_id: str | None = None,
     require_mode_config=True,
     metadata_only=False,
 ):
     """Create or reuse the Run that owns one explicit local action.
 
+    ``project_id`` is optional: omitted resolves the session's bound project, which
+    is the id every project-scoped call in the action must use.
     ``metadata_only`` is for actions that never touch a video provider (season
     membership). Such a Run keeps video mode off and records no video tool
     features, so it works in text-only projects and can never be mistaken for a
@@ -89,6 +100,8 @@ def client_context(
     """
     if group not in CLIENT_GROUPS:
         raise AppError("INVALID_ARGUMENTS", "未知的本地动作。")
+    if project_id is None:
+        project_id = project_of(service, session_id)
     mode = "off" if metadata_only else service.generation_mode()
     if mode == "live" and require_mode_config:
         # The two-Key setup needs only the Key of the provider the user selected.
@@ -104,7 +117,7 @@ def client_context(
         policy = RunPolicy()
 
         def create(draft):
-            if session_id not in draft["projects"] or session_id not in draft["sessions"]:
+            if project_id not in draft["projects"] or session_id not in draft["sessions"]:
                 raise AppError("NOT_FOUND", "当前数据目录中没有这个项目，未登记任务。")
             if run_id in draft["runs"]:
                 return
@@ -147,7 +160,7 @@ def client_context(
 
         store.transaction(create)
     return ToolExecutionContext(
-        project_id=session_id,
+        project_id=project_id,
         session_id=session_id,
         run_id=run_id,
         model_step=1,
@@ -214,9 +227,14 @@ def generate_shots(
     replayed = _replay_or_conflict(service, session_id, client_request_id, "shot_generate", args)
     if replayed is not None:
         return replayed
-    _read_storyboard(service.store, session_id, storyboard_id, storyboard_version)
+    project_id = project_of(service, session_id)
+    _read_storyboard(service.store, project_id, storyboard_id, storyboard_version)
     context = client_context(
-        service, session_id=session_id, client_request_id=client_request_id, group="shot_generate"
+        service,
+        project_id=project_id,
+        session_id=session_id,
+        client_request_id=client_request_id,
+        group="shot_generate",
     )
     result = service.shot_generate(args, context=context)
     if not result.get("ok"):
@@ -237,11 +255,16 @@ def generate_episode(
     replayed = _replay_or_conflict(service, session_id, client_request_id, "episode_generate", args)
     if replayed is not None:
         return replayed
+    project_id = project_of(service, session_id)
     raw = service.store.snapshot()["episodes"].get(episode_id)
-    if raw is None or raw["projectId"] != session_id:
+    if raw is None or raw["projectId"] != project_id:
         raise AppError("EPISODE_NOT_FOUND", "当前项目中没有这个分集。")
     context = client_context(
-        service, session_id=session_id, client_request_id=client_request_id, group="episode_generate"
+        service,
+        project_id=project_id,
+        session_id=session_id,
+        client_request_id=client_request_id,
+        group="episode_generate",
     )
     result = service.episode_generate(args, context=context)
     if not result.get("ok"):
@@ -278,7 +301,8 @@ def redo_shot(
     replayed = _replay_or_conflict(service, session_id, client_request_id, "shot_redo", stated)
     if replayed is not None:
         return replayed
-    record = _read_storyboard(service.store, session_id, storyboard_id, storyboard_version, shot_id)
+    project_id = project_of(service, session_id)
+    record = _read_storyboard(service.store, project_id, storyboard_id, storyboard_version, shot_id)
     if expected_revision is None:
         expected_revision = record.revision
     elif record.revision != expected_revision:
@@ -291,7 +315,11 @@ def redo_shot(
         "clientRequestId": client_request_id,
     }
     context = client_context(
-        service, session_id=session_id, client_request_id=client_request_id, group="shot_redo"
+        service,
+        project_id=project_id,
+        session_id=session_id,
+        client_request_id=client_request_id,
+        group="shot_redo",
     )
     result = service.redo_shot(args, context=context)
     if not result.get("ok"):
@@ -312,18 +340,20 @@ async def assemble_film(
     replayed = _replay_or_conflict(service, session_id, client_request_id, "film_assemble", args)
     if replayed is not None:
         return replayed
-    record = storyboard_in_state(service.store.snapshot(), session_id, storyboard_id)
+    project_id = project_of(service, session_id)
+    record = storyboard_in_state(service.store.snapshot(), project_id, storyboard_id)
     if record.revision != expected_revision:
         raise AppError("VERSION_CONFLICT", "分镜记录已变化，请重新读取后再拼接。")
     context = client_context(
         service,
+        project_id=project_id,
         session_id=session_id,
         client_request_id=client_request_id,
         group="film_assemble",
         require_mode_config=False,
     )
     result = await service.films.assemble(
-        project_id=session_id,
+        project_id=project_id,
         storyboard_id=storyboard_id,
         expected_revision=expected_revision,
         operation_key=_operation_key(context.run_id, "film_assemble"),
@@ -377,22 +407,24 @@ def save_subtitles(
     replayed = _replay_or_conflict(service, session_id, client_request_id, "subtitle_save", args)
     if replayed is not None:
         return replayed
+    project_id = project_of(service, session_id)
     if scope == "storyboard":
         if storyboard_id is None:
             raise AppError("INVALID_ARGUMENTS", "保存分镜字幕需要 storyboardId。")
         target = service.store.snapshot()["storyboards"].get(storyboard_id)
-        if target is None or target["projectId"] != session_id:
+        if target is None or target["projectId"] != project_id:
             raise AppError("NOT_FOUND", "当前项目中没有这个分镜。")
     elif scope == "episode":
         if episode_id is None:
             raise AppError("INVALID_ARGUMENTS", "保存整集字幕需要 episodeId。")
         target = service.store.snapshot()["episodes"].get(episode_id)
-        if target is None or target["projectId"] != session_id:
+        if target is None or target["projectId"] != project_id:
             raise AppError("EPISODE_NOT_FOUND", "当前项目中没有这个分集。")
     else:
         raise AppError("INVALID_ARGUMENTS", "scope 必须是 storyboard 或 episode。")
     context = client_context(
         service,
+        project_id=project_id,
         session_id=session_id,
         client_request_id=client_request_id,
         group="subtitle_save",
@@ -402,7 +434,7 @@ def save_subtitles(
         _operation_key(context.run_id, "subtitle_save"),
         "subtitle_save",
         args,
-        lambda draft: save_subtitles(args, draft, session_id),
+        lambda draft: save_subtitles(args, draft, project_id),
     )
     if not result.get("ok"):
         raise AppError(result["error"]["code"], result["error"]["message"])
@@ -437,8 +469,10 @@ def save_season(
     replayed = _replay_or_conflict(service, session_id, client_request_id, "season_save", args)
     if replayed is not None:
         return replayed
+    project_id = project_of(service, session_id)
     context = client_context(
         service,
+        project_id=project_id,
         session_id=session_id,
         client_request_id=client_request_id,
         group="season_save",
@@ -449,7 +483,7 @@ def save_season(
         _operation_key(context.run_id, "season_save"),
         "season_save",
         args,
-        lambda draft: save_season(args, draft, session_id),
+        lambda draft: save_season(args, draft, project_id),
     )
     if not result.get("ok"):
         raise AppError(result["error"]["code"], result["error"]["message"])
@@ -482,11 +516,16 @@ def generate_season(
     replayed = _replay_or_conflict(service, session_id, client_request_id, "season_generate", args)
     if replayed is not None:
         return replayed
+    project_id = project_of(service, session_id)
     raw = service.store.snapshot()["seasons"].get(season_id)
-    if raw is None or raw["projectId"] != session_id:
+    if raw is None or raw["projectId"] != project_id:
         raise AppError("SEASON_NOT_FOUND", "当前项目中没有这个季。")
     context = client_context(
-        service, session_id=session_id, client_request_id=client_request_id, group="season_generate"
+        service,
+        project_id=project_id,
+        session_id=session_id,
+        client_request_id=client_request_id,
+        group="season_generate",
     )
     result = service.season_generate(args, context=context)
     if not result.get("ok"):
@@ -511,20 +550,22 @@ async def film_render(
     replayed = _replay_or_conflict(service, session_id, client_request_id, "film_render", args)
     if replayed is not None:
         return replayed
+    project_id = project_of(service, session_id)
     if model.scope == "timeline":
         target = service.store.snapshot()["timelines"].get(model.timeline_id)
-        if target is None or target["projectId"] != session_id:
+        if target is None or target["projectId"] != project_id:
             raise AppError("TIMELINE_NOT_FOUND", "当前项目中没有这条时间线。")
     elif model.scope == "storyboard":
         target = service.store.snapshot()["storyboards"].get(model.storyboard_id)
-        if target is None or target["projectId"] != session_id:
+        if target is None or target["projectId"] != project_id:
             raise AppError("NOT_FOUND", "当前项目中没有这个分镜。")
     else:
         target = service.store.snapshot()["episodes"].get(model.episode_id)
-        if target is None or target["projectId"] != session_id:
+        if target is None or target["projectId"] != project_id:
             raise AppError("EPISODE_NOT_FOUND", "当前项目中没有这个分集。")
     context = client_context(
         service,
+        project_id=project_id,
         session_id=session_id,
         client_request_id=client_request_id,
         group="film_render",
@@ -534,7 +575,7 @@ async def film_render(
     )
     result = await service.renders.render(
         args,
-        project_id=session_id,
+        project_id=project_id,
         operation_key=_operation_key(context.run_id, "film_render"),
         args=args,
     )
@@ -564,18 +605,20 @@ async def export_subtitles(
     replayed = _replay_or_conflict(service, session_id, client_request_id, "subtitle_export", args)
     if replayed is not None:
         return replayed
+    project_id = project_of(service, session_id)
     raw = service.store.snapshot()["subtitleTracks"].get(track_id)
-    if raw is None or raw["projectId"] != session_id:
+    if raw is None or raw["projectId"] != project_id:
         raise AppError("SUBTITLE_TRACK_MISSING", "当前项目中没有这个字幕轨。")
     context = client_context(
         service,
+        project_id=project_id,
         session_id=session_id,
         client_request_id=client_request_id,
         group="subtitle_export",
         require_mode_config=False,
     )
     result = await service.subtitles.export(
-        project_id=session_id,
+        project_id=project_id,
         track_id=track_id,
         mode=mode,
         profile_name=profile,
@@ -618,11 +661,13 @@ def save_timeline(
     replayed = _replay_or_conflict(service, session_id, client_request_id, "timeline_save", args)
     if replayed is not None:
         return replayed
+    project_id = project_of(service, session_id)
     raw = service.store.snapshot()["episodes"].get(episode_id)
-    if raw is None or raw["projectId"] != session_id:
+    if raw is None or raw["projectId"] != project_id:
         raise AppError("EPISODE_NOT_FOUND", "当前项目中没有这个分集。")
     context = client_context(
         service,
+        project_id=project_id,
         session_id=session_id,
         client_request_id=client_request_id,
         group="timeline_save",
@@ -633,7 +678,7 @@ def save_timeline(
         _operation_key(context.run_id, "timeline_save"),
         "timeline_save",
         args,
-        lambda draft: save_timeline(args, draft, session_id),
+        lambda draft: save_timeline(args, draft, project_id),
     )
     if not result.get("ok"):
         raise AppError(result["error"]["code"], result["error"]["message"])
@@ -657,6 +702,7 @@ async def import_audio(
 
     context = client_context(
         service,
+        project_id=project_of(service, session_id),
         session_id=session_id,
         client_request_id=client_request_id,
         group="audio_import",
@@ -665,7 +711,7 @@ async def import_audio(
     )
     result = await import_audio_file(
         service,
-        project_id=session_id,
+        project_id=context.project_id,
         data=data,
         kind=kind,
         title=title,

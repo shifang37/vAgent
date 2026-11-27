@@ -1,7 +1,7 @@
 # 项目记忆与跨会话延续（设计）
 
 > 日期：2026-11-27
-> 状态：P0（schema 10 数据层：`memories` 集合、`SessionV10.projectId`、v9→v10 迁移、`ensure_session` 绑定）已实现并通过全量回归；P1–P4 待实施。
+> 状态：P0（schema 10 数据层：`memories` 集合、`SessionV10.projectId`、v9→v10 迁移、`ensure_session` 绑定）已实现并通过全量回归；P1（项目/会话解耦）已实现，验收见 `tests/test_project_binding.py`；P2–P4 待实施。
 > 范围：项目/会话数据模型（schema 10）、上下文组装、工具面、CLI 与 Web 入口。
 > 参考：`docs/HARNESS_REVIEW_FIX_PLAN.md`（FX-12 尾部消息）、`docs/CONTEXT_OPTIMIZATION_ACCEPTANCE.md`（稳定前缀）、DSH 的 workspace + `AGENTS.md`、Claude Code 的 `CLAUDE.md` + auto memory。
 
@@ -309,9 +309,11 @@ if version < 10:
 - `Session.projectId`、`ProjectMemory`、`DatabaseV10`、`migrated_state` v9→v10、`ensure_session(project_id=None)`。
 - 验收：P-01；全量回归（重点：迁移链 v1–v9、基线哈希）。
 
-**P1 解耦（仍无记忆功能，但项目与会话可分离）**
+**P1 解耦（仍无记忆功能，但项目与会话可分离）** ✅ 已实现
 - 按 7.1 清单逐项改：三处 `_check_context`、`runner` 五处、`clients` 五处、`application.session()` 视图。
-- 验收：P-13；旧用法回归（`-s default` 行为不变）。
+- 实施时补出的同类耦合（不在 7.1 表内，同样"漏一处半工作"）：`headless.py` 的规划/授权/登记/执行五处、`video/usage.py` 按项目聚合 Run、`cli.py inspect` 的展示、`application.jobs()` 的会话过滤（改为按项目）。
+- 统一解析入口：`storage.project_of_session(state, session_id)`（无绑定 = 自身 id）与 `FileStore.project_of()`。
+- 验收：P-13（`tests/test_project_binding.py`，含三处 `_check_context` 的正反向断言与预览路径）；旧用法回归（`-s default` 行为不变，全量套件对照 HEAD 基线无新增失败）。
 
 **P2 记忆能力与上下文**
 - `memories` 读写、`memory_read` / `memory_update`、上限与错误码。

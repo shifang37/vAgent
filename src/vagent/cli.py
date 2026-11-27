@@ -25,6 +25,7 @@ from vagent.storage import (
     FileStore,
     collect_garbage,
     load_snapshot,
+    project_of_session,
     record_gc_marker,
     restore_last_good,
 )
@@ -1660,11 +1661,14 @@ def main() -> None:
         elif args.command == "inspect":
             with FileStore.open(config.home) as store:
                 state = store.snapshot()
+                # The selector names the session; its visible project is the binding.
+                project_id = project_of_session(state, args.session) or args.session
                 print_json(
                     {
-                        "project": state["projects"].get(args.session),
+                        "project": state["projects"].get(project_id),
+                        "projectId": project_id,
                         "artifacts": [
-                            a for a in state["artifacts"].values() if a["projectId"] == args.session
+                            a for a in state["artifacts"].values() if a["projectId"] == project_id
                         ],
                         "runs": [
                             {

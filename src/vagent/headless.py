@@ -19,7 +19,7 @@ from langchain_core.messages import AIMessage, ToolMessage, messages_from_dict
 from pydantic import TypeAdapter, ValidationError
 
 from vagent.errors import AppError
-from vagent.storage import now
+from vagent.storage import now, project_of_session
 from vagent.video import clients
 from vagent.video.contracts import LiveJob, Money, canonical_fingerprint, parse_job
 from vagent.video.films import film_media, verify_film_media
@@ -182,7 +182,10 @@ def result_for_run(store, run_id: str, project_id: str | None = None) -> dict:
         raise AppError("HEADLESS_PLAN_NOT_FOUND", "没有这个 headless Run。")
     headless = run.get("headless") or {}
     plan = headless.get("plan") or {}
-    result = blank_result(project_id or run["sessionId"])
+    # The frozen plan names its project; an older plan without the field belongs
+    # to the Run's own session, whose id was the project id back then.
+    project_id = project_id or headless.get("projectId") or run["sessionId"]
+    result = blank_result(project_id)
     result.update(
         {
             "sessionId": run["sessionId"],
@@ -308,7 +311,7 @@ def _persist_plan(store, run_id: str, plan: dict, fingerprint: str) -> None:
             raise AppError("HEADLESS_PLAN_CHANGED", "这个 Run 已经有 headless 计划。")
         run["headless"] = {
             "status": "planned",
-            "projectId": run["sessionId"],
+            "projectId": project_of_session(draft, run["sessionId"]) or run["sessionId"],
             "plan": plan,
             "planFingerprint": fingerprint,
             "authorization": None,
@@ -358,10 +361,11 @@ async def plan(
     if saved is None:
         raise AppError("HEADLESS_PLAN_INCOMPLETE", "编排没有保存结构化分镜，未产生计划。")
     state = service.store.snapshot()
-    board = storyboard_in_state(state, session_id, saved["storyboardId"])
+    project_id = project_of_session(state, session_id) or session_id
+    board = storyboard_in_state(state, project_id, saved["storyboardId"])
     if board.current_version != saved["version"]:
         raise AppError("VERSION_CONFLICT", "分镜版本在规划期间已变化，请重新规划。")
-    frozen = service.video_jobs.plan_shots(session_id, board.id, board.current_version)
+    frozen = service.video_jobs.plan_shots(project_id, board.id, board.current_version)
     if not frozen["newJobCount"]:
         raise AppError("HEADLESS_PLAN_INCOMPLETE", "所有镜头都已有相同请求，没有需要授权的新任务。")
     fingerprint = headless_plan_fingerprint(frozen)
@@ -504,10 +508,11 @@ def authorize(
     plan = headless["plan"]
     if headless_plan_fingerprint(plan) != plan_fingerprint:
         raise AppError("HEADLESS_PLAN_CHANGED", "计划内容与已保存指纹不一致，未授权任何任务。")
-    board = storyboard_in_state(state, run["sessionId"], plan["storyboardId"])
+    project_id = headless.get("projectId") or run["sessionId"]
+    board = storyboard_in_state(state, project_id, plan["storyboardId"])
     if board.current_version != plan["storyboardVersion"] or board.revision != plan["storyboardRevision"]:
         raise AppError("HEADLESS_PLAN_STALE", "分镜在计划后已变化，请重新规划并确认。")
-    current = service.video_jobs.plan_shots(run["sessionId"], board.id, board.current_version)
+    current = service.video_jobs.plan_shots(project_id, board.id, board.current_version)
     if headless_plan_fingerprint(current) != plan_fingerprint:
         raise AppError("HEADLESS_PLAN_STALE", "能力、价格或请求在计划后已变化，请重新规划并确认。")
     authorization = _authorization(service, plan, plan_fingerprint, max_cost, max_units, max_jobs)
@@ -537,8 +542,9 @@ def authorize(
 
 def _register(service, run_id: str, plan: dict, authorization: dict) -> None:
     run = service.store.snapshot()["runs"][run_id]
+    project_id = (run.get("headless") or {}).get("projectId") or run["sessionId"]
     context = ToolExecutionContext(
-        project_id=run["sessionId"],
+        project_id=project_id,
         session_id=run["sessionId"],
         run_id=run_id,
         model_step=1,
@@ -656,7 +662,8 @@ async def execute(
     plan, authorization = headless["plan"], headless["authorization"]
     if headless_plan_fingerprint(plan) != headless.get("planFingerprint"):
         raise AppError("HEADLESS_PLAN_CHANGED", "计划内容与已保存指纹不一致，未继续执行。")
-    board = storyboard_in_state(state, run["sessionId"], plan["storyboardId"])
+    project_id = headless.get("projectId") or run["sessionId"]
+    board = storyboard_in_state(state, project_id, plan["storyboardId"])
     if board.current_version != plan["storyboardVersion"]:
         raise AppError("HEADLESS_PLAN_STALE", "分镜在计划后已变化，请重新规划并确认。")
     if headless.get("registration") is None:
@@ -668,7 +675,7 @@ async def execute(
         run = state["runs"][run_id]
         headless = run["headless"]
     registration = headless["registration"]
-    board = storyboard_in_state(state, run["sessionId"], plan["storyboardId"])
+    board = storyboard_in_state(state, project_id, plan["storyboardId"])
     if board.revision != registration["revision"]:
         raise AppError("HEADLESS_PLAN_STALE", "分镜在登记后已变化，未继续等待或拼接。")
     for item in registration["shots"]:

@@ -566,6 +566,10 @@ class AgentRunner:
             raise AppError("INVALID_PROMPT", "需求不能为空，且不能超过 20000 字符。")
         store, model = self.store, self.model
         store.ensure_session(session_id)
+        # The session's project is fixed once ensure_session has bound it; a
+        # pre-v10 session resolves to its own id. Every project-scoped lookup in
+        # this Run uses this value, never the session id.
+        project_id = store.project_of(session_id) or session_id
 
         def begin(draft: dict):
             for previous in draft["runs"].values():
@@ -581,7 +585,7 @@ class AgentRunner:
                 raise AppError("RUN_BUSY", "已有任务正在运行，请等待完成或停止后重试。")
             if not self.read_only:
                 changes = requested_content_limits(prompt)
-                project = draft["projects"][session_id]
+                project = draft["projects"][project_id]
                 current = project.get("contentLimits", {})
                 limits = updated_content_limits(current, changes)
                 if limits != current:
@@ -819,6 +823,9 @@ class AgentRunner:
     ) -> dict:
         store, model, tools = self.store, self.model, self.tools
         session_id = record["sessionId"]
+        # A resumed pre-v10 Run has an unbound session, which resolves to its own
+        # id and therefore keeps the original project with no compatibility branch.
+        project_id = store.project_of(session_id) or session_id
         limits = record["policy"]
         policy = RunPolicy(
             limits["maxSteps"],
@@ -1027,7 +1034,7 @@ class AgentRunner:
 
                 def build_context(history_summary=None, *, summarize=None):
                     nonlocal memory_failure_reported, memory_dropped_reported
-                    project = store.snapshot()["projects"][session_id]
+                    project = store.snapshot()["projects"][project_id]
                     memory_block = None
                     if self.memory is not None:
                         # Sync is idempotent (content-addressed), then recall for this
@@ -1145,8 +1152,8 @@ class AgentRunner:
                         model_config=model.cache_config,
                         messages=report.messages,
                         tools=specs,
-                        project=snapshot["projects"][session_id],
-                        artifacts=[a for a in snapshot["artifacts"].values() if a["projectId"] == session_id],
+                        project=snapshot["projects"][project_id],
+                        artifacts=[a for a in snapshot["artifacts"].values() if a["projectId"] == project_id],
                     )
                     cached, cache_status = await bounded_call(
                         lambda: self.answer_cache.get(cache_key), cancelled, deadline
@@ -1180,7 +1187,7 @@ class AgentRunner:
                         "budgetBytes": context.max_input_bytes,
                         "messageCount": len(report.messages),
                         "skillCount": len(self.skills),
-                        "projectRevision": store.snapshot()["projects"][session_id]["revision"],
+                        "projectRevision": store.snapshot()["projects"][project_id]["revision"],
                     }
                 )
                 self.emit({"type": "model.started", "step": next_state["model_steps"]})
@@ -1321,7 +1328,7 @@ class AgentRunner:
                 started = time.monotonic()
                 execution_context = (
                     ToolExecutionContext(
-                        project_id=session_id,
+                        project_id=project_id,
                         session_id=session_id,
                         run_id=record["id"],
                         model_step=state["model_steps"],
@@ -1361,7 +1368,7 @@ class AgentRunner:
                                 call["name"],
                                 call["args"],
                                 store=store,
-                                project_id=session_id,
+                                project_id=project_id,
                                 operation_key=key,
                                 context=execution_context,
                             ),
