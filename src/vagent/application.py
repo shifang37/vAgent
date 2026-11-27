@@ -102,7 +102,7 @@ class ApplicationService:
             store = existing_store or stack.enter_context(FileStore.open(config.home))
             client = await stack.enter_async_context(ModelHttpClient(timeout=60))
             catalog = discover_for(config)
-            tools = register_skill_tool(create_project_tools(), catalog)
+            tools = register_skill_tool(create_project_tools(memory=config.project_memory_enabled), catalog)
             # A separate HTTP pool is closed after Workers release all in-flight calls.
             wan = await stack.enter_async_context(
                 WanAdapter(
@@ -236,8 +236,7 @@ class ApplicationService:
         elif project_id is not None:
             assert_id(project_id)
         return [
-            job_view(self.media.refresh(job))
-            for job in reversed(self.video_jobs.list(project_id=project_id))
+            job_view(self.media.refresh(job)) for job in reversed(self.video_jobs.list(project_id=project_id))
         ]
 
     def job(self, job_id):

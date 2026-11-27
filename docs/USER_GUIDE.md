@@ -387,7 +387,7 @@ VAGENT_CACHE_TTL=3600
 .\.venv\Scripts\python.exe -m vagent usage --session coffee
 ```
 
-`--read-only` 仅提供 `project_read`、`artifact_read`、`skill_read`；后端同样拒绝写工具，即使模型尝试调用也不能修改项目、计划或产物。会话与执行记录仍正常持久化。`resume` 自动沿用原 Run 的模式。没有 Redis 配置时只读模式也能使用；普通写作 Run 和离线 demo 不使用回答缓存。
+`--read-only` 仅提供 `project_read`、`artifact_read`、`memory_read`、`skill_read`；后端同样拒绝写工具，即使模型尝试调用也不能修改项目、计划或产物。会话与执行记录仍正常持久化。`resume` 自动沿用原 Run 的模式。没有 Redis 配置时只读模式也能使用；普通写作 Run 和离线 demo 不使用回答缓存。
 
 缓存以**单个模型步的最终纯文本响应**为单位；工具调用响应、空回复、非法协议及明确截断的响应不缓存。命中跳过该步模型请求，仍正常完成图检查点与会话提交，不复用旧 Token usage。之前已经发生的模型调用与读取工具仍保留。缓存不是整个 Agent 工作流或工具操作的重放机制。
 
@@ -480,7 +480,7 @@ scripts/evaluate_m6.py M6 E4：离线整集验收套件（字幕/配音/转场/�
 
 LangGraph 提供图执行底座，项目自己定义状态、路由、上下文策略、工具边界、版本控制和运行记录。`ChatDeepSeek.bind_tools(...).astream(...)` 只执行单个模型步；保留非流式 `generate` 接口以兼容测试和其他调用方。流式工具参数必须通过严格 JSON 解码和完成标记检查后才执行，模型不会直接执行工具。
 
-- **工具白名单**：默认 `project_read`、`project_update`、`plan_update`、`artifact_save`、`artifact_read`、`skill_read`；mock/live 模式增加各自版本的视频工具（当前工具面 18/18，见上文工具表）。不开放 shell 或任意文件路径。
+- **工具白名单**：默认 `project_read`、`project_update`、`plan_update`、`artifact_save`、`artifact_read`、`memory_read`、`memory_update`、`skill_read`；mock/live 模式增加各自版本的视频工具（当前工具面 20/18，见上文工具表）。不开放 shell 或任意文件路径。
 - **Pydantic Schema**：工具声明与后端输入校验共用定义，拒绝未知字段和错误参数类型；工具错误会返回模型。
 - **项目记忆**：保存目标、受众、风格、约束和计划；产物以稳定 ID 保存，每次修改增加版本并保留原文。
 - **写入保护**：单写进程锁、串行事务、同目录原子替换；业务修改和操作结果一起提交。相同操作 ID 复用结果，参数冲突则拒绝。
@@ -504,7 +504,7 @@ LangGraph 提供图执行底座，项目自己定义状态、路由、上下文�
 
 项目事实和 Skill 元信息使用紧凑、键顺序稳定的 JSON。发送给模型的应用工具结果只去掉 JSON 字符串外的冗余空白，保留字符串正文、转义、数值原文及工具调用 ID；存储中的原始对话和产物不改写。
 
-`VAGENT_CONTEXT_BYTES` 默认 98304（M8 E3 起；18/18 工具面在旧 65536 下第一轮即 `CONTEXT_LIMIT`），按消息和工具定义的 UTF-8 序列化字节数衡量，**不是精确 Token 数或供应商请求体大小**。供应商返回的 Token usage 另行记入 Run。
+`VAGENT_CONTEXT_BYTES` 默认 98304（M8 E3 起；18/18 起的工具面在旧 65536 下第一轮即 `CONTEXT_LIMIT`），按消息和工具定义的 UTF-8 序列化字节数衡量，**不是精确 Token 数或供应商请求体大小**。供应商返回的 Token usage 另行记入 Run。
 
 超限时裁剪最旧的完整用户轮次，保留工具调用与结果配对；原始历史不删除。当前需求、当前轮工具结果和项目事实必须完整保留，仍超限则在调用模型前报 `CONTEXT_LIMIT`。长产物通过 `artifact_read` 的 offset/limit 分段读取。
 
@@ -534,6 +534,7 @@ description: 说明哪些任务需要这个技能。
 | 开关 | 默认 | 取值 / 作用 | 对签名 / 恢复的影响 |
 |---|---|---|---|
 | `VAGENT_CONTEXT_VERSION` | `2` | `2` 稳定前缀；`3` 历史摘要；`4` 尾部动态消息（配合 `VAGENT_CONTEXT_TAIL=system\|human`） | 版本改变签名；旧 Run 需新请求 |
+| `VAGENT_PROJECT_MEMORY` | `on` | 项目记忆：注册 `memory_read` / `memory_update` 并把台账渲染进 system 前缀 | `off` 隐藏两个工具与记忆块（数据保留），工具面改变签名；默认 `on` |
 | `VAGENT_MEMORY` | `off` | 开启 `memory.json` 项目级长期记忆，召回已确认事实 | 开启后记忆块进入上下文并改变签名 |
 | `VAGENT_MEMORY_LIMIT` | `4` | 每个项目最多渲染的记忆条数（1–16） | 改变上下文内容与签名 |
 | `VAGENT_PROMPT_VERSION` | `v1` | `v1` 冻结；`v2` 追加数据通道硬化子句 | 模板文本进入签名，切换即拒绝恢复旧 Run |
@@ -561,7 +562,7 @@ description: 说明哪些任务需要这个技能。
 
 默认数据目录为 `~/.vagent/`，可用 `VAGENT_HOME` 覆盖。`state.json` 保存会话、项目、产物、Run、操作结果、jobs/waits、media 索引与 M2 的 `storyboards`/`assets` 集合、M5 的 `episodes`/`scenes`/`characters`/`styles`、M6 的 `audio`/`subtitleTracks`/`renders` 与 M7 的 `seasons`/`batches`/`timelines` 集合；E3 的 headless 计划、授权指纹、登记结果与交付摘要保存在 Run 记录的可选 `headless` 字段（未使用时不写该字段，不改变存储 schema，也不迁移旧记录）；`checkpoints.sqlite` 保存图执行位置和消息。B1 的 `mock-video.json` 独立保存模拟上游受理记录、请求、轨迹和调用计数。应在程序退出后备份完整数据目录。配置 Key 不写入状态；真实 Job 的私有上游 URL 仅保存在本地状态中，不经公开接口返回。`inspect` 会显示创作正文。
 
-当前存储为 schema 10。打开 v1–v9 数据时，在实例锁下使用原版本校验器验证状态与消息，先将原始字节保存为同目录的 `state-v1-<UUID>.json` 等备份，再原子迁移。迁移只增加缺少的顶层集合（v4 新增 `storyboards`/`assets`，v5 新增 `films`，v6 新增 `episodes`/`scenes`/`characters`/`styles`，v7 新增 `audio`/`subtitleTracks`，v8 新增 `renders`，v9 新增 `seasons`/`batches`/`timelines`，v10 新增 `memories` 与会话到项目的绑定）并升级版本，历史 Job、Run、Operation、来源版本和指纹不重编码、不补写默认字段，也不修改 SQLite；运行恢复单独提交。`media` 索引在 v5 成为联合类型：旧的生成媒体记录保持原字段按原校验器解析，`contractVersion=2/kind=film` 才走成片校验器，旧媒体不补 `kind`、不改写。旧 Mock Job 保持 contract v1，新 live Job 使用 v2。缺少视频字段的旧 Run 按 off 解释，execution v1/v2 与上下文 v1/v2 按原签名恢复；execution/context/checkpoint 仍为 3/2/1，工具面自 1/1 起逐代追加（当前为 18/18），恢复旧 Run 时按 `toolFeatures` 身份重建冻结注册表并核对签名，签名逐字节不变。迁移写入失败、损坏数据和未知版本保留原状态文件。新版本数据不能交给更旧的应用直接读取；回退需在服务退出后恢复完整数据目录，单份状态备份不能替代它。
+当前存储为 schema 10。打开 v1–v9 数据时，在实例锁下使用原版本校验器验证状态与消息，先将原始字节保存为同目录的 `state-v1-<UUID>.json` 等备份，再原子迁移。迁移只增加缺少的顶层集合（v4 新增 `storyboards`/`assets`，v5 新增 `films`，v6 新增 `episodes`/`scenes`/`characters`/`styles`，v7 新增 `audio`/`subtitleTracks`，v8 新增 `renders`，v9 新增 `seasons`/`batches`/`timelines`，v10 新增 `memories` 与会话到项目的绑定）并升级版本，历史 Job、Run、Operation、来源版本和指纹不重编码、不补写默认字段，也不修改 SQLite；运行恢复单独提交。`media` 索引在 v5 成为联合类型：旧的生成媒体记录保持原字段按原校验器解析，`contractVersion=2/kind=film` 才走成片校验器，旧媒体不补 `kind`、不改写。旧 Mock Job 保持 contract v1，新 live Job 使用 v2。缺少视频字段的旧 Run 按 off 解释，execution v1/v2 与上下文 v1/v2 按原签名恢复；execution/context/checkpoint 仍为 3/2/1，工具面自 1/1 起逐代追加（视频工具当前为 20/18；项目记忆的两个工具随能力代号 `projectMemory` 记录在 `toolFeatures`，旧 Run 恢复后不出现），恢复旧 Run 时按 `toolFeatures` 身份重建冻结注册表并核对签名，签名逐字节不变。迁移写入失败、损坏数据和未知版本保留原状态文件。新版本数据不能交给更旧的应用直接读取；回退需在服务退出后恢复完整数据目录，单份状态备份不能替代它。
 
 - 成功会话可跨重启继续；执行中的普通 Run 重启后标记为 `interrupted`，已提交产物保留，不自动重放。B3 保留有效的 `waiting_external` 和原 Run 名额，启动时核对等待、检查点、配置与原预算后继续；后续模型尝试已经开始但未完成时要求显式恢复。
 - B1 已登记但尚未提交的 Job 可由 Worker 继续推进；丢失提交结果的任务进入 `unknown`，不自动重提。已确认上游 ID 只用于继续查询，失败窗口和累计次数跨重启保留。

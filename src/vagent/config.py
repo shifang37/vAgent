@@ -90,6 +90,10 @@ class Config:
     context_version: int = 2
     context_tail: Literal["system", "human"] = "system"
     prompt_version: str = "v1"
+    # Project memory (schema 10) is on by default: it is the cross-session continuity the
+    # product exists for. `VAGENT_PROJECT_MEMORY=off` hides the memory tools and the
+    # rendered block while keeping the stored ledger, so a rollback loses no data.
+    project_memory_enabled: bool = True
     # Opt-in long-term memory (H2): an offline, retrievable index of confirmed facts.
     # Off keeps the rendered context and the contextSignature byte-identical to today.
     memory_enabled: bool = False
@@ -316,6 +320,12 @@ def load_config(env: Mapping[str, str] | None = None) -> Config:
     if prompt_version not in PROMPT_VERSIONS:
         raise AppError("INVALID_PROMPT_VERSION", "提示词版本不受支持，请使用 v1 或 v2。")
     memory_enabled = (env.get("VAGENT_MEMORY") or "off").strip().lower() in {"1", "on", "true", "yes"}
+    project_memory_enabled = (env.get("VAGENT_PROJECT_MEMORY") or "on").strip().lower() in {
+        "1",
+        "on",
+        "true",
+        "yes",
+    }
     try:
         memory_limit = int(env.get("VAGENT_MEMORY_LIMIT") or str(MEMORY_DEFAULT_LIMIT))
     except ValueError:
@@ -354,6 +364,7 @@ def load_config(env: Mapping[str, str] | None = None) -> Config:
         context_tail=context_tail,
         prompt_version=prompt_version,
         memory_enabled=memory_enabled,
+        project_memory_enabled=project_memory_enabled,
         memory_limit=memory_limit,
         tracing_enabled=tracing_enabled,
         trace_sample=trace_sample,

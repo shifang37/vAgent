@@ -16,8 +16,8 @@ def names(registry):
 
 
 def test_tool_versions_are_eighteen_and_sixteen_is_frozen():
-    assert (VIDEO_TOOLS_VERSION, VIDEO_RULES_VERSION) == (18, 18)
-    assert (LIVE_VIDEO_TOOLS_VERSION, LIVE_VIDEO_RULES_VERSION) == (18, 18)
+    assert (VIDEO_TOOLS_VERSION, VIDEO_RULES_VERSION) == (20, 18)
+    assert (LIVE_VIDEO_TOOLS_VERSION, LIVE_VIDEO_RULES_VERSION) == (20, 18)
     assert video_tools.M7_E1_TOOL_NAMES == ("season_save", "season_read")
     assert video_tools.M7_E2_TOOL_NAMES == ("season_generate",)
     assert video_tools.M7_E3_TOOL_NAMES == ("timeline_save", "timeline_read")
@@ -44,7 +44,7 @@ def test_tool_versions_are_eighteen_and_sixteen_is_frozen():
 def test_new_runs_publish_eighteen_and_frozen_sixteen_hides_the_timeline_tools(store):
     registry, _service, _adapter, _context = mock_tools(store)
     features = registry.features["video"]
-    assert (features["toolsVersion"], features["rulesVersion"]) == (18, 18)
+    assert (features["toolsVersion"], features["rulesVersion"]) == (20, 18)
     current = names(registry)
     assert {"timeline_save", "timeline_read", "season_generate", "film_render"} <= current
     assert "timeline-zh-v1" in registry.instructions

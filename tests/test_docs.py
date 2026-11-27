@@ -19,6 +19,7 @@ from vagent.tracing import Tracer
 ROOT = Path(__file__).resolve().parents[1]
 SWITCHES = (
     "VAGENT_CONTEXT_VERSION",
+    "VAGENT_PROJECT_MEMORY",
     "VAGENT_MEMORY",
     "VAGENT_MEMORY_LIMIT",
     "VAGENT_PROMPT_VERSION",
@@ -98,6 +99,9 @@ async def test_application_wires_the_environment_switches_to_the_runner(tmp_path
         runner = service.runner()
         assert (runner.context.format_version, runner.prompt_version) == (2, "v1")
         assert runner.memory is None and runner.tracing is None
+        # Project memory defaults to on: the two tools are part of the published surface.
+        names = {spec["function"]["name"] for spec in runner.tools.specs()}
+        assert {"memory_read", "memory_update"}.issubset(names)
 
     config = load_config(
         {
@@ -119,3 +123,9 @@ async def test_application_wires_the_environment_switches_to_the_runner(tmp_path
         assert isinstance(runner.memory, MemoryIndex) and runner.memory_limit == 8
         assert isinstance(runner.tracing, Tracer)
         assert (runner.tracing.sample_percent, runner.tracing.content) == (25, True)
+
+    rollback = load_config({"VAGENT_HOME": str(tmp_path / "rollback"), "VAGENT_PROJECT_MEMORY": "off"})
+    assert rollback.project_memory_enabled is False
+    async with ApplicationService.open(rollback, model=ScriptedModel(respond)) as service:
+        names = {spec["function"]["name"] for spec in service.runner().tools.specs()}
+        assert not {"memory_read", "memory_update"} & names

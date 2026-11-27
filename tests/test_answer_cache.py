@@ -130,7 +130,7 @@ async def test_read_only_enforced_and_tool_calls_not_cached(store):
         ),
     )
     specs = runner.tools.specs()
-    assert {s["function"]["name"] for s in specs} == {"project_read", "artifact_read"}
+    assert {s["function"]["name"] for s in specs} == {"project_read", "artifact_read", "memory_read"}
     result = await runner.run("test", "保存")
     assert result["status"] == "completed" and store.snapshot()["artifacts"] == {}
     assert "UNKNOWN_TOOL" in runner.model.inputs[1][-1].content

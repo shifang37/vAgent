@@ -269,6 +269,8 @@ async def test_existing_checkpoint_uses_legacy_layout_then_new_run_uses_v2(store
                 "tools": registry.specs(),
                 "skills": catalog.list(),
                 "contextBytes": 65536,
+                # Capability features (video, project memory) are part of the signature.
+                "toolFeatures": registry.features,
             },
             sort_keys=True,
             ensure_ascii=False,

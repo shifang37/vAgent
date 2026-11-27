@@ -60,7 +60,7 @@ from vagent.summary import (
     span_key,
     summary_target_bytes,
 )
-from vagent.tools import ToolRegistry
+from vagent.tools import PROJECT_MEMORY_FEATURE, ToolRegistry
 from vagent.tracing import Tracer, span
 from vagent.usage import extract_usage
 from vagent.wait_runtime import WaitService, close_pending_calls, execution_control, utc_now
@@ -1031,10 +1031,18 @@ class AgentRunner:
 
                 memory_failure_reported = False
                 memory_dropped_reported = False
+                project_memory_dropped_reported = False
+                # The capability is part of the published tool surface: a restored Run
+                # whose frozen tool set predates project memory must not gain the block
+                # (its layout and signature stay byte-identical).
+                project_memory_enabled = PROJECT_MEMORY_FEATURE in self.tools.features
 
                 def build_context(history_summary=None, *, summarize=None):
                     nonlocal memory_failure_reported, memory_dropped_reported
-                    project = store.snapshot()["projects"][project_id]
+                    nonlocal project_memory_dropped_reported
+                    snapshot = store.snapshot()
+                    project = snapshot["projects"][project_id]
+                    project_memory = snapshot["memories"].get(project_id) if project_memory_enabled else None
                     memory_block = None
                     if self.memory is not None:
                         # Sync is idempotent (content-addressed), then recall for this
@@ -1056,6 +1064,7 @@ class AgentRunner:
                         "summarize": summarizing if summarize is None else summarize,
                         "historySummary": history_summary is not None,
                         "memoryRecords": len(memory_block.splitlines()) if memory_block else 0,
+                        "projectMemoryEntries": len((project_memory or {}).get("entries") or []),
                     }
                     with span(tracer, "context.build", attributes=attributes) as context_span:
                         report = context.build(
@@ -1068,15 +1077,20 @@ class AgentRunner:
                             history_summary=history_summary,
                             summarize=summarizing if summarize is None else summarize,
                             memory_block=memory_block,
+                            project_memory=project_memory,
                         )
                         context_span.set(
                             inputBytes=report.input_bytes,
                             droppedMessages=report.dropped_messages,
                             memoryDropped=report.memory_dropped,
+                            projectMemoryDropped=report.project_memory_dropped,
                         )
                     if report.memory_dropped and not memory_dropped_reported:
                         memory_dropped_reported = True
                         self.emit({"type": "context.memory_dropped", "runId": record["id"]})
+                    if report.project_memory_dropped and not project_memory_dropped_reported:
+                        project_memory_dropped_reported = True
+                        self.emit({"type": "context.project_memory_dropped", "runId": record["id"]})
                     return report
 
                 report = build_context()

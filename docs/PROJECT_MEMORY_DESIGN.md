@@ -1,7 +1,7 @@
 # 项目记忆与跨会话延续（设计）
 
 > 日期：2026-11-27
-> 状态：P0（schema 10 数据层：`memories` 集合、`SessionV10.projectId`、v9→v10 迁移、`ensure_session` 绑定）已实现并通过全量回归；P1（项目/会话解耦）已实现，验收见 `tests/test_project_binding.py`；P2–P4 待实施。
+> 状态：P0（schema 10 数据层：`memories` 集合、`SessionV10.projectId`、v9→v10 迁移、`ensure_session` 绑定）已实现并通过全量回归；P1（项目/会话解耦）已实现，验收见 `tests/test_project_binding.py`；P2（记忆能力与上下文）已实现，验收见 `tests/test_project_memory_tools.py`、`tests/test_tool_versions.py`，实施记录见 §14；P3–P4 待实施。
 > 范围：项目/会话数据模型（schema 10）、上下文组装、工具面、CLI 与 Web 入口。
 > 参考：`docs/HARNESS_REVIEW_FIX_PLAN.md`（FX-12 尾部消息）、`docs/CONTEXT_OPTIMIZATION_ACCEPTANCE.md`（稳定前缀）、DSH 的 workspace + `AGENTS.md`、Claude Code 的 `CLAUDE.md` + auto memory。
 
@@ -175,10 +175,12 @@ class MemoryUpdate(Arguments):
 
 | 工具 | effect | 返回 | 备注 |
 |---|---|---|---|
-| `memory_read` | read | `{revision, entries, limits:{maxEntries, maxEntryChars, maxBytes}, bytes}` | 只读 Run 自动可用（`read_only()` 按 effect 过滤，`tools.py:304-305`） |
-| `memory_update` | write | `{revision, entries, bytes}` | 只读 Run 拒绝（`READ_ONLY`）；`progress` 条目拒绝 |
+| `memory_read` | read | `{revision, entries, limits:{maxEntries, maxEntryChars, maxBytes}, bytes}` | 只读 Run 自动可用（`read_only()` 按 effect 过滤，`tools.py:304-305`）；`bytes` 始终是整份台账的大小，`kind` 过滤只影响 `entries` |
+| `memory_update` | write | `{revision, entries, bytes}` | 只读 Run 拒绝（`READ_ONLY`）；`progress` 条目拒绝写入**也拒绝删除**（进度归代码所有，模型删掉同样是在编造进度）；无实际变化的写入不升 revision |
 
-工具面版本：当前为 18/18（工具 18 个、规则版本 18）。新增两个工具后工具数为 **20**；规则版本只在确实新增工具指引时才升（没有新指引就是 20/18）。实现要点——把 `memory_read` / `memory_update` 注册进 `create_project_tools()`，并把 `*MEMORY_TOOL_NAMES` 追加到 **所有 ≤ 18 的 `register_tools_variant` 的 `exclude`**（`src/vagent/video/tools.py` 现有 3–18 共十余个变体），否则恢复旧 Run 时冻结工具集会多出两个工具、签名不匹配。失败是关闭的（拒绝恢复），但必须逐一覆盖。同时把 `VIDEO_TOOLS_VERSION` / `LIVE_VIDEO_TOOLS_VERSION` 升到续写的下一个编号（建议 20，与 20 个工具的表面一致）。
+工具面版本：P2 之前为 18/18（工具 18 个、规则版本 18）。新增两个工具后工具数为 **20**；规则版本只在确实新增工具指引时才升（没有新指引就是 20/18）。实现要点——把 `memory_read` / `memory_update` 注册进 `create_project_tools()`，并把 `*MEMORY_TOOL_NAMES` 追加到 **所有 ≤ 18 的 `register_tools_variant` 的 `exclude`**（`src/vagent/video/tools.py` 现有 3–18 共十余个变体），否则恢复旧 Run 时冻结工具集会多出两个工具、签名不匹配。失败是关闭的（拒绝恢复），但必须逐一覆盖。同时把 `VIDEO_TOOLS_VERSION` / `LIVE_VIDEO_TOOLS_VERSION` 升到续写的下一个编号（建议 20，与 20 个工具的表面一致）。
+
+> P2 实施补充（见 §14）：两个工具挂在工具特性 `projectMemory` 下，`create_project_tools(memory=False)` 与 `VAGENT_PROJECT_MEMORY=off` 都复现"前 P2 表面"；`register_execution_variant` 的 1/2 也加入同样的 `exclude`，因为记录为空 `toolFeatures` 的旧 Run 走执行版本回退路径。18/18 表面另注册为冻结变体（toolsVersion/rulesVersion 均为 18，能力与 TTS 表一致），这样 P2 之前最后一批 Run 能按记录的签名恢复。记忆特性不带规则正文：两个工具的 description 已说明用法，`ToolRegistry.instructions` 跳过空文本，因此既有提示词逐字节不变。
 
 ## 6. 上下文注入
 
@@ -278,8 +280,8 @@ if version < 10:
 | 码 | 触发 | 语义 |
 |---|---|---|
 | `MEMORY_REVISION_CONFLICT` | `expectedRevision` 与当前不符 | 重新 `memory_read` 后再写 |
-| `MEMORY_LIMIT` | 条目数 / 单条长度 / 总字节超限 | 不写入，返回当前 `bytes` 与上限 |
-| `MEMORY_KIND_FORBIDDEN` | 模型写 `kind=progress` | 进度由代码维护 |
+| `MEMORY_LIMIT` | 条目数 / 单条长度 / 总字节超限 | 不写入，返回当前 `bytes` 与上限。单条长度的上限由处理器而不是参数 Schema 检查，因此 401 字符也是 `MEMORY_LIMIT` 而不是参数错误 |
+| `MEMORY_KIND_FORBIDDEN` | 模型写或删除 `kind=progress` 条目 | 进度由代码维护 |
 | `PROJECT_NOT_FOUND` | 绑定的项目不存在 | 新会话绑定失败 |
 | `SESSION_PROJECT_CONFLICT` | 会话已有 `projectId`，又传了不同的项目 | 项目不可中途更换 |
 
@@ -290,17 +292,17 @@ if version < 10:
 | 编号 | 场景 | 断言 | 测试 |
 |---|---|---|---|
 | P-01 | v9 状态迁移到 v10 | 备份存在；`memories={}`；旧会话不被改写（无 `projectId`）；历史字段逐字节不变；九个历史信封哈希不变 | `tests/test_project_memory.py`（P0 已交付） |
-| P-02 | 旧 Run 恢复 | 恢复后 `contextSignature` 与记录一致；布局字节不变 | `tests/test_project_memory.py::test_old_run_resumes_unchanged` |
-| P-03 | v2/v3/v4 布局 | 不传记忆时与今天逐字节相同 | 复用 `tests/test_context_layout_v4.py`、`tests/test_context_optimization.py` |
-| P-04 | 新会话绑定旧项目 | 首轮 system 含 `PROJECT_MEMORY_HEADER` 与全部条目；`project_read` 可见旧产物 | `test_new_session_sees_project_memory` |
-| P-05 | 记忆上限 | 65 条 / 401 字符 / 超 8 KiB 均 `MEMORY_LIMIT`，存储不变 | `test_memory_limits_are_enforced` |
-| P-06 | 乐观锁 | 两个串行更新后第二个旧 `expectedRevision` 得 `MEMORY_REVISION_CONFLICT` | `test_memory_revision_conflict` |
-| P-07 | 只读 Run | 工具面无 `memory_update`；强行调用得 `UNKNOWN_TOOL`/`READ_ONLY` | `test_read_only_cannot_update_memory` |
-| P-08 | 跨项目隔离 | 绑定项目 A 的会话读不到 B 的记忆与产物 | `test_memory_is_project_scoped` |
-| P-09 | 预算挤压 | 记忆把预算挤爆时先丢记忆并事件 `context.project_memory_dropped`，仍超限才 `CONTEXT_LIMIT` | `test_memory_dropped_before_context_limit` |
-| P-10 | 前缀稳定性 | 同一项目连续两步、记忆不变时，系统消息到记忆块为止逐字节相同（预算块仍每步变化） | `test_memory_keeps_prefix_stable` |
+| P-02 | 旧 Run 恢复 | 恢复后 `contextSignature` 与记录一致；布局字节不变 | `tests/test_project_memory_tools.py::test_old_run_resumes_unchanged` |
+| P-03 | v2/v3/v4 布局 | 不传记忆时与今天逐字节相同 | 复用 `tests/test_context_layout_v4.py`、`tests/test_context_optimization.py`；v1 不注入见 `test_v1_layout_never_renders_project_memory` |
+| P-04 | 新会话绑定旧项目 | 首轮 system 含 `PROJECT_MEMORY_HEADER` 与全部条目；`project_read` 可见旧产物 | `tests/test_project_memory_tools.py::test_new_session_sees_project_memory` |
+| P-05 | 记忆上限 | 65 条 / 401 字符 / 超 8 KiB 均 `MEMORY_LIMIT`，存储不变 | `test_project_memory_tools.py::test_memory_limits_are_enforced` |
+| P-06 | 乐观锁 | 两个串行更新后第二个旧 `expectedRevision` 得 `MEMORY_REVISION_CONFLICT` | `test_project_memory_tools.py::test_memory_revision_conflict` |
+| P-07 | 只读 Run | 工具面无 `memory_update`；强行调用得 `UNKNOWN_TOOL`/`READ_ONLY` | `test_project_memory_tools.py::test_read_only_cannot_update_memory` |
+| P-08 | 跨项目隔离 | 绑定项目 A 的会话读不到 B 的记忆与产物 | `test_project_memory_tools.py::test_memory_is_project_scoped` |
+| P-09 | 预算挤压 | 记忆把预算挤爆时先丢记忆并事件 `context.project_memory_dropped`，仍超限才 `CONTEXT_LIMIT` | `test_project_memory_tools.py::test_memory_dropped_before_context_limit`、`test_run_reports_the_project_memory_drop` |
+| P-10 | 前缀稳定性 | 同一项目连续两步、记忆不变时，系统消息到记忆块为止逐字节相同（预算块仍每步变化） | `test_project_memory_tools.py::test_memory_keeps_prefix_stable` |
 | P-11 | 命令兼容 | `vagent chat -s default` 行为不变；`--project` 生效且优先级符合 D6 | `tests/test_project_binding.py` |
-| P-12 | 工具版本冻结 | 所有 ≤18 变体恢复后不含 `memory_*`；新版本变体含两个工具 | `tests/test_tool_versions.py`（新增或扩展） |
+| P-12 | 工具版本冻结 | 所有 ≤18 变体恢复后不含 `memory_*`；新版本变体含两个工具 | `tests/test_tool_versions.py` |
 | P-13 | 视频域回归 | 绑定旧项目的新会话能看到旧 Job、分镜、分集与成片（覆盖 7.1 的三处 `_check_context` 与预览上下文） | `test_new_session_sees_existing_video_state` |
 
 ## 11. 实施顺序
@@ -315,10 +317,10 @@ if version < 10:
 - 统一解析入口：`storage.project_of_session(state, session_id)`（无绑定 = 自身 id）与 `FileStore.project_of()`。
 - 验收：P-13（`tests/test_project_binding.py`，含三处 `_check_context` 的正反向断言与预览路径）；旧用法回归（`-s default` 行为不变，全量套件对照 HEAD 基线无新增失败）。
 
-**P2 记忆能力与上下文**
+**P2 记忆能力与上下文** ✅ 已实现
 - `memories` 读写、`memory_read` / `memory_update`、上限与错误码。
 - `ContextBuilder` 注入 + 丢弃策略 + 事件；工具变体冻结。
-- 验收：P-02–P-10、P-12。
+- 验收：P-02–P-10、P-12；实施记录与偏差见 §14。
 
 **P3 会话绑定入口**
 - `create_session(project_id)`、`start(project_id)`、CLI `--project`、`POST /api/sessions`、`GET /api/projects`。
@@ -348,3 +350,29 @@ if version < 10:
 2. 是否把 `memories` 同步进 H2 检索（`memory.json`）以便"按语义召回"？暂不合并，避免两套记忆互相污染。
 3. 同一项目绑定多个会话后，是否需要在会话列表里展示"项目 / 会话"两级导航？P2 只返回 `projectId`，UI 另立任务。
 4. 多集批量推进是否引入"项目级 Run 串行队列"？当前仍是一个会话一个 Run，`RUN_BUSY` 保持全局。
+
+## 14. 实施记录（P2，2026-11-27）
+
+新增/修改：
+
+| 位置 | 内容 |
+|---|---|
+| `src/vagent/project_memory.py`（新） | 上限常量、`read_memory` / `update_memory`、排序与字节计量；所有上限在此判定，超限返回 `MEMORY_LIMIT` |
+| `src/vagent/context.py` | `PROJECT_MEMORY_HEADER`、`MEMORY_KIND_ORDER`、`project_memory_block()`；`build()` / `_build()` 新参数 `project_memory`；`ContextReport.project_memory_dropped`；先丢项目记忆、再丢 H2 记忆的降级顺序 |
+| `src/vagent/tools.py` | `MemoryRead` / `MemoryEntryInput` / `MemoryUpdate` 参数模型、两个工具处理器、工具特性 `projectMemory`、`create_project_tools(memory=...)`；`for_record_features({})` 复现"无特性时代"的核心表面；`instructions` 跳过空文本 |
+| `src/vagent/video/tools.py` | mock 20/18 与 live 20/18；新增 18/18 冻结变体；所有 ≤18 `register_tools_variant` 与执行变体 1/2 的 `exclude` 加入 `MEMORY_TOOL_NAMES` |
+| `src/vagent/runner.py` | 从 `state["memories"]` 取当前项目台账注入；特性不在工具面时不注入（旧 Run 布局不变）；`context.project_memory_dropped` 事件与 trace 属性 |
+| `src/vagent/config.py` / `application.py` / `cli.py` | `project_memory_enabled`（`VAGENT_PROJECT_MEMORY`，默认 `on`）与入口透传 |
+| 文档 | `README.md`、`docs/USER_GUIDE.md`、`.env.example` 记录开关 |
+
+与本文原设计的偏差（均为了"旧 Run 必须能恢复"这一硬约束）：
+
+1. **记忆工具挂在特性 `projectMemory` 下，而不是无特性地平铺进核心工具集。** 工具的增删本身就是签名的一部分；用特性记录"这个 Run 见过项目记忆"，旧 Run 就能按记录复现。`for_record_features` 原来把空 `toolFeatures` 解释成"当前表面"，现在解释成"当前表面去掉 P2 之后新增的特性"，这样连 `toolFeatures={}` 的旧文本 Run 也能逐字节恢复。
+2. **`register_execution_variant(1|2)` 也要 `exclude` 两个工具**：记录 `toolFeatures={}` 的旧 Run 走执行版本回退路径，原设计只提到 `register_tools_variant` 会漏掉这条路。
+3. **18/18 表面必须冻结成变体**：本次是工具面从 18 跳到 20，18 是上一个已发布表面，不注册就无法恢复 P2 之前最后一批 Run。
+4. **记忆特性不带规则正文。** 若写入指引，`ToolFeature.instructions` 会替换基础提示词里的能力段落（"当前只能准备文本创作材料"整段被换掉），对纯文本 Run 是行为回退。因此用法只写在两个工具的 description 里，`instructions` 跳过空块，既有提示词逐字节不变。
+5. **删除 `progress` 条目也拒绝。** 原文只禁止写 progress；但让模型删除同样是在改写进度，故一并 `MEMORY_KIND_FORBIDDEN`。
+6. **无实际变化的写入不升 revision**；不存在的 key 做 `remove` 是无害的空操作。
+7. **签名只记录能力代号，不记录上限。** 特性配置是 `{"version": 1}`；上限常量可以随 §12 的风险处置收紧而不拒绝所有在飞 Run，`memory_read` 每次都返回当前 `limits`。
+
+验收：`tests/test_project_memory_tools.py`（P-04–P-10 与 P-02）、`tests/test_tool_versions.py`（P-12）；既有版本断言从 18 更新为 20（规则版本仍 18），`tests/test_b0_compatibility.py` 用 `create_project_tools(memory=False)` 复现冻结签名，恢复路径本身仍用今天的默认表面验证。

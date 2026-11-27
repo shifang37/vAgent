@@ -12,12 +12,18 @@ from pydantic import BaseModel, ConfigDict, Field, ValidationError, model_valida
 from pydantic.alias_generators import to_camel
 
 from vagent.errors import AppError, failure, public_error
+from vagent.project_memory import read_memory, update_memory
 from vagent.quality import check_project_memory, content_check, project_memory_conflicts
 from vagent.storage import FileStore, now, project_of_session
 from vagent.waiting import DeferredToolResult, ToolExecutionContext
 
 MAX_TOOL_ARGUMENT_BYTES = 32 * 1024
 MAX_SCHEMA_DEPTH = 16
+# The capability name that owns the project-memory tools. It is recorded in a Run's
+# toolFeatures, so a Run started before the capability existed (or with it switched off)
+# restores its exact pre-memory tool surface instead of gaining two unknown tools.
+PROJECT_MEMORY_FEATURE = "projectMemory"
+MEMORY_TOOL_NAMES = ("memory_read", "memory_update")
 # ``pattern`` reach Python's backtracking ``re`` engine, which cannot be interrupted with
 # a timeout (the GIL stays held), so a server could publish ``^(a+)+$`` and freeze the
 # event loop. External ``$ref`` would pull in a schema the harness never reviewed.
@@ -107,6 +113,50 @@ class ArtifactRead(Arguments):
     version: int | None = Field(default=None, ge=1)
     offset: int = Field(default=0, ge=0)
     limit: int = Field(default=4000, ge=1, le=8000)
+
+
+class MemoryRead(Arguments):
+    kind: Literal["fact", "decision", "progress", "todo"] | None = None
+
+
+class MemoryEntryInput(Arguments):
+    key: str = Field(
+        pattern=r"^[a-z][a-z0-9-]{0,63}$",
+        description="稳定的条目标识，例如 ep-03 或 style-rain；写入同一 key 即覆盖。",
+    )
+    kind: Literal["fact", "decision", "progress", "todo"]
+    # The ledger's own 400-character limit is enforced by the handler so that every
+    # limit violation answers MEMORY_LIMIT instead of a generic schema error.
+    text: str = Field(min_length=1)
+
+
+class MemoryUpdate(Arguments):
+    expected_revision: int = Field(ge=0, description="memory_read 返回的 revision。")
+    upsert: list[MemoryEntryInput] = Field(default_factory=list, max_length=32)
+    remove: list[str] = Field(default_factory=list, max_length=32)
+
+    @model_validator(mode="after")
+    def require_a_change(self):
+        if not self.upsert and not self.remove:
+            raise ValueError("upsert 与 remove 至少给一个")
+        keys = [entry.key for entry in self.upsert]
+        if len(set(keys)) != len(keys):
+            raise ValueError("upsert 的 key 不能重复")
+        return self
+
+
+def _memory_read(args: dict, state: dict, project_id: str) -> dict:
+    return read_memory(state, project_id, args.get("kind"))
+
+
+def _memory_update(args: dict, state: dict, project_id: str) -> dict:
+    return update_memory(
+        state,
+        project_id,
+        expected_revision=args["expectedRevision"],
+        upsert=args.get("upsert") or [],
+        remove=args.get("remove") or [],
+    )
 
 
 @dataclass(frozen=True)
@@ -222,8 +272,13 @@ class ToolRegistry:
 
         Returns None when no frozen tool set reproduces the record, so the caller
         keeps the execution-version view and the signature check can refuse.
+        A record with no features at all predates the project-memory capability (and
+        every capability after it): its signed surface is today's core surface *without*
+        those tools, which is what this view reproduces.
         """
-        if not recorded or recorded == self.features:
+        if not recorded:
+            return self.without_feature(PROJECT_MEMORY_FEATURE)
+        if recorded == self.features:
             return self
         for version in sorted(self._tool_variants):
             candidate = self.for_tools_version(version)
@@ -272,7 +327,10 @@ class ToolRegistry:
 
     @property
     def instructions(self) -> str:
-        return "\n".join(feature.instructions for feature in self._active_features())
+        # A capability can be purely descriptive (project memory: its rules live in the
+        # tool descriptions). An empty block must not inject a stray blank line into a
+        # prompt that other features still render byte-for-byte.
+        return "\n".join(feature.instructions for feature in self._active_features() if feature.instructions)
 
     @property
     def bypass_answer_cache(self) -> bool:
@@ -602,7 +660,14 @@ def _artifact_read(args: dict, state: dict, project_id: str) -> dict:
     }
 
 
-def create_project_tools() -> ToolRegistry:
+def create_project_tools(*, memory: bool = True) -> ToolRegistry:
+    """The core tool surface; ``memory=False`` reproduces the pre-P2 one.
+
+    Project memory is published under its own tool feature (``projectMemory``) so that
+    a Run recorded before the capability, or started with ``VAGENT_PROJECT_MEMORY=off``,
+    is restored with exactly the surface it signed. The video tool variants pass
+    ``MEMORY_TOOL_NAMES`` as their ``exclude`` for the same reason.
+    """
     definitions = [
         ToolDefinition(
             "project_read",
@@ -646,7 +711,41 @@ def create_project_tools() -> ToolRegistry:
             _artifact_read,
         ),
     ]
+    memory_definitions = [
+        ToolDefinition(
+            "memory_read",
+            "读取本项目的持久记忆与当前 revision：跨会话的进展(progress)、决定(decision)、"
+            "待办(todo)与事实(fact)，可只读一种 kind。返回 limits 与当前 bytes；"
+            "没有记忆时返回 revision=0 与空列表。",
+            MemoryRead,
+            "read",
+            _memory_read,
+            feature=PROJECT_MEMORY_FEATURE,
+        ),
+        ToolDefinition(
+            "memory_update",
+            "在 expectedRevision 上增删项目记忆：upsert 按 key 新增或覆盖 fact/decision/todo，"
+            "remove 按 key 删除；超限或版本不符整次拒绝且不写入。进度(progress)由系统维护，"
+            "模型不能写入或删除。只保存跨会话仍需知道的事实、决定、进度与待办。",
+            MemoryUpdate,
+            "write",
+            _memory_update,
+            feature=PROJECT_MEMORY_FEATURE,
+        ),
+    ]
     registry = ToolRegistry()
+    if memory:
+        registry.register_feature(
+            ToolFeature(
+                name=PROJECT_MEMORY_FEATURE,
+                # Only the capability generation is signed: the ledger's bounds are code
+                # constants that may be tightened without refusing every in-flight Run
+                # (memory_read always reports the current limits).
+                configuration={"version": 1},
+                instructions="",
+            )
+        )
+        definitions = [*definitions, *memory_definitions]
     for definition in definitions:
         registry.register(definition)
     return registry

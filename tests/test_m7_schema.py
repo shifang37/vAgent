@@ -150,8 +150,8 @@ def test_frozen_stage_limits_and_tool_groups():
     limits = BASELINE["limits"]
     assert limits["storageSchemaVersion"] == 8
     assert limits["tools"]["videoToolsVersion"] == 13
-    assert (tools.VIDEO_TOOLS_VERSION, tools.VIDEO_RULES_VERSION) == (18, 18)
-    assert (tools.LIVE_VIDEO_TOOLS_VERSION, tools.LIVE_VIDEO_RULES_VERSION) == (18, 18)
+    assert (tools.VIDEO_TOOLS_VERSION, tools.VIDEO_RULES_VERSION) == (20, 18)
+    assert (tools.LIVE_VIDEO_TOOLS_VERSION, tools.LIVE_VIDEO_RULES_VERSION) == (20, 18)
     groups = {
         "M2": tools.M2_TOOL_NAMES,
         "M3": tools.M3_TOOL_NAMES,

@@ -10,7 +10,7 @@ from pydantic import Field, field_validator, model_validator
 from vagent.contracts import Identifier
 from vagent.errors import AppError, failure
 from vagent.storage import FileStore
-from vagent.tools import Arguments, ToolDefinition, ToolFeature, ToolRegistry
+from vagent.tools import MEMORY_TOOL_NAMES, Arguments, ToolDefinition, ToolFeature, ToolRegistry
 from vagent.video.adaptation import plan_episode
 from vagent.video.audio import AudioGenerateArgs
 from vagent.video.audio_service import episode_audio_view
@@ -67,10 +67,13 @@ from vagent.waiting import (
 # film_render/render_read and raises both to 13/13, freezing 11/11. M7 E1 appends
 # season_save/season_read and raises both to 15/15, freezing 13/13. M7 E2 appends
 # season_generate and raises both to 16/16, freezing 15/15. M7 E3 appends the timeline
-# pair and raises both to 18/18, freezing 16/16.
-VIDEO_TOOLS_VERSION = 18
+# pair and raises both to 18/18, freezing 16/16. Project memory (P2) appends two core
+# tools, so the video surface rises to 20/18: the rules text did not change, and every
+# earlier variant (including 18/18) must exclude the two new names or a restored Run
+# would be signed with a tool set it never saw.
+VIDEO_TOOLS_VERSION = 20
 VIDEO_RULES_VERSION = 18
-LIVE_VIDEO_TOOLS_VERSION = 18
+LIVE_VIDEO_TOOLS_VERSION = 20
 LIVE_VIDEO_RULES_VERSION = 18
 WAIT_TIMEOUT_SECONDS = 600
 # One episode may hold up to 20 shots and 20 Jobs, so one collection wait covers a
@@ -1356,7 +1359,7 @@ def register_video_tools(registry: ToolRegistry, service: JobService, *, mode="m
                 )
             ],
             descriptions={},
-            exclude=PRE_M7_E3_TOOL_NAMES,
+            exclude=(*MEMORY_TOOL_NAMES, *PRE_M7_E3_TOOL_NAMES),
             definitions={
                 "await_job": frozen_await(AWAIT_DESCRIPTION_M1C),
                 "video_generate": frozen_generate,
@@ -1378,6 +1381,7 @@ def register_video_tools(registry: ToolRegistry, service: JobService, *, mode="m
                 )
             ],
             exclude=(
+                *MEMORY_TOOL_NAMES,
                 *M3_TOOL_NAMES,
                 *M5_TOOL_NAMES,
                 *M5_E2_TOOL_NAMES,
@@ -1407,6 +1411,7 @@ def register_video_tools(registry: ToolRegistry, service: JobService, *, mode="m
                 )
             ],
             exclude=(
+                *MEMORY_TOOL_NAMES,
                 *M5_TOOL_NAMES,
                 *M5_E2_TOOL_NAMES,
                 *M5_E3_TOOL_NAMES,
@@ -1435,6 +1440,7 @@ def register_video_tools(registry: ToolRegistry, service: JobService, *, mode="m
                 )
             ],
             exclude=(
+                *MEMORY_TOOL_NAMES,
                 *M5_TOOL_NAMES,
                 *M5_E2_TOOL_NAMES,
                 *M5_E3_TOOL_NAMES,
@@ -1464,6 +1470,7 @@ def register_video_tools(registry: ToolRegistry, service: JobService, *, mode="m
                 )
             ],
             exclude=(
+                *MEMORY_TOOL_NAMES,
                 *M5_E2_TOOL_NAMES,
                 *M5_E3_TOOL_NAMES,
                 *M6_E1_TOOL_NAMES,
@@ -1491,6 +1498,7 @@ def register_video_tools(registry: ToolRegistry, service: JobService, *, mode="m
                 )
             ],
             exclude=(
+                *MEMORY_TOOL_NAMES,
                 *M5_E3_TOOL_NAMES,
                 *M6_E1_TOOL_NAMES,
                 *M6_E2_TOOL_NAMES,
@@ -1517,6 +1525,7 @@ def register_video_tools(registry: ToolRegistry, service: JobService, *, mode="m
                 )
             ],
             exclude=(
+                *MEMORY_TOOL_NAMES,
                 *M6_E1_TOOL_NAMES,
                 *M6_E2_TOOL_NAMES,
                 *M6_E3_TOOL_NAMES,
@@ -1542,6 +1551,7 @@ def register_video_tools(registry: ToolRegistry, service: JobService, *, mode="m
                 )
             ],
             exclude=(
+                *MEMORY_TOOL_NAMES,
                 *M6_E2_TOOL_NAMES,
                 *M6_E3_TOOL_NAMES,
                 *M7_E1_TOOL_NAMES,
@@ -1565,7 +1575,13 @@ def register_video_tools(registry: ToolRegistry, service: JobService, *, mode="m
                     bypass_answer_cache=True,
                 )
             ],
-            exclude=(*M6_E3_TOOL_NAMES, *M7_E1_TOOL_NAMES, *M7_E2_TOOL_NAMES, *M7_E3_TOOL_NAMES),
+            exclude=(
+                *MEMORY_TOOL_NAMES,
+                *M6_E3_TOOL_NAMES,
+                *M7_E1_TOOL_NAMES,
+                *M7_E2_TOOL_NAMES,
+                *M7_E3_TOOL_NAMES,
+            ),
         )
         # 13/13 froze the M6 E3 render surface; M7 E1 hides only its two season tools.
         registry.register_tools_variant(
@@ -1584,7 +1600,7 @@ def register_video_tools(registry: ToolRegistry, service: JobService, *, mode="m
                     bypass_answer_cache=True,
                 )
             ],
-            exclude=(*M7_E1_TOOL_NAMES, *M7_E2_TOOL_NAMES, *M7_E3_TOOL_NAMES),
+            exclude=(*MEMORY_TOOL_NAMES, *M7_E1_TOOL_NAMES, *M7_E2_TOOL_NAMES, *M7_E3_TOOL_NAMES),
         )
         # 15/15 froze the M7 E1 season surface; E2 hides only its season batch tool.
         registry.register_tools_variant(
@@ -1603,7 +1619,7 @@ def register_video_tools(registry: ToolRegistry, service: JobService, *, mode="m
                     bypass_answer_cache=True,
                 )
             ],
-            exclude=(*M7_E2_TOOL_NAMES, *M7_E3_TOOL_NAMES),
+            exclude=(*MEMORY_TOOL_NAMES, *M7_E2_TOOL_NAMES, *M7_E3_TOOL_NAMES),
         )
         # 16/16 froze the M7 E2 batch surface; E3 hides only its two timeline tools.
         registry.register_tools_variant(
@@ -1622,7 +1638,7 @@ def register_video_tools(registry: ToolRegistry, service: JobService, *, mode="m
                     bypass_answer_cache=True,
                 )
             ],
-            exclude=M7_E3_TOOL_NAMES,
+            exclude=(*MEMORY_TOOL_NAMES, *M7_E3_TOOL_NAMES),
         )
     else:
         legacy_capabilities = legacy_mock_capabilities()
@@ -1642,7 +1658,7 @@ def register_video_tools(registry: ToolRegistry, service: JobService, *, mode="m
                 )
             ],
             descriptions={},
-            exclude=PRE_M7_E3_TOOL_NAMES,
+            exclude=(*MEMORY_TOOL_NAMES, *PRE_M7_E3_TOOL_NAMES),
             definitions={"await_job": frozen_await(LEGACY_AWAIT_DESCRIPTION)},
         )
         registry.register_execution_variant(
@@ -1661,7 +1677,7 @@ def register_video_tools(registry: ToolRegistry, service: JobService, *, mode="m
                 )
             ],
             descriptions={},
-            exclude=PRE_M7_E3_TOOL_NAMES,
+            exclude=(*MEMORY_TOOL_NAMES, *PRE_M7_E3_TOOL_NAMES),
             definitions={"await_job": frozen_await(AWAIT_DESCRIPTION_M1C)},
         )
         registry.register_tools_variant(
@@ -1680,6 +1696,7 @@ def register_video_tools(registry: ToolRegistry, service: JobService, *, mode="m
                 )
             ],
             exclude=(
+                *MEMORY_TOOL_NAMES,
                 *M3_TOOL_NAMES,
                 *M5_TOOL_NAMES,
                 *M5_E2_TOOL_NAMES,
@@ -1708,6 +1725,7 @@ def register_video_tools(registry: ToolRegistry, service: JobService, *, mode="m
                 )
             ],
             exclude=(
+                *MEMORY_TOOL_NAMES,
                 *M5_TOOL_NAMES,
                 *M5_E2_TOOL_NAMES,
                 *M5_E3_TOOL_NAMES,
@@ -1735,6 +1753,7 @@ def register_video_tools(registry: ToolRegistry, service: JobService, *, mode="m
                 )
             ],
             exclude=(
+                *MEMORY_TOOL_NAMES,
                 *M5_TOOL_NAMES,
                 *M5_E2_TOOL_NAMES,
                 *M5_E3_TOOL_NAMES,
@@ -1762,6 +1781,7 @@ def register_video_tools(registry: ToolRegistry, service: JobService, *, mode="m
                 )
             ],
             exclude=(
+                *MEMORY_TOOL_NAMES,
                 *M5_E2_TOOL_NAMES,
                 *M5_E3_TOOL_NAMES,
                 *M6_E1_TOOL_NAMES,
@@ -1788,6 +1808,7 @@ def register_video_tools(registry: ToolRegistry, service: JobService, *, mode="m
                 )
             ],
             exclude=(
+                *MEMORY_TOOL_NAMES,
                 *M5_E3_TOOL_NAMES,
                 *M6_E1_TOOL_NAMES,
                 *M6_E2_TOOL_NAMES,
@@ -1814,6 +1835,7 @@ def register_video_tools(registry: ToolRegistry, service: JobService, *, mode="m
                 )
             ],
             exclude=(
+                *MEMORY_TOOL_NAMES,
                 *M6_E1_TOOL_NAMES,
                 *M6_E2_TOOL_NAMES,
                 *M6_E3_TOOL_NAMES,
@@ -1839,6 +1861,7 @@ def register_video_tools(registry: ToolRegistry, service: JobService, *, mode="m
                 )
             ],
             exclude=(
+                *MEMORY_TOOL_NAMES,
                 *M6_E2_TOOL_NAMES,
                 *M6_E3_TOOL_NAMES,
                 *M7_E1_TOOL_NAMES,
@@ -1862,7 +1885,13 @@ def register_video_tools(registry: ToolRegistry, service: JobService, *, mode="m
                     bypass_answer_cache=True,
                 )
             ],
-            exclude=(*M6_E3_TOOL_NAMES, *M7_E1_TOOL_NAMES, *M7_E2_TOOL_NAMES, *M7_E3_TOOL_NAMES),
+            exclude=(
+                *MEMORY_TOOL_NAMES,
+                *M6_E3_TOOL_NAMES,
+                *M7_E1_TOOL_NAMES,
+                *M7_E2_TOOL_NAMES,
+                *M7_E3_TOOL_NAMES,
+            ),
         )
         # 13/13 froze the M6 E3 render surface; M7 E1 hides only its two season tools.
         registry.register_tools_variant(
@@ -1881,7 +1910,7 @@ def register_video_tools(registry: ToolRegistry, service: JobService, *, mode="m
                     bypass_answer_cache=True,
                 )
             ],
-            exclude=(*M7_E1_TOOL_NAMES, *M7_E2_TOOL_NAMES, *M7_E3_TOOL_NAMES),
+            exclude=(*MEMORY_TOOL_NAMES, *M7_E1_TOOL_NAMES, *M7_E2_TOOL_NAMES, *M7_E3_TOOL_NAMES),
         )
         # 15/15 froze the M7 E1 season surface; E2 hides only its season batch tool.
         registry.register_tools_variant(
@@ -1900,7 +1929,7 @@ def register_video_tools(registry: ToolRegistry, service: JobService, *, mode="m
                     bypass_answer_cache=True,
                 )
             ],
-            exclude=(*M7_E2_TOOL_NAMES, *M7_E3_TOOL_NAMES),
+            exclude=(*MEMORY_TOOL_NAMES, *M7_E2_TOOL_NAMES, *M7_E3_TOOL_NAMES),
         )
         # 16/16 froze the M7 E2 batch surface; E3 hides only its two timeline tools.
         registry.register_tools_variant(
@@ -1919,8 +1948,29 @@ def register_video_tools(registry: ToolRegistry, service: JobService, *, mode="m
                     bypass_answer_cache=True,
                 )
             ],
-            exclude=M7_E3_TOOL_NAMES,
+            exclude=(*MEMORY_TOOL_NAMES, *M7_E3_TOOL_NAMES),
         )
+    # 20/18 superseded 18/18 for new Runs; the 18/18 features are re-registered verbatim
+    # (same capabilities, TTS table and rules text) so a Run recorded just before project
+    # memory restores with exactly the tool surface it signed — without the two new tools.
+    registry.register_tools_variant(
+        18,
+        features=[
+            ToolFeature(
+                name="video",
+                configuration={
+                    "mode": mode,
+                    "toolsVersion": 18,
+                    "rulesVersion": 18,
+                    "capabilities": capabilities,
+                    "tts": tts_capabilities(mode),
+                },
+                instructions=LIVE_VIDEO_RULES_V18 if live else VIDEO_RULES_V18,
+                bypass_answer_cache=True,
+            )
+        ],
+        exclude=MEMORY_TOOL_NAMES,
+    )
     registry.register_wait_resolver(
         "job", lambda binding: resolve_job_wait(service.store, binding, service=service), feature="video"
     )

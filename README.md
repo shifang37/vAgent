@@ -183,6 +183,7 @@ VAGENT_DEEPSEEK_MODEL=deepseek-flash
 | 开关 | 默认 | 作用 | 对签名 / 恢复的影响 |
 |---|---|---|---|
 | `VAGENT_CONTEXT_VERSION` | `2` | `2` 稳定前缀；`3` 历史摘要；`4` 尾部动态消息（配合 `VAGENT_CONTEXT_TAIL=system\|human`） | 版本改变签名；旧 Run 需新请求 |
+| `VAGENT_PROJECT_MEMORY` | `on` | 项目记忆：注册 `memory_read` / `memory_update` 并把台账渲染进 system 前缀 | `off` 隐藏两个工具与记忆块（数据保留），工具面改变签名；默认 `on` |
 | `VAGENT_MEMORY` | `off` | 开启 `memory.json` 项目级长期记忆，召回已确认事实 | 开启后记忆块进入上下文并改变签名 |
 | `VAGENT_MEMORY_LIMIT` | `4` | 每个项目最多渲染的记忆条数（1–16） | 改变上下文内容与签名 |
 | `VAGENT_PROMPT_VERSION` | `v1` | `v1` 冻结；`v2` 追加数据通道硬化子句 | 模板文本进入签名，切换即拒绝恢复旧 Run |

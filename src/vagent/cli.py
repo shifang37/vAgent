@@ -633,7 +633,8 @@ def local_episode_save(config, store, args) -> int:
     if args.request_id is None:
         args.request_id = str(uuid4())
     registry = register_video_tools(
-        create_project_tools(), JobService(store, [MockVideoAdapter(store)], config=config)
+        create_project_tools(memory=config.project_memory_enabled),
+        JobService(store, [MockVideoAdapter(store)], config=config),
     )
     result = registry.execute(
         "episode_save",
@@ -1667,9 +1668,7 @@ def main() -> None:
                     {
                         "project": state["projects"].get(project_id),
                         "projectId": project_id,
-                        "artifacts": [
-                            a for a in state["artifacts"].values() if a["projectId"] == project_id
-                        ],
+                        "artifacts": [a for a in state["artifacts"].values() if a["projectId"] == project_id],
                         "runs": [
                             {
                                 **{

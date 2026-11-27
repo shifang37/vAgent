@@ -51,10 +51,12 @@ class LegacyModel:
 async def test_b0_preserves_v1_execution_with_both_context_layouts(store, version, enable_video):
     # 1 and 2 remain recoverable generations; M2 adds version 3.
     assert CHECKPOINT_VERSION == 1 and WAIT_EXECUTION_VERSION == 3
+    # The persisted v1 Runs predate project memory, so the original configuration is the
+    # core surface without those two tools (the default factory published them later).
     runner = AgentRunner(
         store=store,
         model=LegacyModel(),
-        tools=create_project_tools(),
+        tools=create_project_tools(memory=False),
         context=ContextBuilder(format_version=version),
     )
     assert runner.context_signature() == LEGACY_SIGNATURES[version]

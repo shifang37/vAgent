@@ -89,7 +89,7 @@ async def test_application_model_discovers_capability_and_creates_one_job(tmp_pa
         record = service.run_record(service.active_run_id)
         assert record["status"] == "completed", record["answer"]
         assert record["videoMode"] == "mock" and record["executionVersion"] == 3
-        assert record["toolFeatures"]["video"]["toolsVersion"] == 18
+        assert record["toolFeatures"]["video"]["toolsVersion"] == 20
         assert record["toolFeatures"]["video"]["capabilities"] == [
             item.model_dump(mode="json", by_alias=True) for item in service.video_jobs.capabilities("mock")
         ]
@@ -252,7 +252,10 @@ async def test_old_off_application_run_resumes_under_new_mock_startup(tmp_path):
             return tool_call("project_read")
         raise RuntimeError("offline interrupted request")
 
-    off = Config(home=tmp_path, api_key=None)
+    # A genuinely pre-B2, video-off Run was recorded without the project-memory tools, so
+    # the simulated record is created with that same core surface (P2: the memory tools
+    # are a capability the old record predates and must not be added on resume).
+    off = Config(home=tmp_path, api_key=None, project_memory_enabled=False)
     async with ApplicationService.open(off, model=ScriptedModel(fail_after_read)) as service:
         await service.start("coffee", "读取项目", "original")
         await service.task
