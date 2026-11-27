@@ -216,7 +216,7 @@ AgentRunner  JobWorker    MediaWorker     WaitCoordinator
 LangGraph 图  串行提交/查询  下载/校验/落盘    持久等待续接
    │
    ▼
-Store：state.json（schema 9，单写锁、事务、原子替换、逐字节备份迁移）
+Store：state.json（schema 10，单写锁、事务、原子替换、逐字节备份迁移）
        checkpoints.sqlite（LangGraph 检查点） · media/ · billing.json
 ```
 

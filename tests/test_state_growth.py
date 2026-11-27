@@ -80,7 +80,7 @@ def test_open_still_writes_a_brand_new_store(tmp_path):
     home = tmp_path / "state"
     with FileStore.open(home):
         pass
-    assert json.loads((home / "state.json").read_text(encoding="utf-8"))["schemaVersion"] == 9
+    assert json.loads((home / "state.json").read_text(encoding="utf-8"))["schemaVersion"] == 10
 
 
 def test_stale_lock_from_a_dead_pid_is_reclaimed(tmp_path):
@@ -91,7 +91,7 @@ def test_stale_lock_from_a_dead_pid_is_reclaimed(tmp_path):
         json.dumps({"pid": dead, "createdAt": "2026-01-01T00:00:00+00:00"}), encoding="utf-8"
     )
     with FileStore.open(home) as store:
-        assert store.snapshot()["schemaVersion"] == 9
+        assert store.snapshot()["schemaVersion"] == 10
     assert not (home / "instance.lock").exists()
 
 
@@ -197,7 +197,7 @@ def test_explicit_last_good_snapshot_and_restore(tmp_path):
         store.snapshot_last_good()
     (home / "state.json").write_text("{broken", encoding="utf-8")
     result = restore_last_good(home)
-    assert result["schemaVersion"] == 9
+    assert result["schemaVersion"] == 10
     restored = json.loads((home / "state.json").read_text(encoding="utf-8"))
     assert "run_keep" in restored["runs"]
     assert list(home.glob("state-invalid-*.json"))

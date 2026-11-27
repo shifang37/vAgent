@@ -164,7 +164,7 @@ def test_cli_season_show_and_save(tmp_path):
 
     with FileStore.open(home) as store:
         state = store.snapshot()
-        assert state["schemaVersion"] == 9
+        assert state["schemaVersion"] == 10
         assert state["jobs"] == {}
         assert len(state["seasons"][fixture["season"]]["versions"]) == 2
         season_run = next(

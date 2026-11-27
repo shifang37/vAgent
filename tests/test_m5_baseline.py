@@ -7,7 +7,7 @@ from pathlib import Path
 import pytest
 
 from vagent.errors import AppError
-from vagent.storage import DatabaseV5, DatabaseV9, FileStore
+from vagent.storage import DatabaseV5, DatabaseV10, FileStore
 from vagent.video.contracts import canonical_fingerprint
 from vagent.video.episodes import (
     EPISODE_COST_CAP,
@@ -47,6 +47,10 @@ def v6_projection(state):
 
 def v9_projection(state):
     return {**state, "schemaVersion": 9, **V9_ADDED}
+
+
+def v10_projection(state):
+    return {**state, "schemaVersion": 10, **V9_ADDED, "memories": {}}
 
 
 @pytest.mark.parametrize("entry", SNAPSHOTS, ids=lambda entry: entry["file"])
@@ -116,7 +120,7 @@ def test_v5_baseline_integrity_and_frozen_identities(entry):
 
 
 @pytest.mark.parametrize("entry", SNAPSHOTS, ids=lambda entry: entry["file"])
-def test_v5_baseline_migrates_to_the_v9_envelope(tmp_path, entry):
+def test_v5_baseline_migrates_to_the_v10_envelope(tmp_path, entry):
     raw = (FIXTURES / entry["file"]).read_bytes()
     original = json.loads(raw)
     (tmp_path / "state.json").write_bytes(raw)
@@ -128,7 +132,7 @@ def test_v5_baseline_migrates_to_the_v9_envelope(tmp_path, entry):
         (tmp_path / name).write_bytes(content)
     with FileStore.open(tmp_path) as store:
         migrated = store.snapshot()
-    expected = v9_projection(original)
+    expected = v10_projection(original)
     assert migrated == expected
     # The E0-frozen v5->v6 projection is still reproduced bit-for-bit by the same
     # migration; only the mechanical v7 collections follow it.
@@ -140,7 +144,7 @@ def test_v5_baseline_migrates_to_the_v9_envelope(tmp_path, entry):
     for collection, value in original.items():
         if collection != "schemaVersion":
             assert migrated[collection] == value
-    DatabaseV9.model_validate(migrated)
+    DatabaseV10.model_validate(migrated)
     backups = list(tmp_path.glob("state-v5-*.json"))
     assert len(backups) == 1 and backups[0].read_bytes() == raw
     for name, content in sentinels.items():

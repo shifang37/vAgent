@@ -130,6 +130,27 @@ class Project(Record):
     )
 
 
+class MemoryEntry(Record):
+    """One durable project-memory line shared by every session of a project."""
+
+    key: str = Field(pattern=r"^[a-z][a-z0-9-]{0,63}$")
+    kind: Literal["fact", "decision", "progress", "todo"]
+    text: str = Field(min_length=1, max_length=400)
+
+
+class ProjectMemory(Record):
+    """The cross-session ledger of one project (schema 10).
+
+    Independent of ``Project.revision``: project facts are replaced whole by
+    ``project_update`` while memory entries are patched one by one.
+    """
+
+    id: str
+    revision: int = Field(ge=0)
+    entries: list[MemoryEntry] = Field(default_factory=list, max_length=64)
+    updated_at: str
+
+
 class StoredMessage(Record):
     type: Literal["human", "ai", "tool"]
     data: dict[str, Any]
@@ -139,6 +160,17 @@ class Session(Record):
     id: str
     messages: list[StoredMessage]
     latest_run_id: str | None = None
+
+
+class SessionV10(Session):
+    """Schema 10 binds a session to the project it works in.
+
+    The pre-v10 ``Session`` schema is frozen evidence, so the binding lives on a
+    subclass used only by ``DatabaseV10``. A missing value means "the session's
+    own id" — the pre-v10 convention — so migrated sessions need no rewrite.
+    """
+
+    project_id: str | None = None
 
 
 class ContentCheck(Record):
@@ -330,10 +362,23 @@ class DatabaseV9(DatabaseV8):
     timelines: dict[str, dict]
 
 
+class DatabaseV10(DatabaseV9):
+    """Schema 10 decouples projects from sessions and adds the memory ledger.
+
+    The envelope gains ``memories`` and a session-to-project binding; every
+    pre-existing collection keeps its shape so historical objects are never
+    re-encoded.
+    """
+
+    schema_version: Literal[10]
+    sessions: dict[str, SessionV10]
+    memories: dict[str, ProjectMemory]
+
+
 def migrated_state(state: dict) -> dict:
     """Mechanical envelope upgrade; never re-encode historical domain objects."""
     version = state["schemaVersion"]
-    if type(version) is not int or version not in {1, 2, 3, 4, 5, 6, 7, 8, 9}:
+    if type(version) is not int or version not in {1, 2, 3, 4, 5, 6, 7, 8, 9, 10}:
         raise ValueError("Unsupported schema version")
     upgraded = copy.deepcopy(state)
     if version == 1:
@@ -352,6 +397,12 @@ def migrated_state(state: dict) -> dict:
         upgraded.update(schemaVersion=8, renders={})
     if version < 9:
         upgraded.update(schemaVersion=9, seasons={}, batches={}, timelines={})
+    if version < 10:
+        upgraded.update(schemaVersion=10, memories={})
+        # Sessions keep no projectId here on purpose: every pre-v10 project was
+        # keyed by its session id, and a missing binding already means "own id".
+        # Writing it during migration would re-encode historical sessions, which
+        # every previous envelope upgrade deliberately avoided.
     return upgraded
 
 
@@ -401,11 +452,11 @@ def load_snapshot(home: Path | str) -> dict:
     try:
         state = json.loads(raw)
         version = state["schemaVersion"]
-        if type(version) is not int or version not in {1, 2, 3, 4, 5, 6, 7, 8, 9}:
+        if type(version) is not int or version not in {1, 2, 3, 4, 5, 6, 7, 8, 9, 10}:
             raise ValueError("Unsupported schema version")
-        if version < 9:
+        if version < 10:
             state = migrated_state(state)
-        DatabaseV9.model_validate(state)
+        DatabaseV10.model_validate(state)
     except (ValueError, TypeError, KeyError):
         raise AppError("INVALID_STORE", "本地状态损坏或版本不支持，未执行任何写入。") from None
     return state
@@ -535,7 +586,7 @@ def restore_last_good(home: Path | str) -> dict:
         raise AppError("STORE_UNREADABLE", "last-good 快照无法读取；未修改任何文件。") from error
     try:
         state = json.loads(raw)
-        DatabaseV9.model_validate(migrated_state(state) if state["schemaVersion"] < 9 else state)
+        DatabaseV10.model_validate(migrated_state(state) if state["schemaVersion"] < 10 else state)
     except (ValueError, TypeError, KeyError):
         raise AppError("INVALID_STORE", "last-good 快照本身损坏；未修改任何文件。") from None
     current = home / "state.json"
@@ -620,7 +671,7 @@ class FileStore:
                 raw = read_bytes_with_retry(home / "state.json")
             except FileNotFoundError:
                 state = {
-                    "schemaVersion": 9,
+                    "schemaVersion": 10,
                     "projects": {},
                     "sessions": {},
                     "artifacts": {},
@@ -642,12 +693,13 @@ class FileStore:
                     "seasons": {},
                     "batches": {},
                     "timelines": {},
+                    "memories": {},
                 }
             else:
                 try:
                     state = json.loads(raw)
                     version = state["schemaVersion"]
-                    if type(version) is not int or version not in {1, 2, 3, 4, 5, 6, 7, 8, 9}:
+                    if type(version) is not int or version not in {1, 2, 3, 4, 5, 6, 7, 8, 9, 10}:
                         raise ValueError("Unsupported schema version")
                     {
                         1: DatabaseV1,
@@ -659,6 +711,7 @@ class FileStore:
                         7: DatabaseV7,
                         8: DatabaseV8,
                         9: DatabaseV9,
+                        10: DatabaseV10,
                     }[version].model_validate(state)
                     for collection in (state["sessions"], state["runs"]):
                         for item in collection.values():
@@ -677,7 +730,7 @@ class FileStore:
                         validate_storyboard_changes,
                     )
 
-                    checked = migrated_state(state) if version < 9 else state
+                    checked = migrated_state(state) if version < 10 else state
                     validate_job_changes(checked["jobs"], checked)
                     validate_storyboard_changes(checked["storyboards"], checked)
                     validate_asset_changes(checked["assets"], checked)
@@ -696,11 +749,11 @@ class FileStore:
                     raise AppError(
                         "INVALID_STORE", "本地状态损坏或版本不支持，已保留原文件，未重置数据。"
                     ) from None
-                if version < 9:
+                if version < 10:
                     # Keep the exact pre-migration bytes, including legacy message encoding.
                     atomic_write_bytes(home / f"state-v{version}-{uuid4()}.json", raw)
                     state = migrated_state(state)
-                    DatabaseV9.model_validate(state)
+                    DatabaseV10.model_validate(state)
                     # Migration and runtime recovery are distinct commits. In particular,
                     # no fingerprints/default fields or SQLite checkpoints are rewritten.
                     atomic_write_json(home / "state.json", state)
@@ -834,7 +887,7 @@ class FileStore:
                 # Opening a healthy store must not rewrite (or re-mtime) state.json:
                 # the recovery pass is a no-op on almost every start.
                 return copy.deepcopy(value)
-            DatabaseV9.model_validate(draft)
+            DatabaseV10.model_validate(draft)
             validate_job_changes(self._state["jobs"], draft)
             validate_media_changes(self._state["media"], draft)
             validate_storyboard_changes(self._state["storyboards"], draft)
@@ -871,23 +924,41 @@ class FileStore:
         atomic_write_bytes(self.home / LAST_GOOD_FILE, encoded)
         return self.home / LAST_GOOD_FILE
 
-    def ensure_session(self, session_id: str) -> None:
+    def ensure_session(self, session_id: str, project_id: str | None = None) -> None:
+        """Create the session if needed and bind it to a project.
+
+        ``project_id`` is optional: omitted keeps the historical behavior where
+        the session's own id names a fresh project. Supplying an existing
+        project id lets a new session continue that project. A session never
+        changes projects after creation.
+        """
         assert_id(session_id)
+        if project_id is not None:
+            assert_id(project_id)
 
         def create(draft: dict) -> None:
-            draft["sessions"].setdefault(session_id, {"id": session_id, "messages": []})
-            draft["projects"].setdefault(
-                session_id,
-                {
-                    "id": session_id,
+            session = draft["sessions"].get(session_id)
+            bound = session.get("projectId") if session is not None else None
+            if project_id is not None:
+                if project_id not in draft["projects"]:
+                    raise AppError("PROJECT_NOT_FOUND", "没有这个项目，不能把会话绑定到它。")
+                if bound is not None and bound != project_id:
+                    raise AppError("SESSION_PROJECT_CONFLICT", "会话已属于另一个项目，不能中途更换。")
+                target = project_id
+            else:
+                target = bound or session_id
+            if target not in draft["projects"]:
+                draft["projects"][target] = {
+                    "id": target,
                     "revision": 0,
                     "goal": "",
                     "audience": "",
                     "style": "",
                     "constraints": [],
                     "plan": [],
-                },
-            )
+                }
+            draft["sessions"].setdefault(session_id, {"id": session_id, "messages": []})
+            draft["sessions"][session_id]["projectId"] = target
 
         self.transaction(create)
 

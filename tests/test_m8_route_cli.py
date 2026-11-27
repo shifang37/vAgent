@@ -107,7 +107,7 @@ def test_cli_route_preview_by_spec_and_scope(tmp_path):
     assert conflict.returncode == 1 and "INVALID_ARGUMENTS" in conflict.stderr
     after = json.loads((home / "state.json").read_bytes())
     assert after["jobs"] == before["jobs"] == {}
-    assert after["schemaVersion"] == 9
+    assert after["schemaVersion"] == 10
 
 
 def test_cli_route_preview_reads_a_storyboard_and_missing_keys(tmp_path):

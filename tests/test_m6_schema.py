@@ -11,7 +11,7 @@ from shot_support import mock_tools, shot
 from subtitle_support import plan, save_episode
 
 from vagent.errors import AppError
-from vagent.storage import DatabaseV9, FileStore
+from vagent.storage import DatabaseV10, FileStore
 from vagent.video.audio import AudioAsset, AudioAssetVersion, AudioMedia, ProviderAudioSource
 from vagent.video.films import parse_media
 from vagent.video.jobs import JobService
@@ -98,20 +98,24 @@ def dump_v6(state: dict) -> bytes:
     legacy.pop("seasons", None)
     legacy.pop("batches", None)
     legacy.pop("timelines", None)
+    legacy.pop("memories", None)
+    for session in legacy["sessions"].values():
+        session.pop("projectId", None)
     return json.dumps(legacy, ensure_ascii=False, indent=2, allow_nan=False).encode("utf-8")
 
 
-async def test_fresh_store_is_schema_nine_with_six_empty_collections(store):
+async def test_fresh_store_is_schema_ten_with_six_empty_collections(store):
     state = store.snapshot()
-    assert state["schemaVersion"] == 9
+    assert state["schemaVersion"] == 10
     assert state["audio"] == {} and state["subtitleTracks"] == {} and state["renders"] == {}
     # M7 E1 adds three empty collections on top of the M6 surface.
     assert state["seasons"] == {} and state["batches"] == {} and state["timelines"] == {}
-    DatabaseV9.model_validate(state)
+    assert state["memories"] == {}
+    DatabaseV10.model_validate(state)
     assert (store.home / "state.json").is_file()
 
 
-def test_v6_state_migrates_to_v9_with_an_exact_backup(tmp_path):
+def test_v6_state_migrates_to_v10_with_an_exact_backup(tmp_path):
     with FileStore.open(tmp_path / "source") as source:
         seed_v7_state(source)
         seeded = source.snapshot()
@@ -126,14 +130,15 @@ def test_v6_state_migrates_to_v9_with_an_exact_backup(tmp_path):
     (home / "checkpoints.sqlite").write_bytes(sentinel)
     with FileStore.open(home) as store:
         migrated = store.snapshot()
-    assert migrated["schemaVersion"] == 9
+    assert migrated["schemaVersion"] == 10
     assert migrated["audio"] == {} and migrated["subtitleTracks"] == {} and migrated["renders"] == {}
     assert migrated["seasons"] == {} and migrated["batches"] == {} and migrated["timelines"] == {}
+    assert migrated["memories"] == {}
     for key, value in legacy.items():
         if key == "schemaVersion":
             continue
         assert migrated[key] == value, key
-    DatabaseV9.model_validate(migrated)
+    DatabaseV10.model_validate(migrated)
     backups = list(home.glob("state-v6-*.json"))
     assert len(backups) == 1 and backups[0].read_bytes() == raw
     assert (home / "checkpoints.sqlite").read_bytes() == sentinel
@@ -142,7 +147,7 @@ def test_v6_state_migrates_to_v9_with_an_exact_backup(tmp_path):
     assert len(list(home.glob("state-v*.json"))) == 1
 
 
-def test_v7_state_migrates_to_v9_with_an_exact_backup(tmp_path):
+def test_v7_state_migrates_to_v10_with_an_exact_backup(tmp_path):
     with FileStore.open(tmp_path / "source") as source:
         seed_v7_state(source)
         seeded = source.snapshot()
@@ -152,19 +157,23 @@ def test_v7_state_migrates_to_v9_with_an_exact_backup(tmp_path):
     legacy.pop("seasons")
     legacy.pop("batches")
     legacy.pop("timelines")
+    legacy.pop("memories")
+    for session in legacy["sessions"].values():
+        session.pop("projectId", None)
     raw = json.dumps(legacy, ensure_ascii=False, indent=2, allow_nan=False).encode("utf-8")
     home = tmp_path / "migrated"
     home.mkdir()
     (home / "state.json").write_bytes(raw)
     with FileStore.open(home) as store:
         migrated = store.snapshot()
-    assert migrated["schemaVersion"] == 9
+    assert migrated["schemaVersion"] == 10
     assert migrated["renders"] == {}
     assert migrated["seasons"] == {} and migrated["batches"] == {} and migrated["timelines"] == {}
+    assert migrated["memories"] == {}
     for key, value in legacy.items():
         if key != "schemaVersion":
             assert migrated[key] == value, key
-    DatabaseV9.model_validate(migrated)
+    DatabaseV10.model_validate(migrated)
     backups = list(home.glob("state-v7-*.json"))
     assert len(backups) == 1 and backups[0].read_bytes() == raw
 

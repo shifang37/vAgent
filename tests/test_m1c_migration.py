@@ -7,7 +7,7 @@ from pathlib import Path
 import pytest
 
 from vagent.errors import AppError
-from vagent.storage import DatabaseV1, DatabaseV2, DatabaseV9, FileStore
+from vagent.storage import DatabaseV1, DatabaseV2, DatabaseV10, FileStore
 from vagent.video.contracts import canonical_fingerprint
 
 FIXTURES = Path(__file__).parent / "fixtures" / "m1c"
@@ -29,7 +29,7 @@ def test_frozen_c0_migration_envelope_and_original_bytes(tmp_path, entry):
         (tmp_path / name).write_bytes(content)
     with FileStore.open(tmp_path) as store:
         state = store.snapshot()
-        assert state["schemaVersion"] == 9 and state["media"] == {}
+        assert state["schemaVersion"] == 10 and state["media"] == {}
         assert state["storyboards"] == {} and state["assets"] == {}
         assert state["episodes"] == state["scenes"] == state["characters"] == state["styles"] == {}
         # The frozen v1/v2->v3 envelope stays byte-identical; v4 adds exactly the
@@ -48,11 +48,12 @@ def test_frozen_c0_migration_envelope_and_original_bytes(tmp_path, entry):
             "seasons",
             "batches",
             "timelines",
+            "memories",
         }
         v3_shape = {key: value for key, value in state.items() if key not in added}
         v3_shape["schemaVersion"] = 3
         assert canonical_fingerprint(v3_shape) == entry["expectedV3CanonicalSha256"]
-        DatabaseV9.model_validate(state)
+        DatabaseV10.model_validate(state)
         for collection, digest in entry["preservedCollectionsSha256"].items():
             assert canonical_fingerprint(state[collection]) == digest
             assert state[collection] == original[collection]
@@ -97,7 +98,7 @@ def test_both_source_versions_preserved_on_migration_write_failure(tmp_path, mon
         assert backups[0].read_bytes() == raw
     monkeypatch.undo()
     with FileStore.open(tmp_path) as store:
-        assert store.snapshot()["schemaVersion"] == 9
+        assert store.snapshot()["schemaVersion"] == 10
 
 
 @pytest.mark.parametrize("corrupt", ["job-version", "fingerprint", "operation", "message"])

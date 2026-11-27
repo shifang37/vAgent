@@ -61,7 +61,7 @@ async def test_b0_preserves_v1_execution_with_both_context_layouts(store, versio
     before = await runner.run("legacy", "Save an artifact", request_id="original-request")
     assert before["resumable"] and before["executionVersion"] == 1
     original = store.snapshot()
-    assert original["schemaVersion"] == 9
+    assert original["schemaVersion"] == 10
     assert before["modelSteps"] == 2 and before["toolCalls"] == 1
     home = store.home
     store.close()
@@ -88,16 +88,20 @@ async def test_b0_preserves_v1_execution_with_both_context_layouts(store, versio
             "seasons",
             "batches",
             "timelines",
+            "memories",
         }
     }
     legacy["schemaVersion"] = 1
     for run in legacy["runs"].values():
         run.pop("videoMode", None)
         run.pop("toolFeatures", None)
+    # The v1 envelope predates the schema-10 session->project binding.
+    for session in legacy["sessions"].values():
+        session.pop("projectId", None)
     legacy_bytes = json.dumps(legacy, ensure_ascii=False).encode("utf-8")
     (home / "state.json").write_bytes(legacy_bytes)
     with FileStore.open(home) as reopened:
-        assert reopened.snapshot()["schemaVersion"] == 9
+        assert reopened.snapshot()["schemaVersion"] == 10
         assert next(home.glob("state-v1-*.json")).read_bytes() == legacy_bytes
         model = LegacyModel(finish=True)
         tools = create_project_tools()

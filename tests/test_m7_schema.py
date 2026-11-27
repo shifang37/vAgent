@@ -11,7 +11,7 @@ from shot_support import mock_tools
 from subtitle_support import episode_args, plan
 
 from vagent.errors import AppError
-from vagent.storage import DatabaseV8, DatabaseV9, FileStore, migrated_state
+from vagent.storage import DatabaseV8, DatabaseV9, DatabaseV10, FileStore, migrated_state
 from vagent.video import tools
 from vagent.video.seasons import SEASON_EPISODE_LIMIT, SEASON_PER_PROJECT_LIMIT
 
@@ -186,15 +186,16 @@ def test_frozen_stage_limits_and_tool_groups():
     assert timelines.TIMELINE_CONTRACT == "timeline-zh-v1"
 
 
-def test_fresh_store_is_schema_nine_with_three_empty_collections(store):
+def test_fresh_store_is_schema_ten_with_three_empty_collections(store):
     state = store.snapshot()
-    assert state["schemaVersion"] == 9
+    assert state["schemaVersion"] == 10
     assert state["seasons"] == {} and state["batches"] == {} and state["timelines"] == {}
-    DatabaseV9.model_validate(state)
+    assert state["memories"] == {}
+    DatabaseV10.model_validate(state)
     assert (store.home / "state.json").is_file()
 
 
-def test_v8_state_migrates_to_v9_with_an_exact_backup(tmp_path):
+def test_v8_state_migrates_to_v10_with_an_exact_backup(tmp_path):
     with FileStore.open(tmp_path / "source") as source:
         episode_id = seed_episode(source)
         seeded = source.snapshot()
@@ -203,6 +204,9 @@ def test_v8_state_migrates_to_v9_with_an_exact_backup(tmp_path):
     legacy.pop("seasons")
     legacy.pop("batches")
     legacy.pop("timelines")
+    legacy.pop("memories")
+    for session in legacy["sessions"].values():
+        session.pop("projectId", None)
     raw = json.dumps(legacy, ensure_ascii=False, indent=2, allow_nan=False).encode("utf-8")
     home = tmp_path / "migrated"
     home.mkdir()
@@ -211,14 +215,15 @@ def test_v8_state_migrates_to_v9_with_an_exact_backup(tmp_path):
     (home / "checkpoints.sqlite").write_bytes(sentinel)
     with FileStore.open(home) as store:
         migrated = store.snapshot()
-    assert migrated["schemaVersion"] == 9
+    assert migrated["schemaVersion"] == 10
     assert migrated["seasons"] == {} and migrated["batches"] == {} and migrated["timelines"] == {}
+    assert migrated["memories"] == {}
     for key, value in legacy.items():
         if key == "schemaVersion":
             continue
         assert migrated[key] == value, key
     assert migrated["episodes"][episode_id]["title"] == "第一集"
-    DatabaseV9.model_validate(migrated)
+    DatabaseV10.model_validate(migrated)
     backups = list(home.glob("state-v8-*.json"))
     assert len(backups) == 1 and backups[0].read_bytes() == raw
     assert (home / "checkpoints.sqlite").read_bytes() == sentinel
@@ -250,13 +255,14 @@ def test_migrated_state_is_mechanical_for_schema_eight():
         "renders": {},
     }
     upgraded = migrated_state(state)
-    assert upgraded["schemaVersion"] == 9
+    assert upgraded["schemaVersion"] == 10
     assert upgraded["seasons"] == {} and upgraded["batches"] == {} and upgraded["timelines"] == {}
+    assert upgraded["memories"] == {}
     assert state["schemaVersion"] == 8 and "seasons" not in state
-    DatabaseV9.model_validate(upgraded)
+    DatabaseV10.model_validate(upgraded)
 
 
-@pytest.mark.parametrize("version", [0, 10, True, "9", None])
+@pytest.mark.parametrize("version", [0, 11, True, "9", None])
 def test_unsupported_versions_are_still_rejected(tmp_path, version):
     raw = json.dumps({"schemaVersion": version, "projects": {}}).encode()
     (tmp_path / "state.json").write_bytes(raw)
