@@ -343,3 +343,84 @@ async def test_web_exposes_the_episode_view_and_the_storyboard_link(tmp_path):
         snapshot = (await client.get(f"/api/sessions/{session_id}")).json()
         assert snapshot["episode"]["episodeId"] == episode_id
         assert snapshot["episode"]["episodes"][0]["shotCount"] == plan["shotBudget"]["shotCount"]
+
+
+async def test_web_projects_and_session_project_binding(tmp_path):
+    """P3 HTTP API: GET /api/projects, POST /api/sessions {projectId}, and first-turn memory."""
+    from vagent.context import PROJECT_MEMORY_HEADER
+
+    seen_systems = []
+
+    def respond(messages, step):
+        if step == 0:
+            return tool_call(
+                "memory_update",
+                {
+                    "expectedRevision": 0,
+                    "upsert": [{"key": "ep-note", "kind": "decision", "text": "全片冷青雨夜"}],
+                },
+                call_id="web-mem-save",
+            )
+        if step == 1:
+            return AIMessage(content="已记录项目记忆。")
+        seen_systems.append(messages[0].content)
+        return AIMessage(content="新会话已看到冷青雨夜决定。")
+
+    async with client_for(tmp_path, ScriptedModel(respond)) as (client, service):
+        first = await client.post("/api/sessions", json={})
+        assert first.status_code == 201
+        first_body = first.json()
+        session_a = first_body["id"]
+        assert first_body["projectId"] == session_a
+
+        sent = await client.post(
+            f"/api/sessions/{session_a}/messages",
+            json={"prompt": "记住雨夜冷青色调", "clientRequestId": "web-p3-1"},
+        )
+        assert sent.status_code == 202
+        await service.task
+
+        projects_resp = await client.get("/api/projects")
+        assert projects_resp.status_code == 200
+        project_rows = projects_resp.json()["projects"]
+        assert len(project_rows) == 1
+        assert project_rows[0]["id"] == session_a
+        assert project_rows[0]["memoryRevision"] == 1
+        assert project_rows[0]["memoryEntries"] == 1
+        assert project_rows[0]["sessionCount"] == 1
+
+        # Create a second session bound to the existing project.
+        second = await client.post("/api/sessions", json={"projectId": session_a})
+        assert second.status_code == 201
+        session_b = second.json()["id"]
+        assert session_b != session_a and second.json()["projectId"] == session_a
+
+        # Unknown project returns 404 PROJECT_NOT_FOUND; extra fields return 422.
+        missing = await client.post("/api/sessions", json={"projectId": "no-such-project"})
+        assert missing.status_code == 404 and missing.json()["error"]["code"] == "PROJECT_NOT_FOUND"
+        extra = await client.post("/api/sessions", json={"projectId": session_a, "unexpected": True})
+        assert extra.status_code == 422
+
+        # Bound session snapshot immediately exposes the project and its memory ledger.
+        snap_b = (await client.get(f"/api/sessions/{session_b}")).json()
+        assert snap_b["projectId"] == session_a
+        assert snap_b["memory"]["revision"] == 1
+        assert snap_b["memory"]["entries"][0]["text"] == "全片冷青雨夜"
+
+        # First turn in the bound session injects the project's memory ledger.
+        follow = await client.post(
+            f"/api/sessions/{session_b}/messages",
+            json={"prompt": "我们之前定了什么风格？", "clientRequestId": "web-p3-2"},
+        )
+        assert follow.status_code == 202
+        await service.task
+        assert len(seen_systems) == 1
+        assert PROJECT_MEMORY_HEADER in seen_systems[0]
+        assert "全片冷青雨夜" in seen_systems[0]
+
+        # Project list now reports two sessions bound to the same project.
+        updated_projects = (await client.get("/api/projects")).json()["projects"]
+        assert len(updated_projects) == 1 and updated_projects[0]["sessionCount"] == 2
+        session_rows = (await client.get("/api/sessions")).json()["sessions"]
+        assert {row["id"] for row in session_rows} == {session_a, session_b}
+        assert {row["projectId"] for row in session_rows} == {session_a}

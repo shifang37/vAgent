@@ -1,7 +1,7 @@
 # 项目记忆与跨会话延续（设计）
 
 > 日期：2026-11-27
-> 状态：P0（schema 10 数据层：`memories` 集合、`SessionV10.projectId`、v9→v10 迁移、`ensure_session` 绑定）已实现并通过全量回归；P1（项目/会话解耦）已实现，验收见 `tests/test_project_binding.py`；P2（记忆能力与上下文）已实现，验收见 `tests/test_project_memory_tools.py`、`tests/test_tool_versions.py`，实施记录见 §14；P3–P4 待实施。
+> 状态：P0（schema 10 数据层：`memories` 集合、`SessionV10.projectId`、v9→v10 迁移、`ensure_session` 绑定）已实现并通过全量回归；P1（项目/会话解耦）已实现，验收见 `tests/test_project_binding.py`；P2（记忆能力与上下文）已实现，验收见 `tests/test_project_memory_tools.py`、`tests/test_tool_versions.py`，实施记录见 §14；P3（会话绑定入口：`create_session(project_id)`、`start(project_id)`、CLI `--project`、`POST /api/sessions`、`GET /api/projects` 与 Web 工作台项目绑定）已实现，验收见 `tests/test_project_binding.py`、`tests/test_web.py`，实施记录见 §15；P4（代码维护进展与两会话联调：`episode_save` 自动 upsert `ep-<episodeId>`、`docs/PROJECT_MEMORY_ACCEPTANCE.md`）已实现，实施记录见 §16。
 > 范围：项目/会话数据模型（schema 10）、上下文组装、工具面、CLI 与 Web 入口。
 > 参考：`docs/HARNESS_REVIEW_FIX_PLAN.md`（FX-12 尾部消息）、`docs/CONTEXT_OPTIMIZATION_ACCEPTANCE.md`（稳定前缀）、DSH 的 workspace + `AGENTS.md`、Claude Code 的 `CLAUDE.md` + auto memory。
 
@@ -301,7 +301,7 @@ if version < 10:
 | P-08 | 跨项目隔离 | 绑定项目 A 的会话读不到 B 的记忆与产物 | `test_project_memory_tools.py::test_memory_is_project_scoped` |
 | P-09 | 预算挤压 | 记忆把预算挤爆时先丢记忆并事件 `context.project_memory_dropped`，仍超限才 `CONTEXT_LIMIT` | `test_project_memory_tools.py::test_memory_dropped_before_context_limit`、`test_run_reports_the_project_memory_drop` |
 | P-10 | 前缀稳定性 | 同一项目连续两步、记忆不变时，系统消息到记忆块为止逐字节相同（预算块仍每步变化） | `test_project_memory_tools.py::test_memory_keeps_prefix_stable` |
-| P-11 | 命令兼容 | `vagent chat -s default` 行为不变；`--project` 生效且优先级符合 D6 | `tests/test_project_binding.py` |
+| P-11 | 命令兼容 | `vagent chat -s default` 行为不变；`--project` 生效且优先级符合 D6 | `tests/test_project_binding.py::test_cli_parser_and_project_binding_precedence_d6`、`test_service_create_session_start_and_projects_entry_points`；Web 入口见 `tests/test_web.py::test_web_projects_and_session_project_binding` |
 | P-12 | 工具版本冻结 | 所有 ≤18 变体恢复后不含 `memory_*`；新版本变体含两个工具 | `tests/test_tool_versions.py` |
 | P-13 | 视频域回归 | 绑定旧项目的新会话能看到旧 Job、分镜、分集与成片（覆盖 7.1 的三处 `_check_context` 与预览上下文） | `test_new_session_sees_existing_video_state` |
 
@@ -322,14 +322,14 @@ if version < 10:
 - `ContextBuilder` 注入 + 丢弃策略 + 事件；工具变体冻结。
 - 验收：P-02–P-10、P-12；实施记录与偏差见 §14。
 
-**P3 会话绑定入口**
-- `create_session(project_id)`、`start(project_id)`、CLI `--project`、`POST /api/sessions`、`GET /api/projects`。
-- 验收：P-11；Web 手工走查（新建会话 → 绑定项目 → 首轮可见记忆）。
+**P3 会话绑定入口** ✅ 已实现
+- `create_session(project_id)`、`start(project_id)`、`projects()`、CLI `run`/`chat --project`、`POST /api/sessions {"projectId": ...}`、`GET /api/projects`，以及 Web 侧边栏「已有项目 → 新会话」和按 `projectId` 对齐的面板请求/记忆台账展示。
+- 验收：P-11（`tests/test_project_binding.py`、`tests/test_web.py`、`tests/test_job_state.mjs`）；实施记录见 §15。
 
-**P4 代码维护进展 + 默认行为**
-- `episode_save` 成功后 upsert `ep-<episodeId>`（幂等，与 operation 重放一致）。
-- 验收文档 `docs/PROJECT_MEMORY_ACCEPTANCE.md`；一次真实两会话联调（会话 A 完成第 3 集 → 会话 B 绑定同项目 → 模型能答出进度与待办）。
-- 可选：把 `VAGENT_CONTEXT_VERSION` 默认翻到 4（与本文解耦，单独评审）。
+**P4 代码维护进展 + 默认行为** ✅ 已实现
+- `episode_save` 成功后 upsert `ep-<episodeId>`（幂等，与 operation 重放一致；台账满时不阻断分集保存）。
+- 验收文档 `docs/PROJECT_MEMORY_ACCEPTANCE.md`；已完成真实两会话联调（会话 A 完成第 3 集并写入决定/待办 → 会话 B 绑定同项目 → 模型答出进度、决定与待办）；实施记录见 §16。
+- 可选：把 `VAGENT_CONTEXT_VERSION` 默认翻到 4（与本文解耦，单独评审；本次保持默认 2）。
 
 ## 12. 风险与回滚
 
@@ -376,3 +376,35 @@ if version < 10:
 7. **签名只记录能力代号，不记录上限。** 特性配置是 `{"version": 1}`；上限常量可以随 §12 的风险处置收紧而不拒绝所有在飞 Run，`memory_read` 每次都返回当前 `limits`。
 
 验收：`tests/test_project_memory_tools.py`（P-04–P-10 与 P-02）、`tests/test_tool_versions.py`（P-12）；既有版本断言从 18 更新为 20（规则版本仍 18），`tests/test_b0_compatibility.py` 用 `create_project_tools(memory=False)` 复现冻结签名，恢复路径本身仍用今天的默认表面验证。
+
+## 15. 实施记录（P3，2026-11-27）
+
+新增/修改：
+
+| 位置 | 内容 |
+|---|---|
+| `src/vagent/storage.py` | `ensure_session` 检查冲突时通过 `project_of_session` 识别未落 `projectId` 字段的迁移旧会话，防止旧会话被中途改绑到其他项目 |
+| `src/vagent/runner.py` | `AgentRunner.run()` 增加可选 `project_id=None`，透传至 `ensure_session` |
+| `src/vagent/application.py` | `create_session(project_id=None)` 返回 `{id, projectId}`；`start(..., project_id=None)` 启动前校验并透传绑定；新增 `projects()` 列出项目及会话/记忆统计；`session()` 视图追加 `memory` 台账（`read_memory`） |
+| `src/vagent/web.py` | `POST /api/sessions` 接受可选严格 JSON 体 `{projectId}`；新增 `GET /api/projects`；异常映射补充 `PROJECT_NOT_FOUND` → 404、`SESSION_PROJECT_CONFLICT` → 409 |
+| `src/vagent/cli.py` | `run` / `chat` 新增 `--project`，严格遵循 D6 优先级（显式 `--project` > 已有绑定 > 缺省等于会话 ID），启动前即校验未知项目与项目冲突 |
+| `web/index.html`、`web/app.js`、`web/job-state.js`、`web/styles.css` | 侧边栏新增「已有项目」及「新会话」绑定入口；工作台所有项目级读取/上传/Job 合并改为使用当前会话的 `projectId`（不再把 `activeId` 当项目 ID）；编排观测面板新增项目记忆台账展示 |
+| 文档与测试 | `tests/test_project_memory.py`、`tests/test_project_binding.py`（P-11）、`tests/test_web.py`、`tests/test_job_state.mjs`、`docs/USER_GUIDE.md`、`web/README.md` |
+
+说明：`GET /api/projects` 中的项目 ID 是不透明引用标识（历史项目沿用创建它的会话 ID，不可从 ID 反推语义）。
+
+## 16. 实施记录（P4，2026-11-27）
+
+新增/修改：
+
+| 位置 | 内容 |
+|---|---|
+| `src/vagent/project_memory.py` | 新增 `progress_key()` 与 `upsert_progress()`：供领域写操作在同事务内写入代码自有 `kind="progress"` 条目；移除对 `vagent.storage.now` 的循环导入，改为模块内独立 UTC 时间戳函数 |
+| `src/vagent/video/episodes.py` | `save_episode()` 写入分集后在同事务内 upsert `ep-<episodeId>` 进展条目（含标题、分集 ID、版本、场数、镜头数与目标时长）；校验失败整笔回滚，重放同一 `operation_key` 由 `FileStore.operation` 幂等返回不重复升 revision |
+| `tests/test_project_memory_tools.py` | 新增 `test_episode_save_maintains_code_owned_progress_idempotently`（新建/修订/重放/禁止模型改删/失败回滚/64 条满账不阻断）与 `test_two_sessions_handoff_episode_progress_and_todo`（离线双会话接力） |
+| `docs/PROJECT_MEMORY_ACCEPTANCE.md` | P0–P4 完整验收记录与真实两会话联调实测数据 |
+
+说明与偏差：
+
+1. **台账满时不阻断分集保存。** 当项目记忆已达 64 条或 8 KiB 硬上限时，`upsert_progress()` 返回 `False` 且不改动台账，避免记忆容量上限反向阻断 `episode_save`（结构化 `episodes` 是真源，进度条目只是投影）。
+2. **`VAGENT_CONTEXT_VERSION` 保持默认 `2`。** 设计 §11 已明确翻到 `4` 与本文解耦、单独评审，本次不改动默认上下文版本，既有基线与文档门禁不变。

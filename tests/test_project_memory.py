@@ -142,6 +142,24 @@ def test_unknown_project_binding_is_rejected(store):
     assert "ep02" not in store.snapshot()["sessions"]
 
 
+def test_legacy_migrated_session_cannot_rebind_to_another_project(store):
+    """A pre-v10 session with no explicit projectId field still belongs to its own id."""
+    store.ensure_session("legacy")
+    store.ensure_session("other")
+
+    def strip_binding(draft):
+        draft["sessions"]["legacy"].pop("projectId", None)
+
+    store.transaction(strip_binding)
+    with pytest.raises(AppError) as error:
+        store.ensure_session("legacy", project_id="other")
+    assert error.value.code == "SESSION_PROJECT_CONFLICT"
+    assert "projectId" not in store.snapshot()["sessions"]["legacy"]
+    # Explicit binding to its own project is idempotent and succeeds.
+    store.ensure_session("legacy", project_id="legacy")
+    assert store.snapshot()["sessions"]["legacy"]["projectId"] == "legacy"
+
+
 def test_database_v10_adds_exactly_the_memory_ledger():
     added = set(DatabaseV10.model_fields) - set(DatabaseV9.model_fields)
     assert added == {"memories"}

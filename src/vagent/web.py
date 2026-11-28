@@ -30,6 +30,11 @@ MAX_AUDIO_UPLOAD_BYTES = 25 * 1024 * 1024 + 65536
 UPLOAD_PATHS = {"/api/assets", "/api/audio/import"}
 
 
+class CreateSessionInput(BaseModel):
+    model_config = ConfigDict(extra="forbid", strict=True)
+    projectId: Identifier | None = None
+
+
 class MessageInput(BaseModel):
     model_config = ConfigDict(extra="forbid", strict=True)
     prompt: str = Field(min_length=1, max_length=20000)
@@ -289,6 +294,7 @@ def create_app(config, *, port=3210, allowed_hosts=None, model=None, policy=None
             if error.code
             in {
                 "NOT_FOUND",
+                "PROJECT_NOT_FOUND",
                 "JOB_NOT_FOUND",
                 "MEDIA_NOT_FOUND",
                 "ASSET_NOT_FOUND",
@@ -302,6 +308,7 @@ def create_app(config, *, port=3210, allowed_hosts=None, model=None, policy=None
             in {
                 "RUN_BUSY",
                 "REQUEST_CONFLICT",
+                "SESSION_PROJECT_CONFLICT",
                 "STALE_RUN",
                 "NOT_RESUMABLE",
                 "RESUME_CONFIG_CHANGED",
@@ -355,13 +362,17 @@ def create_app(config, *, port=3210, allowed_hosts=None, model=None, policy=None
     async def validate_configuration():
         return await app.state.service.validate_configuration()
 
+    @app.get("/api/projects")
+    async def projects():
+        return {"projects": app.state.service.projects()}
+
     @app.get("/api/sessions")
     async def sessions():
         return {"sessions": app.state.service.sessions()}
 
     @app.post("/api/sessions", status_code=201)
-    async def create_session():
-        return app.state.service.create_session()
+    async def create_session(body: CreateSessionInput | None = None):
+        return app.state.service.create_session(project_id=body.projectId if body else None)
 
     @app.get("/api/sessions/{session_id}")
     async def session(session_id: str):

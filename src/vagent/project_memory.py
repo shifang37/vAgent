@@ -11,9 +11,14 @@ storage model re-asserts the same bounds as a hard invariant: a ledger that bypa
 module still cannot be committed.
 """
 
+from datetime import UTC, datetime
+
 from vagent.context import MEMORY_KIND_ORDER, compact_json
 from vagent.errors import AppError
-from vagent.storage import now
+
+
+def _now() -> str:
+    return datetime.now(UTC).isoformat()
 
 # D8: bounded by construction; over-limit writes are refused, never silently truncated.
 MEMORY_MAX_ENTRIES = 64
@@ -49,6 +54,53 @@ def memory_limits() -> dict:
         "maxEntryChars": MEMORY_MAX_ENTRY_CHARS,
         "maxBytes": MEMORY_MAX_BYTES,
     }
+
+
+def progress_key(prefix: str, identifier: str) -> str:
+    """Build a valid memory key (``^[a-z][a-z0-9-]{0,63}$``) for a code-owned progress line."""
+    normalized = "".join(ch if ch.isalnum() or ch == "-" else "-" for ch in identifier.lower()).strip("-")
+    raw = f"{prefix}-{normalized}" if normalized else prefix
+    return raw[:64]
+
+
+def upsert_progress(
+    state: dict,
+    project_id: str,
+    *,
+    key: str,
+    text: str,
+    timestamp: str | None = None,
+) -> bool:
+    """Record one code-owned progress entry in the same Store transaction as the domain write.
+
+    Progress is a best-effort ledger projection of durable domain truth: if the ledger is
+    already at its hard limit (D8), the domain write (e.g. ``episode_save``) must still
+    succeed rather than being blocked by the memory cap, so this helper returns ``False``
+    without mutating the ledger. It never changes ``Project.revision``.
+    """
+    _require_project(state, project_id)
+    cleaned = text.strip()
+    if not cleaned:
+        return False
+    if len(cleaned) > MEMORY_MAX_ENTRY_CHARS:
+        cleaned = cleaned[: MEMORY_MAX_ENTRY_CHARS - 1] + "…"
+    memory = state["memories"].get(project_id)
+    revision = 0 if memory is None else memory["revision"]
+    current = {} if memory is None else {entry["key"]: dict(entry) for entry in memory["entries"]}
+    current[key] = {"key": key, "kind": CODE_OWNED_KIND, "text": cleaned}
+    entries = _ordered(list(current.values()))
+    if len(entries) > MEMORY_MAX_ENTRIES or ledger_bytes(entries) > MEMORY_MAX_BYTES:
+        return False
+    before = [] if memory is None else _ordered([dict(entry) for entry in memory["entries"]])
+    if entries == before:
+        return False
+    state["memories"][project_id] = {
+        "id": project_id,
+        "revision": revision + 1,
+        "entries": entries,
+        "updatedAt": timestamp or _now(),
+    }
+    return True
 
 
 def read_memory(state: dict, project_id: str, kind: str | None = None) -> dict:
@@ -119,7 +171,7 @@ def update_memory(
         "id": project_id,
         "revision": revision + 1,
         "entries": entries,
-        "updatedAt": now(),
+        "updatedAt": _now(),
     }
     state["memories"][project_id] = updated
     return {"revision": updated["revision"], "entries": entries, "bytes": size}

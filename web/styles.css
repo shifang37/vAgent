@@ -496,9 +496,10 @@ footer span {
   height: 100dvh;
   position: sticky;
   top: 0;
-  padding: 18px 15px;
+  padding: 18px 15px 52px;
   flex-shrink: 0;
   z-index: 4;
+  overflow-y: auto;
 }
 .panel-heading {
   display: flex;
@@ -562,6 +563,75 @@ footer span {
 .session.selected {
   background: #eaf0fb;
   color: #5879b8;
+}
+.session-meta {
+  display: block;
+  font-size: 10px;
+  color: #8f97a6;
+  margin-top: 2px;
+}
+.project-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  padding: 8px 9px;
+  border-radius: 7px;
+  font-size: 12px;
+}
+.project-row:hover,
+.project-row.selected {
+  background: #eef3fb;
+}
+.project-row-info {
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+.project-row-info strong {
+  font-weight: 500;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.project-row-info small {
+  font-size: 10px;
+  color: #8f97a6;
+}
+.project-row-action {
+  flex-shrink: 0;
+  font-size: 11px;
+  color: #547cda;
+  padding: 4px 7px;
+  border-radius: 6px;
+  border: 1px solid #dbe4f6;
+  background: #fff;
+}
+.project-row-action:hover {
+  background: #eaf0fd;
+}
+.memory-ledger {
+  list-style: none;
+  padding: 0;
+  margin: 8px 0 16px;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+.memory-ledger li {
+  font-size: 12px;
+  line-height: 1.5;
+  padding: 8px 10px;
+  border-radius: 7px;
+  background: #f7f8fa;
+  border: 1px solid var(--line);
+}
+.memory-ledger small {
+  display: inline-block;
+  margin-right: 6px;
+  font-size: 10px;
+  color: #547cda;
 }
 .sidebar-note {
   position: absolute;

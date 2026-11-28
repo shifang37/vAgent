@@ -15,7 +15,7 @@ $env:VAGENT_HOME = Join-Path $PWD '.vagent/web'
 
 ## 交互与数据
 
-- 创建、切换、搜索服务端会话；刷新恢复选中的会话。
+- 创建、切换、搜索服务端会话；可在侧边栏「已有项目」下基于既有项目新建会话（共享项目事实、产物、分镜与项目记忆台账）；刷新恢复选中的会话。
 - 设置页保存本地 Key/模型，显示配置来源；独立的验证按钮只发起一次短模型请求，保存本身不产生模型费用；保存视频 Key 时执行一次零费用只读探测（不创建任务），结果区分鉴权通过与未验证。
 - 回复逐段显示为草稿；刷新或 SSE 重连补齐当前草稿，完成后显示正式回复，停止或失败清除草稿。
 - 真正的 DeepSeek model/tools 循环，Skills 按需读取；分镜模式将输出要求加入需求。
@@ -47,7 +47,7 @@ $env:VAGENT_HOME = Join-Path $PWD '.vagent/web'
 
 ## API
 
-实现 `/api/health`、`/api/session-token`、`GET/PATCH /api/config`、`POST /api/config/validate`、会话列表/创建/快照、消息提交、Run 状态/停止/恢复、产物列表/历史版本，以及 `/api/events?sessionId=...`。Job 入口为 `GET /api/jobs`（可选 `sessionId`）、`GET /api/jobs/:id`、`POST /api/jobs/:id/retry-query`。读取会核对本地媒体并可能保存可用性 revision，不触发供应商请求；恢复查询不重新提交。
+实现 `/api/health`、`/api/session-token`、`GET/PATCH /api/config`、`POST /api/config/validate`、`GET /api/projects`（项目 ID 仅用于引用，不可推断语义）、会话列表/创建（`POST /api/sessions` 可选传入 `{"projectId": "..."}` 绑定已有项目）/快照（含 `projectId` 与 `memory` 台账）、消息提交、Run 状态/停止/恢复、产物列表/历史版本，以及 `/api/events?sessionId=...`。Job 入口为 `GET /api/jobs`（可选 `sessionId`）、`GET /api/jobs/:id`、`POST /api/jobs/:id/retry-query`。读取会核对本地媒体并可能保存可用性 revision，不触发供应商请求；恢复查询不重新提交。
 
 PATCH 配置与完整设置表单支持 `videoMode`、`videoApiKey`、`clearVideoApiKey`、`videoWorkspaceId`、`videoProvider`、`videoModel`、`videoRegion`、`videoMaxJobCost`；省略保留原值。视频金额为十进制人民币字符串，模型和地域限定 C0 冻结值。读取返回 Key 是否配置、权限 `unverified`、参考估价 `videoEstimate`、各字段来源、待生效 `videoMode`、当前 `activeVideoMode`、`restartRequired/restartFields`。保存配置不产生生成请求。
 

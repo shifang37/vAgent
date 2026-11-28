@@ -556,6 +556,7 @@ class AgentRunner:
         prompt: str,
         *,
         request_id: str | None = None,
+        project_id: str | None = None,
         cancelled: asyncio.Event | None = None,
         shutdown: asyncio.Event | None = None,
     ) -> dict:
@@ -565,7 +566,7 @@ class AgentRunner:
         if not prompt.strip() or len(prompt) > 20000:
             raise AppError("INVALID_PROMPT", "需求不能为空，且不能超过 20000 字符。")
         store, model = self.store, self.model
-        store.ensure_session(session_id)
+        store.ensure_session(session_id, project_id=project_id)
         # The session's project is fixed once ensure_session has bound it; a
         # pre-v10 session resolves to its own id. Every project-scoped lookup in
         # this Run uses this value, never the session id.

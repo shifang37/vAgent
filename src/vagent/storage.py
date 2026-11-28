@@ -952,7 +952,7 @@ class FileStore:
 
         def create(draft: dict) -> None:
             session = draft["sessions"].get(session_id)
-            bound = session.get("projectId") if session is not None else None
+            bound = project_of_session(draft, session_id) if session is not None else None
             if project_id is not None:
                 if project_id not in draft["projects"]:
                     raise AppError("PROJECT_NOT_FOUND", "没有这个项目，不能把会话绑定到它。")

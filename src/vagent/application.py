@@ -21,6 +21,7 @@ from vagent.http import ModelHttpClient
 from vagent.mcp_bridge import connect_mcp, server_configs
 from vagent.memory import MemoryIndex
 from vagent.models import DeepSeekModel
+from vagent.project_memory import read_memory
 from vagent.runner import AgentRunner, RunPolicy
 from vagent.skills import discover_for, register_skill_tool
 from vagent.storage import FileStore, append_event, now, project_of_session
@@ -1127,11 +1128,42 @@ class ApplicationService:
     def _first_prompt(state, key):
         return next((r["prompt"][:45] for r in state["runs"].values() if r["sessionId"] == key), "新建创作")
 
-    def create_session(self):
+    def projects(self):
+        """Projects in this data directory, newest first.
+
+        Project IDs are opaque identifiers (for legacy projects they equal the
+        creating session's id) and must only be referenced, never inferred.
+        """
+        state = self.store.snapshot()
+        session_counts: dict[str, int] = {}
+        latest_session: dict[str, str] = {}
+        for session_id in state["sessions"]:
+            project_id = project_of_session(state, session_id) or session_id
+            session_counts[project_id] = session_counts.get(project_id, 0) + 1
+            latest_session[project_id] = session_id
+        rows = []
+        for project_id, project in reversed(list(state["projects"].items())):
+            memory = state["memories"].get(project_id)
+            fallback_session = latest_session.get(project_id)
+            rows.append(
+                {
+                    "id": project_id,
+                    "title": project.get("goal", "")[:45]
+                    or (self._first_prompt(state, fallback_session) if fallback_session else "未命名项目"),
+                    "revision": project.get("revision", 0),
+                    "memoryRevision": 0 if memory is None else memory["revision"],
+                    "memoryEntries": 0 if memory is None else len(memory["entries"]),
+                    "sessionCount": session_counts.get(project_id, 0),
+                }
+            )
+        return rows
+
+    def create_session(self, project_id: str | None = None):
         session_id = str(uuid4())
-        self.store.ensure_session(session_id)
+        self.store.ensure_session(session_id, project_id=project_id)
+        bound = self.store.project_of(session_id) or session_id
         self.notify(session_id)
-        return {"id": session_id}
+        return {"id": session_id, "projectId": bound}
 
     def session(self, session_id):
         assert_id(session_id)
@@ -1157,6 +1189,7 @@ class ApplicationService:
             "id": session_id,
             "projectId": project_id,
             "project": project,
+            "memory": read_memory(state, project_id),
             "messages": visible,
             "run": self.run_view(run) if run else None,
             "artifacts": [a for a in state["artifacts"].values() if a["projectId"] == project_id],
@@ -1254,12 +1287,21 @@ class ApplicationService:
             else:
                 queue.put_nowait(event or {"type": "snapshot"})
 
-    async def start(self, session_id, prompt, request_id, *, read_only=False):
+    async def start(self, session_id, prompt, request_id, *, read_only=False, project_id=None):
         assert_id(session_id)
         assert_id(request_id)
+        if project_id is not None:
+            assert_id(project_id)
         if not prompt.strip() or len(prompt) > 20000:
             raise AppError("INVALID_PROMPT", "需求不能为空，且不能超过 20000 字符。")
-        for record in self.store.snapshot()["runs"].values():
+        state = self.store.snapshot()
+        if project_id is not None:
+            if project_id not in state["projects"]:
+                raise AppError("PROJECT_NOT_FOUND", "没有这个项目，不能把会话绑定到它。")
+            existing_project = project_of_session(state, session_id)
+            if existing_project is not None and existing_project != project_id:
+                raise AppError("SESSION_PROJECT_CONFLICT", "会话已属于另一个项目，不能中途更换。")
+        for record in state["runs"].values():
             if record["sessionId"] == session_id and record["requestId"] == request_id:
                 if record["prompt"] != prompt or record.get("readOnly", False) != read_only:
                     raise AppError("REQUEST_CONFLICT", "相同请求 ID 不能关联不同需求或模式。")
@@ -1268,13 +1310,14 @@ class ApplicationService:
             raise AppError("CONFIG_BUSY", "配置验证正在进行，请稍后发送需求。")
         if self.task and not self.task.done():
             raise AppError("RUN_BUSY", "已有任务正在运行，请等待完成或停止后重试。")
-        if any(
-            record["status"] in {"running", "waiting_external"}
-            for record in self.store.snapshot()["runs"].values()
-        ):
+        if any(record["status"] in {"running", "waiting_external"} for record in state["runs"].values()):
             raise AppError("RUN_BUSY", "已有任务正在运行或等待外部结果，请完成或停止后重试。")
         runner = self.runner(read_only=read_only)  # Missing keys fail before creating a run.
-        return await self._launch(runner, session_id, prompt=prompt, request_id=request_id)
+        if project_id is not None:
+            self.store.ensure_session(session_id, project_id=project_id)
+        return await self._launch(
+            runner, session_id, prompt=prompt, request_id=request_id, project_id=project_id
+        )
 
     async def resume(self, run_id):
         record = self.run_record(run_id)
@@ -1345,7 +1388,9 @@ class ApplicationService:
 
         return event_sink
 
-    async def _launch(self, runner, session_id, *, prompt=None, request_id=None, resume_id=None):
+    async def _launch(
+        self, runner, session_id, *, prompt=None, request_id=None, resume_id=None, project_id=None
+    ):
         ready = asyncio.Event()
         errors = []
         self.active_run_id = resume_id
@@ -1362,6 +1407,7 @@ class ApplicationService:
                         session_id,
                         prompt,
                         request_id=request_id,
+                        project_id=project_id,
                         cancelled=self.cancelled,
                         shutdown=self.shutdown,
                     )

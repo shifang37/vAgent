@@ -20,6 +20,7 @@ from pydantic import Field, model_validator
 
 from vagent.contracts import Contract, Identifier, JsonTuple, Name, UtcTimestamp
 from vagent.errors import AppError
+from vagent.project_memory import progress_key, upsert_progress
 from vagent.video.consistency import (
     CONSISTENCY_REVIEW_LIMIT,
     ConsistencyReview,
@@ -960,6 +961,17 @@ def save_episode(args: dict, state: dict, project_id: str) -> dict:
     for scene in scenes:
         state["scenes"][scene.id] = scene.model_dump(mode="json", by_alias=True)
     state["episodes"][record.id] = record.model_dump(mode="json", by_alias=True)
+    if "memories" in state:
+        upsert_progress(
+            state,
+            project_id,
+            key=progress_key("ep", record.id),
+            text=(
+                f"分集《{record.title}》({record.id}) 已保存 v{record.current_version}："
+                f"{len(scenes)} 场 {shots} 镜，目标 {target} 秒"
+            ),
+            timestamp=timestamp,
+        )
     return {
         "episodeId": record.id,
         "version": record.current_version,

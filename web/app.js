@@ -210,7 +210,9 @@ function contentCheckText(version) {
 let health = null,
   csrf = null,
   sessions = [],
+  projects = [],
   activeId = null,
+  selectedProjectId = null,
   snapshot = null;
 let reference = null,
   stream = null,
@@ -271,6 +273,7 @@ let timelineEditor = null,
 let routePreviewBusy = false;
 const IMAGE_TYPES = ["image/png", "image/jpeg", "image/webp"];
 const MAX_IMAGE_BYTES = 20 * 1024 * 1024;
+const currentProjectId = () => snapshot?.projectId || selectedProjectId || activeId || null;
 const currentRun = () => snapshot?.run;
 const isRunning = () => ["running", "waiting_external"].includes(currentRun()?.status);
 function toast(message) {
@@ -340,24 +343,52 @@ function updateSend() {
   $("#prompt").disabled = submitting;
 }
 async function refreshSessions() {
-  sessions = (await api("/api/sessions")).sessions;
+  const [sessionData, projectData] = await Promise.all([
+    api("/api/sessions"),
+    api("/api/projects").catch(() => ({ projects: [] })),
+  ]);
+  sessions = sessionData.sessions || [];
+  projects = projectData.projects || [];
+  renderProjects();
   renderSessions();
+}
+function renderProjects() {
+  const host = $("#projects");
+  if (!host) return;
+  const current = currentProjectId();
+  host.innerHTML = projects.length
+    ? projects
+        .map(
+          (p) =>
+            `<div class="project-row ${p.id === current ? "selected" : ""}">
+              <div class="project-row-info">
+                <strong>${escapeHTML(p.title)}</strong>
+                <small>${escapeHTML(p.id.slice(0, 8))} · ${p.sessionCount} 会话 · ${p.memoryEntries} 记忆</small>
+              </div>
+              <button class="project-row-action" data-bind-project="${escapeHTML(p.id)}" title="基于此项目新建会话">新会话</button>
+            </div>`,
+        )
+        .join("")
+    : '<p class="empty">尚无项目。</p>';
 }
 function renderSessions() {
   const needle = $("#search").value.trim().toLowerCase();
   const list = sessions.filter(
-    (s) => s.title.toLowerCase().includes(needle) || s.id.includes(needle),
+    (s) =>
+      s.title.toLowerCase().includes(needle) ||
+      s.id.includes(needle) ||
+      (s.projectId || "").toLowerCase().includes(needle),
   );
   $("#sessions").innerHTML = list.length
     ? list
         .map(
           (s) =>
-            `<button class="session ${s.id === activeId ? "selected" : ""}" data-session="${escapeHTML(s.id)}">${escapeHTML(s.title)}</button>`,
+            `<button class="session ${s.id === activeId ? "selected" : ""}" data-session="${escapeHTML(s.id)}">${escapeHTML(s.title)}${s.projectId && s.projectId !== s.id ? `<span class="session-meta">项目 ${escapeHTML(s.projectId.slice(0, 8))}</span>` : ""}</button>`,
         )
         .join("")
     : '<p class="empty">没有匹配的会话。<br>从一个想法开始吧。</p>';
 }
-function newChat() {
+function newChat(projectId = null) {
   if (submitting) {
     toast("正在提交，请稍候。");
     return;
@@ -366,6 +397,7 @@ function newChat() {
   stream?.close();
   stream = null;
   activeId = null;
+  selectedProjectId = projectId || null;
   snapshot = null;
   reference = null;
   pendingRequest = null;
@@ -398,8 +430,10 @@ function connectEvents(id, generation) {
     if (generation !== viewGeneration || stream !== source) return;
     try {
       const update = JSON.parse(event.data);
-      if (update.sessionId !== id || snapshot?.id !== id) return;
-      const jobs = upsertJob(snapshot.jobs || [], update.job, id);
+      const projectId = snapshot?.projectId || id;
+      if (snapshot?.id !== id) return;
+      if (update.sessionId !== id && update.job?.projectId !== projectId) return;
+      const jobs = upsertJob(snapshot.jobs || [], update.job, id, projectId);
       if (jobs === snapshot.jobs) return;
       snapshot.jobs = jobs;
       renderJobs();
@@ -450,8 +484,15 @@ function connectEvents(id, generation) {
   };
 }
 function applySnapshot(next) {
-  next.jobs = mergeJobs(snapshot?.id === next.id ? snapshot.jobs || [] : [], next.jobs || [], next.id);
+  const projectId = next.projectId || next.id;
+  next.jobs = mergeJobs(
+    snapshot?.id === next.id ? snapshot.jobs || [] : [],
+    next.jobs || [],
+    next.id,
+    projectId,
+  );
   snapshot = next;
+  selectedProjectId = projectId;
   pruneShotSelection();
 }
 function pruneShotSelection() {
@@ -608,8 +649,9 @@ function bindMedia(card, job) {
     status.textContent = "视频暂时无法播放，正在核对本地文件…";
     try {
       const current = await api(`/api/jobs/${encodeURIComponent(job.jobId)}`);
-      if (snapshot && current.sessionId === activeId) {
-        snapshot.jobs = upsertJob(snapshot.jobs || [], current, activeId);
+      const projectId = currentProjectId();
+      if (snapshot && (current.sessionId === activeId || current.projectId === projectId)) {
+        snapshot.jobs = upsertJob(snapshot.jobs || [], current, activeId, projectId);
         if (!current.mediaAvailable) { renderJobs(); return; }
       }
       status.textContent = "浏览器无法播放此文件，可下载 MP4 检查。";
@@ -649,8 +691,9 @@ function render() {
   $("#page-title").textContent =
     sessions.find((s) => s.id === activeId)?.title ||
     (activeId ? "创作会话" : "新建创作");
-  $("#project-label").textContent = activeId
-    ? `项目 ${activeId.slice(0, 8)}`
+  const projectId = currentProjectId();
+  $("#project-label").textContent = projectId
+    ? `项目 ${projectId.slice(0, 8)}${activeId ? "" : "（新会话）"}`
     : "新项目";
   const detailsOpen = $("#conversation .run-details")?.open;
   const oldJobs = $("#job-list");
@@ -684,6 +727,7 @@ function render() {
   } else $("#run-status").hidden = true;
   icons($("#conversation"));
   if (followLatest) conversation.scrollTop = conversation.scrollHeight;
+  renderProjects();
   renderSessions();
   updateSend();
   renderObserve();
@@ -698,20 +742,35 @@ function metric(label, value) {
 function renderObserve() {
   if ($("#observe-panel").hidden) return;
   const run = currentRun(),
-    project = snapshot?.project;
+    project = snapshot?.project,
+    ledger = snapshot?.memory;
   const usage = run?.usage;
   const context = (run?.events || [])
     .filter((e) => e.type === "context.prepared")
     .at(-1);
   const value = (v) =>
     v === null || v === undefined ? "未知" : v.toLocaleString();
+  const memoryKindLabels = {
+    progress: "进展",
+    decision: "决定",
+    todo: "待办",
+    fact: "事实",
+  };
+  const ledgerRows = (ledger?.entries || [])
+    .map(
+      (entry) =>
+        `<li><small>${escapeHTML(memoryKindLabels[entry.kind] || entry.kind)} · ${escapeHTML(entry.key)}</small>${escapeHTML(entry.text)}</li>`,
+    )
+    .join("");
   $("#observe-panel").innerHTML =
     `<div class="panel-heading"><strong>编排观测</strong><button class="icon-button" data-action="close-observe" aria-label="关闭编排观测" data-icon="close"></button></div>
-    <p class="meta">${run ? `Run ${escapeHTML(run.id)}` : "发送需求后显示真实执行数据"}</p>
+    <p class="meta">${run ? `Run ${escapeHTML(run.id)}` : "发送需求后显示真实执行数据"}${snapshot?.projectId ? ` · 项目 ${escapeHTML(snapshot.projectId)}` : ""}</p>
     <h3>上下文管理</h3><div class="metrics">${metric("输入字节", value(run?.contextBytes))}${metric("预算字节", value(health?.contextBudgetBytes))}${metric("裁剪历史消息", value(run?.droppedMessages))}${metric("当前输入消息", value(context?.messageCount))}</div>
     <p class="meta">按完整轮次裁剪；持久记忆保留，原始历史不删除。</p>
-    <h3>项目记忆 <small>revision ${project?.revision ?? "—"}</small></h3>
+    <h3>项目事实 <small>revision ${project?.revision ?? "—"}</small></h3>
     <dl class="memory">${["goal", "audience", "style", "constraints"].map((key, i) => `<dt>${["目标", "受众", "风格", "约束"][i]}</dt><dd>${escapeHTML(Array.isArray(project?.[key]) ? project[key].join("；") || "暂无" : project?.[key] || "暂无")}</dd>`).join("")}<dt>正文上限</dt><dd>${escapeHTML(contentLimitsText(project))}</dd></dl>
+    <h3>项目记忆台账 <small>revision ${ledger?.revision ?? 0} · ${(ledger?.entries || []).length} 条 · ${ledger?.bytes ?? 0} 字节</small></h3>
+    <ul class="memory-ledger">${ledgerRows || "<li>暂无跨会话记忆条目</li>"}</ul>
     <h3>执行计划</h3><ol class="plan-list">${(project?.plan || []).map((p) => `<li>${escapeHTML(p.text)} <small>${escapeHTML(p.status)}</small></li>`).join("") || "<li>暂无计划</li>"}</ol>
     <h3>Skills · 按需读取</h3>${(health?.skills || []).map((s) => `<div class="capability"><strong>${escapeHTML(s.name)}</strong><small>${escapeHTML(s.description)}<br>版本 ${escapeHTML(s.version)}</small></div>`).join("")}${(health?.skillDiagnostics || []).map((d) => `<p class="meta">用户 skill 未加载：${escapeHTML(d.code)} · ${escapeHTML(d.name)}</p>`).join("")}<p class="meta">默认在内置根之后合并 VAGENT_HOME/skills；显式 VAGENT_SKILLS_DIR 仍整体替换，坏文件只诊断、不使应用启动失败。</p>
     <h3>MCP 服务</h3>${(health?.mcp || []).map((s) => `<div class="capability"><strong>${escapeHTML(s.name)} · 已连接</strong><small>${escapeHTML(s.transport)} / ${escapeHTML(s.protocolVersion)}<br>${s.tools.map(escapeHTML).join("<br>")}</small></div>`).join("") || '<p class="meta">未启用 MCP 服务</p>'}
@@ -753,10 +812,11 @@ async function refreshSession(id) {
   const next = await api(`/api/sessions/${encodeURIComponent(id)}`);
   if (snapshot?.id === id) {
     applySnapshot(next);
+    const projectId = next.projectId || id;
     if (storyboardOverride?.storyboardId) {
       try {
         storyboardOverride = await api(
-          `/api/storyboards/${encodeURIComponent(storyboardOverride.storyboardId)}?projectId=${encodeURIComponent(id)}`,
+          `/api/storyboards/${encodeURIComponent(storyboardOverride.storyboardId)}?projectId=${encodeURIComponent(projectId)}`,
         );
       } catch {
         storyboardOverride = null;
@@ -800,10 +860,11 @@ function openEpisodePanel() {
 }
 
 async function openSceneStoryboard(storyboardId) {
-  if (!storyboardId || !activeId) return;
+  const projectId = currentProjectId();
+  if (!storyboardId || !projectId) return;
   try {
     storyboardOverride = await api(
-      `/api/storyboards/${encodeURIComponent(storyboardId)}?projectId=${encodeURIComponent(activeId)}`,
+      `/api/storyboards/${encodeURIComponent(storyboardId)}?projectId=${encodeURIComponent(projectId)}`,
     );
   } catch (error) {
     toast(error.message);
@@ -838,7 +899,8 @@ async function showAssets() {
 }
 
 async function showUsage() {
-  const query = activeId ? `?projectId=${encodeURIComponent(activeId)}` : "";
+  const projectId = currentProjectId();
+  const query = projectId ? `?projectId=${encodeURIComponent(projectId)}` : "";
   let report;
   try {
     report = await api(`/api/usage${query}`);
@@ -857,7 +919,7 @@ async function showUsage() {
 // The ledger is read from its own sidecar so the panel never guesses from estimates.
 async function loadBillLedger() {
   try {
-    billLedger = await api(billLedgerPath({ projectId: activeId }));
+    billLedger = await api(billLedgerPath({ projectId: currentProjectId() }));
   } catch (error) {
     billError = error.code || "BILL_RECORD_INVALID";
     billLedger = null;
@@ -884,9 +946,10 @@ async function recordBill() {
     billNotice = result.replayed
       ? "这条账单与账本中的记录完全相同，已复用，没有重复写入。"
       : `已录入 ${result.record.amount} ${result.record.currency}（第 ${result.record.revision} 版）。`;
-    const query = activeId ? `?projectId=${encodeURIComponent(activeId)}` : "";
+    const projectId = currentProjectId();
+    const query = projectId ? `?projectId=${encodeURIComponent(projectId)}` : "";
     usageReport = await api(`/api/usage${query}`);
-    billLedger = await api(billLedgerPath({ projectId: activeId }));
+    billLedger = await api(billLedgerPath({ projectId }));
   } catch (error) {
     billError = error.code || "BILL_RECORD_INVALID";
     billNotice = billErrorText(billError);
@@ -1146,13 +1209,14 @@ function openSeasonPanel() {
 }
 
 async function loadSeason(seasonId) {
-  if (!activeId || !seasonId) return;
+  const projectId = currentProjectId();
+  if (!projectId || !seasonId) return;
   seasonBusy = true;
   seasonError = null;
   renderSeasonPanel();
   try {
     seasonView = await api(
-      `/api/seasons/${encodeURIComponent(seasonId)}?projectId=${encodeURIComponent(activeId)}`,
+      `/api/seasons/${encodeURIComponent(seasonId)}?projectId=${encodeURIComponent(projectId)}`,
     );
     seasonList = seasonView.seasons || [];
     resetSeasonEdit(seasonView);
@@ -1212,7 +1276,7 @@ async function saveSeason() {
     );
     await refreshSession(activeId);
     seasonView = await api(
-      `/api/seasons/${encodeURIComponent(result.seasonId)}?projectId=${encodeURIComponent(activeId)}`,
+      `/api/seasons/${encodeURIComponent(result.seasonId)}?projectId=${encodeURIComponent(currentProjectId())}`,
     );
     seasonList = seasonView.seasons || [];
     resetSeasonEdit(seasonView);
@@ -1263,7 +1327,7 @@ async function openSeasonBatchDialog(mode) {
   let preview;
   try {
     preview = await api(
-      `/api/seasons/${encodeURIComponent(seasonId)}/estimate?projectId=${encodeURIComponent(activeId)}&${query}`,
+      `/api/seasons/${encodeURIComponent(seasonId)}/estimate?projectId=${encodeURIComponent(currentProjectId())}&${query}`,
     );
   } catch (error) {
     seasonBatchError = { code: error.code, message: error.message };
@@ -1534,14 +1598,15 @@ function resetTimelineDraft(editor) {
 }
 
 async function loadTimeline(episodeId) {
-  if (!activeId || !episodeId) return;
+  const projectId = currentProjectId();
+  if (!projectId || !episodeId) return;
   timelineEpisodeId = episodeId;
   timelineBusy = true;
   timelineError = null;
   renderTimelinePanel();
   try {
     const editor = await api(
-      `/api/episodes/${encodeURIComponent(episodeId)}/timeline?projectId=${encodeURIComponent(activeId)}`,
+      `/api/episodes/${encodeURIComponent(episodeId)}/timeline?projectId=${encodeURIComponent(projectId)}`,
     );
     resetTimelineDraft(editor);
     stopTimelinePreview();
@@ -1990,7 +2055,7 @@ let renderBusy = false;
 let renderError = null;
 
 async function loadFilm(board) {
-  const path = filmRequestPath(board, activeId);
+  const path = filmRequestPath(board, currentProjectId());
   if (!path) return;
   try {
     const result = await api(path);
@@ -2004,7 +2069,7 @@ async function loadFilm(board) {
 }
 
 async function loadRender(board) {
-  const path = renderRequestPath(activeId, board);
+  const path = renderRequestPath(currentProjectId(), board);
   if (!path) return;
   try {
     const result = await api(path);
@@ -2119,8 +2184,9 @@ let subtitleBusy = false;
 let subtitleError = null;
 
 async function loadSubtitle(board) {
-  if (!board?.storyboardId || !activeId) return;
-  const query = `?projectId=${encodeURIComponent(activeId)}&storyboardId=${encodeURIComponent(board.storyboardId)}`;
+  const projectId = currentProjectId();
+  if (!board?.storyboardId || !projectId) return;
+  const query = `?projectId=${encodeURIComponent(projectId)}&storyboardId=${encodeURIComponent(board.storyboardId)}`;
   try {
     const result = await api(`/api/subtitles${query}`);
     subtitleState = result.track || null;
@@ -2317,7 +2383,7 @@ async function confirmBatch() {
   const board = storyboard();
   const chosen = selectedShots();
   if (!board || !chosen.length || shotBusy.size) return;
-  const token = { ...revisionToken(board, chosen.map((shot) => shot.id)), projectId: activeId };
+  const token = { ...revisionToken(board, chosen.map((shot) => shot.id)), projectId: currentProjectId() };
   let preview;
   try {
     preview = await api(estimateQuery(token));
@@ -2411,13 +2477,14 @@ async function redoShot(shotId) {
 function renderAssetPanel() {
   if (panelMode !== "assets") return;
   const panel = $("#artifact-panel");
+  const projectId = currentProjectId();
   const visible =
-    assetsScopeOnly && activeId ? assets.filter((asset) => asset.projectId === activeId) : assets;
+    assetsScopeOnly && projectId ? assets.filter((asset) => asset.projectId === projectId) : assets;
   panel.innerHTML = `${panelHeading("素材库", "close-artifact")}
     <p class="meta">库中共 ${assets.length} 张参考图。镜头可以引用同一数据目录内其他项目的素材；导入按项目与 SHA-256 去重，M2 不提供删除。</p>
     <div class="asset-actions">
-      <button class="primary" data-action="upload-image" ${uploadingImage || !activeId ? "disabled" : ""}>${uploadingImage ? "正在导入…" : "导入参考图"}</button>
-      <label class="chip"><input type="checkbox" id="assets-scope" ${assetsScopeOnly ? "checked" : ""} ${activeId ? "" : "disabled"}> 只看当前项目</label>
+      <button class="primary" data-action="upload-image" ${uploadingImage || !projectId ? "disabled" : ""}>${uploadingImage ? "正在导入…" : "导入参考图"}</button>
+      <label class="chip"><input type="checkbox" id="assets-scope" ${assetsScopeOnly ? "checked" : ""} ${projectId ? "" : "disabled"}> 只看当前项目</label>
     </div>
     <div class="asset-grid">${
       visible.length
@@ -2942,7 +3009,10 @@ $("#composer").addEventListener("submit", async (event) => {
   updateSend();
   try {
     if (!activeId) {
-      activeId = (await post("/api/sessions")).id;
+      const payload = selectedProjectId ? { projectId: selectedProjectId } : {};
+      const created = await post("/api/sessions", payload);
+      activeId = created.id;
+      selectedProjectId = created.projectId || selectedProjectId || activeId;
       rememberSelection();
     }
     const signature = JSON.stringify([activeId, prompt, readOnly]);
@@ -3133,7 +3203,8 @@ $("#image-input").addEventListener("change", async (event) => {
     toast("参考图不能超过 20 MB。");
     return;
   }
-  if (!activeId) {
+  const projectId = currentProjectId();
+  if (!projectId) {
     toast("请先选择或创建一个创作会话。");
     return;
   }
@@ -3141,7 +3212,7 @@ $("#image-input").addEventListener("change", async (event) => {
   renderAssetPanel();
   try {
     const form = new FormData();
-    form.append("projectId", activeId);
+    form.append("projectId", projectId);
     form.append("file", file, file.name);
     const created = await upload("/api/assets", form);
     toast(
@@ -3165,7 +3236,8 @@ $("#audio-input").addEventListener("change", async (event) => {
   event.target.value = "";
   const pending = pendingTimelineAudio;
   pendingTimelineAudio = null;
-  if (!file || !pending || !activeId) return;
+  const projectId = currentProjectId();
+  if (!file || !pending || !projectId) return;
   if (file.size > 25 * 1024 * 1024) {
     toast("音频不能超过 25 MB。");
     return;
@@ -3176,7 +3248,7 @@ $("#audio-input").addEventListener("change", async (event) => {
   try {
     const form = new FormData();
     form.append("clientRequestId", crypto.randomUUID());
-    form.append("projectId", activeId);
+    form.append("projectId", projectId);
     form.append("kind", pending.kind);
     form.append("title", pending.title);
     form.append("sourceUrl", pending.sourceUrl);
@@ -3206,6 +3278,17 @@ document.addEventListener("click", async (event) => {
       $("#prompt").focus();
       return;
     }
+    const bindProject = event.target.closest("[data-bind-project]");
+    if (bindProject && submitting) return;
+    if (bindProject) {
+      const targetProjectId = bindProject.dataset.bindProject;
+      const created = await post("/api/sessions", { projectId: targetProjectId });
+      $("#dialog").close();
+      await selectSession(created.id);
+      await refreshSessions();
+      toast(`已在项目 ${targetProjectId.slice(0, 8)} 下新建会话。`);
+      return;
+    }
     const session = event.target.closest("[data-session]");
     if (session && submitting) return;
     if (session) {
@@ -3231,13 +3314,13 @@ document.addEventListener("click", async (event) => {
         const request = download ? { clientRequestId: crypto.randomUUID(), expectedRevision: current.revision } : {};
         const job = await post(`/api/jobs/${encodeURIComponent(id)}/${download ? "retry-download" : "retry-query"}`, request);
         if (generation === viewGeneration && snapshot) {
-          snapshot.jobs = upsertJob(snapshot.jobs || [], job, activeId);
+          snapshot.jobs = upsertJob(snapshot.jobs || [], job, activeId, currentProjectId());
           toast(download ? "已登记原媒体的下载恢复。" : "已恢复原任务的状态查询。");
         }
       } catch (error) {
         if (error.code === "JOB_REVISION_CONFLICT" && generation === viewGeneration && snapshot) {
           const current = await api(`/api/jobs/${encodeURIComponent(id)}`);
-          snapshot.jobs = upsertJob(snapshot.jobs || [], current, activeId);
+          snapshot.jobs = upsertJob(snapshot.jobs || [], current, activeId, currentProjectId());
         }
         throw error;
       } finally {
@@ -3443,7 +3526,15 @@ document.addEventListener("click", async (event) => {
     if (action === "revise" && selectedArtifact) {
       const id = selectedArtifact.id,
         projectId = selectedArtifact.projectId;
-      await selectSession(projectId);
+      if (currentProjectId() !== projectId) {
+        const match = sessions.find((s) => s.projectId === projectId);
+        if (match) await selectSession(match.id);
+        else {
+          const created = await post("/api/sessions", { projectId });
+          await selectSession(created.id);
+          await refreshSessions();
+        }
+      }
       $("#prompt").value = `请先读取产物 ${id} 的最新版本，再修改：`;
       updateSend();
       $("#prompt").focus();

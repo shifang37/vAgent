@@ -296,3 +296,210 @@ async def test_run_started_in_a_bound_session_works_in_its_project(store):
     assert state["sessions"][NEW_SESSION]["projectId"] == PROJECT
     run = next(run for run in state["runs"].values() if run["sessionId"] == NEW_SESSION)
     assert run["status"] == "completed"
+
+
+async def test_service_create_session_start_and_projects_entry_points(store):
+    """P3 service entry points: create_session(project_id), start(project_id) and projects()."""
+    config = Config(home=store.home, api_key=None)
+    model = project_read_model()
+    async with ApplicationService.open(config, model=model, existing_store=store) as service:
+        first = service.create_session()
+        project_id = first["projectId"]
+        assert first["id"] == project_id
+
+        def seed(draft):
+            draft["projects"][project_id]["goal"] = "雨夜侦探短剧"
+            draft["memories"][project_id] = {
+                "id": project_id,
+                "revision": 1,
+                "entries": [{"key": "tone", "kind": "decision", "text": "雨夜冷调"}],
+                "updatedAt": "2026-11-27T00:00:00+00:00",
+            }
+
+        store.transaction(seed)
+
+        # create_session(project_id=...) joins the existing project without creating a new one.
+        second = service.create_session(project_id=project_id)
+        assert second["id"] != project_id and second["projectId"] == project_id
+        assert second["id"] not in store.snapshot()["projects"]
+
+        # start(project_id=...) binds a fresh session on first run and reuses that project.
+        await service.start("ep03", "读取项目继续", "p3-start-1", project_id=project_id)
+        await service.task
+        assert model.result["ok"] and model.result["data"]["id"] == project_id
+        assert store.snapshot()["sessions"]["ep03"]["projectId"] == project_id
+
+        # Omitting project_id on a follow-up start keeps the recorded binding (D6).
+        await service.start("ep03", "继续下一镜", "p3-start-2")
+        await service.task
+        assert store.snapshot()["sessions"]["ep03"]["projectId"] == project_id
+        assert "ep03" not in store.snapshot()["projects"]
+
+        # Missing project and conflicting project are refused before creating runs or projects.
+        with pytest.raises(AppError) as missing:
+            service.create_session(project_id="missing-project")
+        assert missing.value.code == "PROJECT_NOT_FOUND"
+
+        other = service.create_session()
+        with pytest.raises(AppError) as conflict:
+            await service.start("ep03", "换项目", "p3-conflict", project_id=other["projectId"])
+        assert conflict.value.code == "SESSION_PROJECT_CONFLICT"
+
+        # projects() summarizes sessions and ledger counts; session() exposes memory ledger.
+        listing = {row["id"]: row for row in service.projects()}
+        assert listing[project_id]["title"] == "雨夜侦探短剧"
+        assert listing[project_id]["sessionCount"] == 3
+        assert listing[project_id]["memoryRevision"] == 1
+        assert listing[project_id]["memoryEntries"] == 1
+        view = service.session(second["id"])
+        assert view["projectId"] == project_id
+        assert view["memory"]["revision"] == 1
+        assert view["memory"]["entries"][0]["text"] == "雨夜冷调"
+
+
+def test_cli_parser_and_project_binding_precedence_d6(store, monkeypatch):
+    """P-11: CLI --project parses on run/chat, keeps -s default intact and enforces D6 precedence."""
+    from vagent import cli
+    from vagent.context import PROJECT_MEMORY_HEADER
+
+    parsed_default = cli.parser().parse_args(["run", "写方案"])
+    assert parsed_default.session == "default" and parsed_default.project is None
+    parsed_run = cli.parser().parse_args(["run", "写第 3 集", "-s", "ep03", "--project", PROJECT])
+    assert parsed_run.session == "ep03" and parsed_run.project == PROJECT
+    parsed_chat = cli.parser().parse_args(["chat", "-s", "ep03", "--project", PROJECT])
+    assert parsed_chat.session == "ep03" and parsed_chat.project == PROJECT
+
+    store.ensure_session(PROJECT)
+    store.ensure_session("other")
+
+    def seed(draft):
+        draft["projects"][PROJECT]["goal"] = "第 3 集雨夜续拍"
+        draft["memories"][PROJECT] = {
+            "id": PROJECT,
+            "revision": 2,
+            "entries": [{"key": "rule-color", "kind": "decision", "text": "霓虹偏冷青"}],
+            "updatedAt": "2026-11-27T00:00:00+00:00",
+        }
+
+    store.transaction(seed)
+
+    seen_systems = []
+
+    def make_model():
+        model = ScriptedModel(
+            lambda messages, step: (
+                seen_systems.append(messages[0].content) or AIMessage(content="收到")
+            )
+        )
+        model.name = "cli-p11-fixture"
+        return model
+
+    monkeypatch.setattr(cli, "load_config", lambda: Config(home=store.home, api_key=None))
+    orig_open = ApplicationService.open
+
+    def open_with_model(config, **kwargs):
+        kwargs["model"] = make_model()
+        return orig_open(config, **kwargs)
+
+    monkeypatch.setattr(cli.ApplicationService, "open", staticmethod(open_with_model))
+
+    # Release the fixture lock before run_agent opens the same home.
+    store.close()
+    try:
+        # 1) Default `-s default` without `--project` creates and binds project `default`.
+        assert asyncio.run(cli.run_agent(cli.parser().parse_args(["run", "默认会话"]))) == 0
+        # 2) Explicit `--project` binds new session `ep03` to `coffee` and sees its memory.
+        assert (
+            asyncio.run(
+                cli.run_agent(cli.parser().parse_args(["run", "继续第 3 集", "-s", "ep03", "--project", PROJECT]))
+            )
+            == 0
+        )
+        # 3) Omitting `--project` on the already-bound session keeps its binding (D6).
+        assert (
+            asyncio.run(cli.run_agent(cli.parser().parse_args(["run", "续跑第 3 集", "-s", "ep03"]))) == 0
+        )
+        # 4) Passing a different `--project` fails with SESSION_PROJECT_CONFLICT.
+        with pytest.raises(AppError) as conflict:
+            asyncio.run(
+                cli.run_agent(cli.parser().parse_args(["run", "换项目", "-s", "ep03", "--project", "other"]))
+            )
+        assert conflict.value.code == "SESSION_PROJECT_CONFLICT"
+        # 5) Passing an unknown `--project` fails with PROJECT_NOT_FOUND before creating the session.
+        with pytest.raises(AppError) as missing:
+            asyncio.run(
+                cli.run_agent(cli.parser().parse_args(["run", "未知项目", "-s", "ep99", "--project", "nope"]))
+            )
+        assert missing.value.code == "PROJECT_NOT_FOUND"
+    finally:
+        from vagent.storage import FileStore
+
+        with FileStore.open(store.home) as reopened:
+            state = reopened.snapshot()
+
+    assert state["sessions"]["default"]["projectId"] == "default"
+    assert state["sessions"]["ep03"]["projectId"] == PROJECT
+    assert "ep03" not in state["projects"]
+    assert "ep99" not in state["sessions"]
+    assert PROJECT_MEMORY_HEADER not in seen_systems[0]
+    assert PROJECT_MEMORY_HEADER in seen_systems[1] and "霓虹偏冷青" in seen_systems[1]
+    assert PROJECT_MEMORY_HEADER in seen_systems[2] and "霓虹偏冷青" in seen_systems[2]
+
+
+async def test_cli_chat_forwards_project_flag(store, monkeypatch):
+    """P-11: `vagent chat -s <id> --project <project>` binds and passes project_id on each turn."""
+    from vagent import cli
+    from vagent.context import PROJECT_MEMORY_HEADER
+
+    store.ensure_session(PROJECT)
+
+    def seed(draft):
+        draft["memories"][PROJECT] = {
+            "id": PROJECT,
+            "revision": 1,
+            "entries": [{"key": "chat-rule", "kind": "fact", "text": "男主左手有疤"}],
+            "updatedAt": "2026-11-27T00:00:00+00:00",
+        }
+
+    store.transaction(seed)
+
+    seen_systems = []
+    prompts = iter(["我们设定了什么？", "/exit"])
+
+    async def fake_read_prompt(_label):
+        return next(prompts)
+
+    def make_model():
+        model = ScriptedModel(
+            lambda messages, step: (
+                seen_systems.append(messages[0].content) or AIMessage(content="男主左手有疤。")
+            )
+        )
+        model.name = "cli-chat-p11-fixture"
+        return model
+
+    monkeypatch.setattr(cli, "load_config", lambda: Config(home=store.home, api_key=None))
+    monkeypatch.setattr(cli, "read_prompt", fake_read_prompt)
+    monkeypatch.setattr(cli.sys.stdin, "isatty", lambda: True)
+    orig_open = ApplicationService.open
+
+    def open_with_model(config, **kwargs):
+        kwargs["model"] = make_model()
+        return orig_open(config, **kwargs)
+
+    monkeypatch.setattr(cli.ApplicationService, "open", staticmethod(open_with_model))
+
+    store.close()
+    try:
+        code = await cli.run_agent(cli.parser().parse_args(["chat", "-s", "chat-ep02", "--project", PROJECT]))
+        assert code == 0
+    finally:
+        from vagent.storage import FileStore
+
+        with FileStore.open(store.home) as reopened:
+            state = reopened.snapshot()
+
+    assert state["sessions"]["chat-ep02"]["projectId"] == PROJECT
+    assert "chat-ep02" not in state["projects"]
+    assert len(seen_systems) == 1
+    assert PROJECT_MEMORY_HEADER in seen_systems[0] and "男主左手有疤" in seen_systems[0]

@@ -73,3 +73,11 @@ test("repair restores the same player identity and stale retry responses cannot 
   assert.equal(mediaContentPath(merged[0]), `/api/media/${mediaId}/content`);
   assert.equal(merged[0].revision, 12);
 });
+test("bound sessions accept Jobs belonging to their shared project", () => {
+  const fromFirst = job(3, "succeeded", { sessionId: "ep01", projectId: "coffee" });
+  const merged = mergeJobs([], [fromFirst], "ep02", "coffee");
+  assert.equal(merged.length, 1);
+  assert.equal(merged[0].jobId, "job-1");
+  const fromOtherProject = job(4, "succeeded", { sessionId: "ep02", projectId: "other" });
+  assert.equal(upsertJob(merged, fromOtherProject, "ep02", "coffee"), merged);
+});

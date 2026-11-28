@@ -100,9 +100,12 @@ VAGENT_DEEPSEEK_MODEL=deepseek-flash
 .\.venv\Scripts\python.exe -m vagent config show
 .\.venv\Scripts\python.exe -m vagent run '准备咖啡店短视频方案，面向上班族，暖色调，并保存。' --session coffee
 .\.venv\Scripts\python.exe -m vagent run '改成雨夜氛围，保留受众设定和原版。' --session coffee
-.\.venv\Scripts\python.exe -m vagent inspect --session coffee
-.\.venv\Scripts\python.exe -m vagent chat --session coffee
+.\.venv\Scripts\python.exe -m vagent run '继续第 2 集并沿用同一项目记忆。' --session coffee-ep02 --project coffee
+.\.venv\Scripts\python.exe -m vagent inspect --session coffee-ep02
+.\.venv\Scripts\python.exe -m vagent chat --session coffee-ep02
 ```
+
+`run` 和 `chat` 支持 `--project` 把新会话绑定到已有项目，共享项目事实、产物、分镜与项目记忆台账。优先级为：**显式 `--project` > 该会话已记录的 `projectId` > 缺省（等于会话 ID）**；因此续跑已绑定会话时省略 `--project` 仍沿用原项目，传入不存在的项目返回 `PROJECT_NOT_FOUND`，尝试把已有会话换绑到其他项目返回 `SESSION_PROJECT_CONFLICT`。
 
 `chat` 中输入 `/exit` 退出，Ctrl+C 停止当前进程的 Agent。`run` 和 `chat` 会发起真实请求并产生 API 费用。候选模型 `deepseek-flash` 可配置，账户权限与线上兼容性仍需真实 Key 验证；首版关闭 thinking。
 

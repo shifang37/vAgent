@@ -150,7 +150,21 @@ async def run_agent(args: argparse.Namespace) -> int:
             ApplicationService.open(runtime_config, model=model, existing_store=store)
         )
         session_id = saved["sessionId"] if saved else args.session
-        print(f"模型：{model.name if model else config.model}\n会话：{session_id}\n数据：{config.home}")
+        assert_id(session_id)
+        requested_project = None if saved else getattr(args, "project", None)
+        if requested_project is not None:
+            assert_id(requested_project)
+            state = store.snapshot()
+            if requested_project not in state["projects"]:
+                raise AppError("PROJECT_NOT_FOUND", "没有这个项目，不能把会话绑定到它。")
+            existing_project = project_of_session(state, session_id)
+            if existing_project is not None and existing_project != requested_project:
+                raise AppError("SESSION_PROJECT_CONFLICT", "会话已属于另一个项目，不能中途更换。")
+        resolved_project = requested_project or store.project_of(session_id) or session_id
+        project_line = f"\n项目：{resolved_project}" if resolved_project != session_id else ""
+        print(
+            f"模型：{model.name if model else config.model}\n会话：{session_id}{project_line}\n数据：{config.home}"
+        )
         try:
             if args.command == "chat":
                 if not sys.stdin.isatty():
@@ -170,7 +184,13 @@ async def run_agent(args: argparse.Namespace) -> int:
                     if not prompt.strip():
                         continue
                     display = service.on_event = EventDisplay()
-                    result = await execute_cli(service, session_id, prompt=prompt, read_only=read_only)
+                    result = await execute_cli(
+                        service,
+                        session_id,
+                        prompt=prompt,
+                        read_only=read_only,
+                        project_id=requested_project,
+                    )
                     display.finish(result, chat=True)
                     show_usage(result)
                     show_resume_hint(result)
@@ -189,6 +209,7 @@ async def run_agent(args: argparse.Namespace) -> int:
                     prompt=prompt,
                     request_id=getattr(args, "request_id", None),
                     read_only=read_only,
+                    project_id=requested_project,
                 )
             display.finish(result)
             show_usage(result)
@@ -198,13 +219,28 @@ async def run_agent(args: argparse.Namespace) -> int:
             show_job_exit_hint(service)
 
 
-async def execute_cli(service, session_id, *, prompt=None, request_id=None, read_only=False, resume_id=None):
+async def execute_cli(
+    service,
+    session_id,
+    *,
+    prompt=None,
+    request_id=None,
+    read_only=False,
+    project_id=None,
+    resume_id=None,
+):
     run_id = resume_id
     try:
         result = (
             await service.resume(resume_id)
             if resume_id
-            else await service.start(session_id, prompt, request_id or str(uuid4()), read_only=read_only)
+            else await service.start(
+                session_id,
+                prompt,
+                request_id or str(uuid4()),
+                read_only=read_only,
+                project_id=project_id,
+            )
         )
         run_id = result["id"]
         return await service.wait_for_run(run_id)
@@ -1171,6 +1207,11 @@ def parser() -> argparse.ArgumentParser:
     for command in (run, chat):
         command.add_argument(
             "--read-only", action="store_true", help="仅提供读取工具；配置 Redis 后启用回答缓存"
+        )
+        command.add_argument(
+            "--project",
+            default=None,
+            help="把会话绑定到已有项目；省略时沿用已有绑定或新建同名项目",
         )
     demo = commands.add_parser("demo", help="无需 Key 的离线模拟演示")
     inspect = commands.add_parser("inspect", help="查看本地项目、产物与运行记录")

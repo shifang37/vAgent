@@ -528,3 +528,190 @@ async def test_old_run_resumes_unchanged(store):
     assert final["contextSignature"] == before["contextSignature"]
     system = resumed_model.inputs[0][0].content
     assert PROJECT_MEMORY_HEADER not in system and "第 3 集已保存" not in system
+
+
+def test_episode_save_maintains_code_owned_progress_idempotently(store):
+    """P4: episode_save atomically upserts ep-<episodeId> progress, replays cleanly, and never blocks on cap."""
+    from pathlib import Path
+
+    from shot_support import mock_tools
+
+    from vagent.video.adaptation import plan_episode
+
+    text = (Path(__file__).parent / "fixtures" / "m5" / "texts" / "rainy-cafe.md").read_text(encoding="utf-8")
+    registry, _service, _adapter, _context = mock_tools(store)
+    plan = plan_episode(text)
+    scenes = [
+        {
+            "heading": scene["heading"],
+            "location": scene["location"],
+            "timeOfDay": scene["timeOfDay"],
+            "synopsis": scene["synopsis"],
+            "characterIds": [],
+            "dialogue": [
+                {"speaker": line["speaker"], "text": line["text"], "paragraph": line["paragraph"]}
+                for line in scene["dialogue"]
+            ],
+            "shotCount": scene["shotCount"],
+            "durationSeconds": scene["durationSeconds"],
+        }
+        for scene in plan["scenes"]
+    ]
+    args = {"title": "第 3 集 雨夜咖啡店", "scenes": scenes}
+
+    # 1) First save writes ep-<episodeId> with kind=progress atomically.
+    first = call(registry, store, "episode_save", args, "p4-ep-1")
+    assert first["ok"], first
+    episode_id = first["data"]["episodeId"]
+    key = f"ep-{episode_id}"
+    ledger = store.snapshot()["memories"][PROJECT]
+    assert ledger["revision"] == 1
+    assert len(ledger["entries"]) == 1
+    entry = ledger["entries"][0]
+    assert entry["key"] == key and entry["kind"] == "progress"
+    assert "第 3 集 雨夜咖啡店" in entry["text"] and "v1" in entry["text"]
+    assert f"{len(scenes)} 场 {first['data']['shotCount']} 镜" in entry["text"]
+
+    # 2) Operation replay returns the exact same result without bumping memory revision.
+    replayed = call(registry, store, "episode_save", args, "p4-ep-1")
+    assert replayed == first
+    assert store.snapshot()["memories"][PROJECT]["revision"] == 1
+
+    # 3) Model still cannot overwrite or remove the code-owned progress entry.
+    blocked_write = call(
+        registry,
+        store,
+        "memory_update",
+        {"expectedRevision": 1, "upsert": [{"key": key, "kind": "progress", "text": "伪造进度"}]},
+        "p4-forbid-write",
+    )
+    assert not blocked_write["ok"] and blocked_write["error"]["code"] == "MEMORY_KIND_FORBIDDEN"
+    blocked_remove = call(
+        registry,
+        store,
+        "memory_update",
+        {"expectedRevision": 1, "remove": [key]},
+        "p4-forbid-remove",
+    )
+    assert not blocked_remove["ok"] and blocked_remove["error"]["code"] == "MEMORY_KIND_FORBIDDEN"
+
+    # 4) Failed episode_save rolls back completely and never touches memories.
+    bad = call(registry, store, "episode_save", {"title": "非法分集", "scenes": scenes[:1]}, "p4-ep-bad")
+    assert not bad["ok"]
+    assert store.snapshot()["memories"][PROJECT] == ledger
+
+    # 5) Updating the episode to v2 updates the same ep-<episodeId> key in place.
+    edited = {
+        "episodeId": episode_id,
+        "expectedRevision": first["data"]["revision"],
+        "title": "第 3 集 雨夜咖啡店（修订）",
+        "scenes": [dict(scene) for scene in scenes],
+    }
+    edited["scenes"][0]["id"] = first["data"]["sceneIds"][0]
+    edited["scenes"][0]["synopsis"] = "修订后的第一场概要。"
+    second = call(registry, store, "episode_save", edited, "p4-ep-2")
+    assert second["ok"] and second["data"]["version"] == 2
+    ledger_v2 = store.snapshot()["memories"][PROJECT]
+    assert ledger_v2["revision"] == 2
+    assert len(ledger_v2["entries"]) == 1
+    assert ledger_v2["entries"][0]["key"] == key
+    assert "v2" in ledger_v2["entries"][0]["text"] and "修订" in ledger_v2["entries"][0]["text"]
+
+    # 6) When the ledger is already full (64 entries), saving a new episode still succeeds.
+    filler = [{"key": f"f-{i}", "kind": "fact", "text": "占位"} for i in range(63)]
+    assert call(
+        registry, store, "memory_update", {"expectedRevision": 2, "upsert": filler[:32]}, "p4-fill-1"
+    )["ok"]
+    assert call(
+        registry, store, "memory_update", {"expectedRevision": 3, "upsert": filler[32:]}, "p4-fill-2"
+    )["ok"]
+    assert len(store.snapshot()["memories"][PROJECT]["entries"]) == 64
+    overflow_ep = call(
+        registry, store, "episode_save", {"title": "第 4 集", "scenes": scenes}, "p4-ep-overflow"
+    )
+    assert overflow_ep["ok"], overflow_ep
+    assert overflow_ep["data"]["episodeId"] in store.snapshot()["episodes"]
+    assert len(store.snapshot()["memories"][PROJECT]["entries"]) == 64
+
+
+async def test_two_sessions_handoff_episode_progress_and_todo(store):
+    """P4 end-to-end (offline): session A saves episode + todo; session B bound to same project sees both."""
+    from pathlib import Path
+
+    from vagent.video.adaptation import plan_episode
+
+    text = (Path(__file__).parent / "fixtures" / "m5" / "texts" / "rainy-cafe.md").read_text(encoding="utf-8")
+    plan = plan_episode(text)
+    scenes = [
+        {
+            "heading": scene["heading"],
+            "location": scene["location"],
+            "timeOfDay": scene["timeOfDay"],
+            "synopsis": scene["synopsis"],
+            "characterIds": [],
+            "dialogue": [
+                {"speaker": line["speaker"], "text": line["text"], "paragraph": line["paragraph"]}
+                for line in scene["dialogue"]
+            ],
+            "shotCount": scene["shotCount"],
+            "durationSeconds": scene["durationSeconds"],
+        }
+        for scene in plan["scenes"]
+    ]
+    config = Config(home=store.home, api_key=None, video_mode="mock")
+
+    def session_a_model(messages, step):
+        if step == 0:
+            return tool_call(
+                "episode_save",
+                {"title": "第 3 集 雨夜追踪", "scenes": scenes},
+                call_id="p4-a-ep",
+            )
+        if step == 1:
+            return tool_call(
+                "memory_update",
+                {
+                    "expectedRevision": 1,
+                    "upsert": [
+                        {"key": "next-ep04", "kind": "todo", "text": "下一集补拍咖啡店后门追逐戏"},
+                        {"key": "style-rain", "kind": "decision", "text": "全片雨夜冷蓝调，霓虹禁用暖黄"},
+                    ],
+                },
+                call_id="p4-a-mem",
+            )
+        return AIMessage(content="第 3 集已保存并登记待办。")
+
+    model_a = ScriptedModel(session_a_model)
+    model_a.name = "p4-session-a-fixture"
+    async with ApplicationService.open(config, model=model_a, existing_store=store) as service:
+        session_a = service.create_session()
+        project_id = session_a["projectId"]
+        await service.start(session_a["id"], "保存第 3 集并记下后续待办", "p4-run-a")
+        await service.task
+
+    seen_b = {}
+
+    def session_b_model(messages, step):
+        seen_b["system"] = messages[0].content
+        return AIMessage(
+            content="当前进度：第 3 集《第 3 集 雨夜追踪》v1 已保存；待办：下一集补拍咖啡店后门追逐戏。"
+        )
+
+    model_b = ScriptedModel(session_b_model)
+    model_b.name = "p4-session-b-fixture"
+    async with ApplicationService.open(config, model=model_b, existing_store=store) as service:
+        session_b = service.create_session(project_id=project_id)
+        assert session_b["id"] != session_a["id"] and session_b["projectId"] == project_id
+        await service.start(session_b["id"], "这个项目做到哪了？还有什么待办？", "p4-run-b")
+        await service.task
+        view_b = service.session(session_b["id"])
+
+    system_b = seen_b["system"]
+    assert PROJECT_MEMORY_HEADER in system_b
+    assert "第 3 集 雨夜追踪" in system_b and "v1" in system_b
+    assert "下一集补拍咖啡店后门追逐戏" in system_b
+    assert "全片雨夜冷蓝调" in system_b
+    kinds = {entry["kind"] for entry in view_b["memory"]["entries"]}
+    assert kinds == {"progress", "decision", "todo"}
+    # Rendered order puts progress before decision before todo.
+    assert system_b.index('"kind":"progress"') < system_b.index('"kind":"decision"') < system_b.index('"kind":"todo"')
