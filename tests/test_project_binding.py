@@ -387,9 +387,7 @@ def test_cli_parser_and_project_binding_precedence_d6(store, monkeypatch):
 
     def make_model():
         model = ScriptedModel(
-            lambda messages, step: (
-                seen_systems.append(messages[0].content) or AIMessage(content="收到")
-            )
+            lambda messages, step: seen_systems.append(messages[0].content) or AIMessage(content="收到")
         )
         model.name = "cli-p11-fixture"
         return model
@@ -411,14 +409,14 @@ def test_cli_parser_and_project_binding_precedence_d6(store, monkeypatch):
         # 2) Explicit `--project` binds new session `ep03` to `coffee` and sees its memory.
         assert (
             asyncio.run(
-                cli.run_agent(cli.parser().parse_args(["run", "继续第 3 集", "-s", "ep03", "--project", PROJECT]))
+                cli.run_agent(
+                    cli.parser().parse_args(["run", "继续第 3 集", "-s", "ep03", "--project", PROJECT])
+                )
             )
             == 0
         )
         # 3) Omitting `--project` on the already-bound session keeps its binding (D6).
-        assert (
-            asyncio.run(cli.run_agent(cli.parser().parse_args(["run", "续跑第 3 集", "-s", "ep03"]))) == 0
-        )
+        assert asyncio.run(cli.run_agent(cli.parser().parse_args(["run", "续跑第 3 集", "-s", "ep03"]))) == 0
         # 4) Passing a different `--project` fails with SESSION_PROJECT_CONFLICT.
         with pytest.raises(AppError) as conflict:
             asyncio.run(

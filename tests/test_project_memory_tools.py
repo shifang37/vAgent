@@ -714,4 +714,8 @@ async def test_two_sessions_handoff_episode_progress_and_todo(store):
     kinds = {entry["kind"] for entry in view_b["memory"]["entries"]}
     assert kinds == {"progress", "decision", "todo"}
     # Rendered order puts progress before decision before todo.
-    assert system_b.index('"kind":"progress"') < system_b.index('"kind":"decision"') < system_b.index('"kind":"todo"')
+    assert (
+        system_b.index('"kind":"progress"')
+        < system_b.index('"kind":"decision"')
+        < system_b.index('"kind":"todo"')
+    )

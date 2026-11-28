@@ -20,6 +20,7 @@ from vagent.errors import AppError
 def _now() -> str:
     return datetime.now(UTC).isoformat()
 
+
 # D8: bounded by construction; over-limit writes are refused, never silently truncated.
 MEMORY_MAX_ENTRIES = 64
 MEMORY_MAX_ENTRY_CHARS = 400
